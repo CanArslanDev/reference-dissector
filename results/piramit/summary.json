@@ -1,0 +1,1001 @@
+{
+ "song": "PIRAMIT",
+ "grid": {
+  "bpm": 137.002,
+  "phase": 0.0319,
+  "beats_per_bar": 4,
+  "score": 3.895,
+  "mean_onset_strength": 0.416,
+  "offsets_by_beat": {
+   "beat 1": {
+    "bars": 60,
+    "median_ms": -0.1,
+    "p90_abs_ms": 10.8
+   },
+   "beat 2": {
+    "bars": 60,
+    "median_ms": 1.1,
+    "p90_abs_ms": 8.6
+   },
+   "beat 3": {
+    "bars": 58,
+    "median_ms": 1.5,
+    "p90_abs_ms": 4.6
+   },
+   "beat 4": {
+    "bars": 62,
+    "median_ms": -0.5,
+    "p90_abs_ms": 11.8
+   }
+  }
+ },
+ "tuning": {
+  "per_stem": {
+   "bass": 0.23,
+   "other": 0.27,
+   "piano": 0.28,
+   "vocals": 0.32
+  },
+  "consensus": 0.28,
+  "a4_hz": 447.2
+ },
+ "duration_s": 126.168,
+ "sections": [
+  {
+   "start_bar": 1,
+   "end_bar": 24,
+   "name": "A",
+   "plays": [
+    "808",
+    "sound_1",
+    "sound_10",
+    "sound_3",
+    "sound_4",
+    "sound_5",
+    "sound_6",
+    "sound_7"
+   ]
+  },
+  {
+   "start_bar": 25,
+   "end_bar": 28,
+   "name": "B",
+   "plays": [
+    "808",
+    "sound_4",
+    "sound_6",
+    "sound_7"
+   ]
+  },
+  {
+   "start_bar": 29,
+   "end_bar": 32,
+   "name": "C",
+   "plays": [
+    "808",
+    "sound_4",
+    "sound_7"
+   ]
+  },
+  {
+   "start_bar": 33,
+   "end_bar": 47,
+   "name": "A",
+   "plays": [
+    "808",
+    "sound_1",
+    "sound_10",
+    "sound_3",
+    "sound_4",
+    "sound_5",
+    "sound_6",
+    "sound_7"
+   ]
+  },
+  {
+   "start_bar": 48,
+   "end_bar": 51,
+   "name": "D",
+   "plays": [
+    "808"
+   ]
+  },
+  {
+   "start_bar": 52,
+   "end_bar": 56,
+   "name": "E",
+   "plays": []
+  },
+  {
+   "start_bar": 57,
+   "end_bar": 71,
+   "name": "A",
+   "plays": [
+    "808",
+    "sound_1",
+    "sound_10",
+    "sound_3",
+    "sound_4",
+    "sound_5",
+    "sound_6",
+    "sound_7"
+   ]
+  },
+  {
+   "start_bar": 72,
+   "end_bar": 73,
+   "name": "F",
+   "plays": [
+    "sound_6"
+   ]
+  }
+ ],
+ "sounds": {
+  "sound_1": {
+   "found_in_band": "hat",
+   "hits_in_template": 189,
+   "detected_hits": 236,
+   "clean_share": 0.877,
+   "grid_slots_of_template_hits": {
+    "0": 18,
+    "2": 40,
+    "4": 33,
+    "6": 13,
+    "10": 29,
+    "12": 14,
+    "14": 42
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    88,
+    13,
+    14,
+    29,
+    61,
+    93,
+    178
+   ],
+   "descriptors": {
+    "peak_ms": 6.7,
+    "decay_-6dB_ms": 10.7,
+    "decay_-20dB_ms": 24.3,
+    "centroid_hz": 4932,
+    "rolloff85_hz": 7827,
+    "noisiness": 0.022
+   },
+   "match": {
+    "role": "hat",
+    "band": "hat",
+    "verdict": "same sample",
+    "same_as": null,
+    "margin": 0.078,
+    "top": [
+     {
+      "sample": "user library hat #4a5b79",
+      "ncc": 0.9814,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #9d8584",
+      "ncc": 0.9034,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #130421",
+      "ncc": 0.9009,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     187,
+     1,
+     1
+    ],
+    "null_test_db": [
+     -14.3,
+     -7.4,
+     -7.3
+    ]
+   }
+  },
+  "sound_2": {
+   "found_in_band": "hat",
+   "hits_in_template": 28,
+   "detected_hits": 60,
+   "clean_share": 0.6,
+   "grid_slots_of_template_hits": {
+    "4": 14,
+    "10": 14
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    86,
+    11,
+    15,
+    33,
+    63,
+    88,
+    174
+   ],
+   "descriptors": {
+    "peak_ms": 9.0,
+    "decay_-6dB_ms": 9.4,
+    "decay_-20dB_ms": 28.5,
+    "centroid_hz": 3048,
+    "rolloff85_hz": 7461,
+    "noisiness": 0.024
+   },
+   "match": {
+    "role": "hat",
+    "band": "hat",
+    "verdict": "same sound as sound_1",
+    "same_as": "sound_1",
+    "margin": 0.074,
+    "top": [
+     {
+      "sample": "user library hat #4a5b79",
+      "ncc": 0.9539,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #130421",
+      "ncc": 0.8801,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #9d8584",
+      "ncc": 0.8799,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     5,
+     23,
+     0
+    ],
+    "null_test_db": [
+     -10.5,
+     -6.5,
+     -6.5
+    ]
+   }
+  },
+  "sound_3": {
+   "found_in_band": "hat",
+   "hits_in_template": 9,
+   "detected_hits": 52,
+   "clean_share": 0.904,
+   "grid_slots_of_template_hits": {
+    "0": 9
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    121,
+    37,
+    53,
+    54,
+    84,
+    146,
+    34
+   ],
+   "descriptors": {
+    "peak_ms": 8.7,
+    "decay_-6dB_ms": 5.3,
+    "decay_-20dB_ms": 14.1,
+    "centroid_hz": 446,
+    "rolloff85_hz": 215,
+    "noisiness": 0.003
+   },
+   "match": {
+    "role": "kick",
+    "band": "kick",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.134,
+    "top": [
+     {
+      "sample": "Core Library: E-Perc Short and Prune.wav",
+      "ncc": 0.8647,
+      "semitones": -4.0
+     },
+     {
+      "sample": "Core Library: Snare LDre 6.wav",
+      "ncc": 0.7303,
+      "semitones": -3.0
+     },
+     {
+      "sample": "Core Library: Kick Click Layer Real Drum.wav",
+      "ncc": 0.729,
+      "semitones": -1.0
+     }
+    ],
+    "per_hit_wins": [
+     9,
+     0,
+     0
+    ],
+    "null_test_db": [
+     -6.0,
+     -3.3,
+     -3.3
+    ]
+   }
+  },
+  "sound_4": {
+   "found_in_band": "low",
+   "hits_in_template": 71,
+   "detected_hits": 133,
+   "clean_share": 0.541,
+   "grid_slots_of_template_hits": {
+    "0": 27,
+    "4": 11,
+    "12": 34
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    154,
+    126,
+    111,
+    91,
+    46,
+    17,
+    61
+   ],
+   "descriptors": {
+    "peak_ms": 7.1,
+    "decay_-6dB_ms": 5.1,
+    "decay_-20dB_ms": 16.3,
+    "centroid_hz": 2026,
+    "rolloff85_hz": 4156,
+    "noisiness": 0.028
+   },
+   "match": {
+    "role": "kick",
+    "band": "snare",
+    "verdict": "same family",
+    "same_as": null,
+    "margin": 0.012,
+    "top": [
+     {
+      "sample": "Core Library: Kick Doctor M.wav",
+      "ncc": 0.9099,
+      "semitones": -3.0
+     },
+     {
+      "sample": "Core Library: Kick Tight Leash.wav",
+      "ncc": 0.8982,
+      "semitones": 2.0
+     },
+     {
+      "sample": "user library kick #ca7eee",
+      "ncc": 0.8974,
+      "semitones": 1.0
+     }
+    ],
+    "per_hit_wins": [
+     45,
+     21,
+     6
+    ],
+    "null_test_db": [
+     -8.2,
+     -7.1,
+     -7.1
+    ]
+   }
+  },
+  "sound_5": {
+   "found_in_band": "snare",
+   "hits_in_template": 10,
+   "detected_hits": 161,
+   "clean_share": 0.099,
+   "grid_slots_of_template_hits": {
+    "6": 10
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    87,
+    33,
+    16,
+    89,
+    71,
+    4,
+    15
+   ],
+   "descriptors": {
+    "peak_ms": 9.9,
+    "decay_-6dB_ms": 9.7,
+    "decay_-20dB_ms": null,
+    "centroid_hz": 8531,
+    "rolloff85_hz": 10500,
+    "noisiness": 0.053
+   },
+   "match": {
+    "role": "hat",
+    "band": "hat",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.046,
+    "top": [
+     {
+      "sample": "user library hat #94e4bb",
+      "ncc": 0.6508,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #9d8584",
+      "ncc": 0.6053,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library clap #a575a9",
+      "ncc": 0.5868,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     10,
+     0,
+     0
+    ],
+    "null_test_db": [
+     -2.4,
+     -2.0,
+     -1.8
+    ]
+   }
+  },
+  "sound_6": {
+   "found_in_band": "low",
+   "hits_in_template": 18,
+   "detected_hits": 78,
+   "clean_share": 0.321,
+   "grid_slots_of_template_hits": {
+    "8": 18
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    145,
+    141,
+    154,
+    84,
+    29,
+    10,
+    18
+   ],
+   "descriptors": {
+    "peak_ms": 18.2,
+    "decay_-6dB_ms": 22.8,
+    "decay_-20dB_ms": 71.8,
+    "centroid_hz": 2890,
+    "rolloff85_hz": 4888,
+    "noisiness": 0.025
+   },
+   "match": {
+    "role": "snare",
+    "band": "kick",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.021,
+    "top": [
+     {
+      "sample": "user library snare #6e64bc",
+      "ncc": 0.4738,
+      "semitones": -1.0
+     },
+     {
+      "sample": "Core Library: Snare BNYX High.wav",
+      "ncc": 0.4529,
+      "semitones": -1.0
+     },
+     {
+      "sample": "user library snare #0df8ac",
+      "ncc": 0.448,
+      "semitones": -1.0
+     }
+    ],
+    "per_hit_wins": [
+     2,
+     12,
+     4
+    ],
+    "null_test_db": [
+     -1.1,
+     -1.0,
+     -1.0
+    ]
+   }
+  },
+  "sound_7": {
+   "found_in_band": "low",
+   "hits_in_template": 21,
+   "detected_hits": 61,
+   "clean_share": 0.328,
+   "grid_slots_of_template_hits": {
+    "8": 21
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    192,
+    197,
+    159,
+    64,
+    12,
+    5,
+    15
+   ],
+   "descriptors": {
+    "peak_ms": 8.7,
+    "decay_-6dB_ms": 29.0,
+    "decay_-20dB_ms": 47.3,
+    "centroid_hz": 3308,
+    "rolloff85_hz": 5340,
+    "noisiness": 0.022
+   },
+   "match": {
+    "role": "snare",
+    "band": "kick",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.01,
+    "top": [
+     {
+      "sample": "user library snare #9d7cc8",
+      "ncc": 0.6894,
+      "semitones": -1.0
+     },
+     {
+      "sample": "user library snare #a1f265",
+      "ncc": 0.6797,
+      "semitones": 1.0
+     },
+     {
+      "sample": "user library snare #6e64bc",
+      "ncc": 0.6756,
+      "semitones": -1.0
+     }
+    ],
+    "per_hit_wins": [
+     0,
+     0,
+     21
+    ],
+    "null_test_db": [
+     -2.8,
+     -2.7,
+     -2.6
+    ]
+   }
+  },
+  "sound_8": {
+   "found_in_band": "snare",
+   "hits_in_template": 18,
+   "detected_hits": 51,
+   "clean_share": 0.431,
+   "grid_slots_of_template_hits": {
+    "6": 18
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    14,
+    29,
+    159,
+    9,
+    37,
+    6,
+    15
+   ],
+   "descriptors": {
+    "peak_ms": 9.9,
+    "decay_-6dB_ms": 8.8,
+    "decay_-20dB_ms": null,
+    "centroid_hz": 8444,
+    "rolloff85_hz": 10400,
+    "noisiness": 0.109
+   },
+   "match": {
+    "role": "hat",
+    "band": "snare",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.036,
+    "top": [
+     {
+      "sample": "user library hat #94e4bb",
+      "ncc": 0.5028,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #9d8584",
+      "ncc": 0.4671,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #130421",
+      "ncc": 0.46,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     16,
+     1,
+     1
+    ],
+    "null_test_db": [
+     -1.3,
+     -1.1,
+     -1.0
+    ]
+   }
+  },
+  "sound_9": {
+   "found_in_band": "hat",
+   "hits_in_template": 9,
+   "detected_hits": 13,
+   "clean_share": 1.0,
+   "grid_slots_of_template_hits": {
+    "12": 9
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    90,
+    71,
+    103,
+    192,
+    5,
+    4,
+    9
+   ],
+   "descriptors": {
+    "peak_ms": 9.5,
+    "decay_-6dB_ms": 6.3,
+    "decay_-20dB_ms": 16.1,
+    "centroid_hz": 1944,
+    "rolloff85_hz": 6298,
+    "noisiness": 0.003
+   },
+   "match": {
+    "role": "kick",
+    "band": "snare",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.002,
+    "top": [
+     {
+      "sample": "Core Library: Kick BNYX 1.wav",
+      "ncc": 0.8567,
+      "semitones": 3.0
+     },
+     {
+      "sample": "Core Library: Kick Doctor M.wav",
+      "ncc": 0.8552,
+      "semitones": -3.0
+     },
+     {
+      "sample": "user library kick #ee1c64",
+      "ncc": 0.8545,
+      "semitones": 3.0
+     }
+    ],
+    "per_hit_wins": [
+     3,
+     6,
+     0
+    ],
+    "null_test_db": [
+     -5.8,
+     -6.0,
+     -5.7
+    ]
+   }
+  },
+  "sound_10": {
+   "found_in_band": "hat",
+   "hits_in_template": 27,
+   "detected_hits": 28,
+   "clean_share": 1.0,
+   "grid_slots_of_template_hits": {
+    "8": 27
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    269,
+    0,
+    0,
+    0,
+    0,
+    1,
+    27
+   ],
+   "descriptors": {
+    "peak_ms": 11.0,
+    "decay_-6dB_ms": 31.7,
+    "decay_-20dB_ms": 47.0,
+    "centroid_hz": 3962,
+    "rolloff85_hz": 7494,
+    "noisiness": 0.023
+   },
+   "match": {
+    "role": "snare",
+    "band": "kick",
+    "verdict": "same sample",
+    "same_as": null,
+    "margin": 0.075,
+    "top": [
+     {
+      "sample": "user library snare #6e64bc",
+      "ncc": 0.9534,
+      "semitones": -1.0
+     },
+     {
+      "sample": "user library snare #ed61b8",
+      "ncc": 0.8785,
+      "semitones": -1.0
+     },
+     {
+      "sample": "Core Library: Snare BNYX High.wav",
+      "ncc": 0.8717,
+      "semitones": -1.0
+     }
+    ],
+    "per_hit_wins": [
+     27,
+     0,
+     0
+    ],
+    "null_test_db": [
+     -10.4,
+     -6.4,
+     -6.2
+    ]
+   }
+  },
+  "sound_11": {
+   "found_in_band": "snare",
+   "hits_in_template": 26,
+   "detected_hits": 27,
+   "clean_share": 0.963,
+   "grid_slots_of_template_hits": {
+    "8": 26
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    0,
+    0,
+    0,
+    0,
+    1,
+    2,
+    24
+   ],
+   "descriptors": {
+    "peak_ms": 19.3,
+    "decay_-6dB_ms": 33.0,
+    "decay_-20dB_ms": 76.2,
+    "centroid_hz": 2447,
+    "rolloff85_hz": 3176,
+    "noisiness": 0.011
+   },
+   "match": {
+    "role": "snare",
+    "band": "kick",
+    "verdict": "no close match",
+    "same_as": null,
+    "margin": 0.044,
+    "top": [
+     {
+      "sample": "user library clap #3d87e2",
+      "ncc": 0.466,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library snare #501bc6",
+      "ncc": 0.4219,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library snare #fbac79",
+      "ncc": 0.3935,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     25,
+     0,
+     1
+    ],
+    "null_test_db": [
+     -1.1,
+     -0.9,
+     -0.7
+    ]
+   }
+  },
+  "sound_12": {
+   "found_in_band": "snare",
+   "hits_in_template": 8,
+   "detected_hits": 9,
+   "clean_share": 0.889,
+   "grid_slots_of_template_hits": {
+    "6": 8
+   },
+   "peak_ncc_histogram_0.3_to_1.0": [
+    171,
+    198,
+    20,
+    2,
+    0,
+    2,
+    6
+   ],
+   "descriptors": {
+    "peak_ms": 12.7,
+    "decay_-6dB_ms": 5.1,
+    "decay_-20dB_ms": 55.3,
+    "centroid_hz": 165,
+    "rolloff85_hz": 172,
+    "noisiness": 0.002
+   },
+   "match": {
+    "role": "hat",
+    "band": "hat",
+    "verdict": "same sound as sound_1",
+    "same_as": "sound_1",
+    "margin": 0.054,
+    "top": [
+     {
+      "sample": "user library hat #4a5b79",
+      "ncc": 0.9501,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #130421",
+      "ncc": 0.8962,
+      "semitones": 0.0
+     },
+     {
+      "sample": "user library hat #eaf01b",
+      "ncc": 0.8857,
+      "semitones": 0.0
+     }
+    ],
+    "per_hit_wins": [
+     0,
+     0,
+     8
+    ],
+    "null_test_db": [
+     -10.3,
+     -7.2,
+     -6.8
+    ]
+   }
+  }
+ },
+ "808": {
+  "notes": 126,
+  "by_pitch": {
+   "24": 105,
+   "25": 14,
+   "31": 3,
+   "27": 1,
+   "28": 1,
+   "19": 1,
+   "36": 1
+  },
+  "slides_over_1.5_semitones": 3,
+  "synth": {
+   "params": {
+    "f_end_hz": 32.9029,
+    "f_start_hz": 41.4374,
+    "glide_ms": 59.7687,
+    "decay_s": 0.479,
+    "attack_ms": 78.41,
+    "drive": 1.8773,
+    "asym": 0.0107,
+    "phase": 6.1743
+   },
+   "glide_semitones": 3.99,
+   "pitch_hz": 33.24,
+   "fit": {
+    "loss": 0.0665,
+    "seconds": 199.2
+   },
+   "vs_reference": {
+    "ncc": 0.975,
+    "harmonics_2_5_db": 7.7,
+    "harmonics_6_12_db": 7.4,
+    "envelope_db": 0.8,
+    "mel_db": 22.23
+   },
+   "best_library_808_vs_reference": {
+    "ncc": 0.945,
+    "harmonics_2_5_db": 6.6,
+    "harmonics_6_12_db": 2.4,
+    "envelope_db": 1.8,
+    "mel_db": 9.7,
+    "file": "user library 808 #9654b5",
+    "semitones": 0.0,
+    "margin": 0.002
+   }
+  }
+ },
+ "plan": {
+  "tempo": 137.002,
+  "drum_notes": 549,
+  "pads": {
+   "42": {
+    "role": "hat",
+    "sample": "user library hat #4a5b79",
+    "transpose": 0,
+    "ncc": 0.9814,
+    "verdict": "same sample"
+   },
+   "38": {
+    "role": "snare",
+    "sample": "user library snare #6e64bc",
+    "transpose": -1,
+    "ncc": 0.9534,
+    "verdict": "same sample"
+   },
+   "36": {
+    "role": "kick",
+    "sample": "Core Library: Kick Doctor M.wav",
+    "transpose": -3,
+    "ncc": 0.9099,
+    "verdict": "same family"
+   },
+   "35": {
+    "role": "kick",
+    "sample": "Core Library: E-Perc Short and Prune.wav",
+    "transpose": -4,
+    "ncc": 0.8647,
+    "verdict": "no close match"
+   },
+   "47": {
+    "role": "kick",
+    "sample": "Core Library: Kick BNYX 1.wav",
+    "transpose": 3,
+    "ncc": 0.8567,
+    "verdict": "no close match"
+   },
+   "40": {
+    "role": "snare",
+    "sample": "user library snare #3d87e2",
+    "transpose": 0,
+    "ncc": 0.466,
+    "verdict": "no close match"
+   }
+  },
+  "808_notes": 126,
+  "levels": {
+   "headroom_db": 4.0,
+   "drums_track_db": -12.3,
+   "808_track_db": -6.2,
+   "stems_track_db": -4.0
+  },
+  "locators": [
+   [
+    "A (1)",
+    0.0
+   ],
+   [
+    "B (25)",
+    96.0
+   ],
+   [
+    "C (29)",
+    112.0
+   ],
+   [
+    "A (33)",
+    128.0
+   ],
+   [
+    "D (48)",
+    188.0
+   ],
+   [
+    "E (52)",
+    204.0
+   ],
+   [
+    "A (57)",
+    224.0
+   ],
+   [
+    "F (72)",
+    284.0
+   ]
+  ]
+ }
+}

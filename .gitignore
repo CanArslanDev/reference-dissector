@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Work folders and anything derived from songs or sample libraries: keep local
+work/
+*.wav
+*.mp3
+*.aif
+*.aiff
+*.flac
+*.npz
+*.npy
+*.mid
+!tests/data/*.mid
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+.serena/
