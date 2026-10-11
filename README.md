@@ -25,7 +25,7 @@ The work started from one question: *can an AI that cannot hear tell whether the
 | Snare (odd bars) | Not in the library: the best match is NCC 0.47. |
 | 808 | 126 notes, 105 of them on C1 (+28 cents). A fitted synth voice reaches NCC 0.975 and a 0.8 dB envelope error, against the best of 865 library 808s at 0.945 and 1.8 dB. The library 808 is closer in harmonics: 2.4 dB off, against 7.4 dB for the synth. |
 | Sections | A 1–24 · B 25–28 · C 29–32 · A 33–47 · D 48–51 · E 52–56 (breakdown) · A 57–71 · F 72–73 |
-| Live | 6 Drum Rack pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators: about 5 s to build. |
+| Live | `refdissect live-build` built it into an empty Live 12.4 set in 9.7 s: 6 Drum Rack pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators. |
 
 **Calibration**: 6 synthetic beats built from known library samples, mastered loud, passed through mp3 and Demucs.
 

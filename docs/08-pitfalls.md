@@ -50,4 +50,5 @@
 - **Simpler's root is C3.** Transpose +36 for an 808 whose notes are written at C1 (MIDI 24).
 - **New files reach the browser after a few seconds;** retry, do not fail.
 - **Locators at fractional beats were refused,** so round them.
+- **A new audio clip starts at its first transient.** Live's warp analysis moves the start, 21 ms to 3.6 s in here, and it stays moved with warping off. Set `loop_start` back to 0, or the reference plays early against the notes.
 - **The Trial cannot save.** Keep the plan, rebuild in seconds.

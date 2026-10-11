@@ -127,6 +127,8 @@ The build took 4.6 s. `plan.json` from the finished pipeline differs:
 - it uses the identified hat and snare;
 - it puts the click and the kick on Drum Rack pads too: six pads, 549 notes.
 
+`refdissect live-build` then built that plan into an empty set in 9.7 s, with the pads, notes, stems and 8 section locators checked in Live afterwards. That run found one more Live behaviour: a new audio clip's start sits at its first transient (3.6 s into the `other` stem), and the build now puts it back at 0.
+
 Measured on the way (Live 12.4):
 - Simpler loads samples at −12 dB.
 - A new file in the User Library is in the browser within seconds.

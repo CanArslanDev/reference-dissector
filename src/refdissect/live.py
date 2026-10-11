@@ -12,7 +12,9 @@ docs/07-building-in-live.md):
 - A new file in the User Library shows up in Live's browser after a few
   seconds; samples load onto Drum Rack pads through the browser.
 - Reference stems go in as Arrangement audio clips with warping off, so they
-  play at their own speed and line up with notes placed at their seconds.
+  play at their own speed and line up with notes placed at their seconds,
+  once their start (moved to the first transient by Live's warp analysis)
+  is put back at 0.
 - Locators at fractional beats were refused ("Live did not create it");
   whole beats work.
 """
@@ -114,7 +116,9 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             "stems": {}, "locators": [], "levels": {}}
     if synth:
         root = synth["root_midi"]
-        plan["tracks"]["808"].update(sample=synth["file_name"], sample_path=synth["file"],
+        # named after the song: the User Library keeps one file per name
+        song = Path(stems_dir).resolve().parent.name
+        plan["tracks"]["808"].update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"],
                                      transpose=int(60 - root), root_midi=root)
     stems_dir = Path(stems_dir)
     for stem in ("drums", "bass", "other", "piano", "guitar", "vocals"):
@@ -302,10 +306,20 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
         for a in range(0, len(notes), 200):
             await call("edit_clip_notes", track=index[key], mode="add", notes=notes[a:a + 200],
                        arrangement_clip_index=0)
+    report["stems"] = {}
     for stem, info in plan["stems"].items():
         tp = f"live_set tracks {index['stem:' + stem]}"
+        clip = f"{tp} arrangement_clips 0"
         lom("lom_call", path=tp, method="create_audio_clip", args=[info["path"], 0.0])
-        lom("lom_set", path=f"{tp} arrangement_clips 0", property="warping", value=False)
+        lom("lom_set", path=clip, property="warping", value=False)
+        # Live's warp analysis moves the clip's start to the first transient
+        # (21-30 ms on these stems, 3.6 s on one with a quiet intro) and the
+        # start stays there with warping off: back to the file's start, or the
+        # stem plays early against the notes. loop_start carries start_marker.
+        lom("lom_set", path=clip, property="loop_start", value=0.0)
+        if lom("lom_get", path=clip, properties=["start_marker"]).get("start_marker"):
+            lom("lom_set", path=clip, property="start_marker", value=0.0)
+        report["stems"][stem] = lom("lom_get", path=clip, properties=["start_marker", "end_time"])
     levels = plan["levels"]
     faders = {index["808"]: levels.get("808_track_db", -levels["headroom_db"]),
               index["drums"]: levels.get("drums_track_db", -levels["headroom_db"])}
