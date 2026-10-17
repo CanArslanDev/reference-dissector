@@ -36,18 +36,22 @@ def band_envelope(x: np.ndarray, lo: float, hi: float, window_ms: float = 5.0, s
 
 
 def kick_curve(env: np.ndarray, kicks: list[float], pre: float = 0.05, post: float = 0.6,
-               sr: int = SR) -> dict:
-    """The median level around the kicks, in dB re the 100-20 ms before each.
+               sr: int = SR, reference: str = "before") -> dict:
+    """The median level around the kicks, in dB re the 100-20 ms before each
+    (reference="before"), or re the layer's median level over the whole
+    envelope ("median": steadier when the layer is often silent just before a
+    kick, as an 808 that enters with it is).
 
     Returns how deep it falls, when it is lowest, when it is back within 3 dB,
     and the curve at CURVE_POINTS (seconds after the kick)."""
     a, b = int(pre * sr), int(post * sr)
+    level = float(np.median(env[env > 0])) if (env > 0).any() else 0.0
     rows = []
     for t in kicks:
         k = int(round(t * sr))
         if k - int(0.1 * sr) < 0 or k + b > len(env):
             continue
-        ref = float(np.median(env[k - int(0.1 * sr):k - int(0.02 * sr)]))
+        ref = level if reference == "median" else float(np.median(env[k - int(0.1 * sr):k - int(0.02 * sr)]))
         if ref <= 0:
             continue
         rows.append(20 * np.log10(env[k - a:k + b] / ref + 1e-9))

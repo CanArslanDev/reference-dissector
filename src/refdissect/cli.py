@@ -10,6 +10,12 @@
     refdissect plan work/song
     refdissect live-build work/song          (needs the [live] extra and Live running)
     refdissect calibrate work/inventory.json --library work/library.npz --out work/calibration
+
+  comparing and choosing (docs/11):
+    refdissect compare ref/stems rebuild/stems --out compare.json   (both separated by the same model)
+    refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
+    refdissect space stems/other.wav --spans 40-56 100-116           (width, and the band-pass between spans)
+    refdissect mix-gains stems/ --targets targets.json               (fader moves without re-recording)
 """
 
 from __future__ import annotations
@@ -101,6 +107,69 @@ def _calibrate(a):
     print(f"-> {out / 'results.json'}")
 
 
+def _spans(values):
+    out = []
+    for v in values or []:
+        a, b = v.split("-")
+        out.append((float(a), float(b)))
+    return out
+
+
+def _compare(a):
+    from .symmetric import baseline, compare, load_stems, measure
+    span = _spans([a.span])[0] if a.span else None
+    ref, new = load_stems(a.reference, span), load_stems(a.rebuild, span)
+    spread = baseline(ref, a.kick_gap)
+    rows = compare(measure(ref, a.kick_gap), measure(new, a.kick_gap), spread)
+    if a.out:
+        Path(a.out).write_text(json.dumps({"rows": rows, "reference_spread": spread}, indent=1), encoding="utf-8")
+    beyond = {k: v for k, v in rows.items() if v.get("beyond_spread")}
+    for k, v in sorted(beyond.items(), key=lambda kv: -abs(kv[1]["diff"]))[:a.top]:
+        print(f"{k:45s} reference {v['reference']:9.2f}  rebuild {v['rebuild']:9.2f}  diff {v['diff']:+8.2f}")
+    for k, v in rows.items():
+        if k.endswith("curve_distance_db"):
+            print(f"{k:45s} {v['diff']:.2f} dB")
+    print(f"{len(beyond)} of {len(rows)} measures differ by more than the reference's own halves do")
+
+
+def _round(a):
+    from .rounds import listening_round
+    span_r = _spans([a.reference_span])[0] if a.reference_span else None
+    span_c = _spans([a.candidate_span])[0] if a.candidate_span else None
+    m = listening_round(a.reference, a.candidates, a.out, a.question, span_r, span_c, a.lufs)
+    print(f"{len(m['files'])} files -> {a.out} (manifest.md says what each number is)")
+
+
+def _space(a):
+    import soundfile as sf
+
+    from .space import band_correlation, fit_bandpass, median_spectrum_db
+    x, sr = sf.read(a.audio, always_2d=True)
+    spans = _spans(a.spans) or [(0.0, len(x) / sr)]
+    out = {"width": {}}
+    for s0, s1 in spans:
+        seg = x[int(s0 * sr):int(s1 * sr)]
+        if seg.shape[1] >= 2:
+            out["width"][f"{s0:g}-{s1:g}"] = band_correlation(seg, sr)
+    if len(spans) >= 2:
+        (a0, a1), (b0, b1) = spans[:2]
+        f, da = median_spectrum_db(x[int(a0 * sr):int(a1 * sr)].mean(1), sr)
+        _, db = median_spectrum_db(x[int(b0 * sr):int(b1 * sr)].mean(1), sr)
+        out["second_vs_first"] = fit_bandpass(f, db - da, sr=sr)
+    print(json.dumps(out, indent=1))
+
+
+def _gains(a):
+    from .mixsim import gains_to_targets
+    from .symmetric import load_stems
+    targets = json.loads(Path(a.targets).read_text(encoding="utf-8"))
+    stems = load_stems(a.stems)
+    spans = {k: _spans(v.get("spans")) for k, v in targets.items() if isinstance(v, dict) and v.get("spans")}
+    levels = {k: (v["target_db"] if isinstance(v, dict) else float(v)) for k, v in targets.items()}
+    from .audio import SR
+    print(json.dumps(gains_to_targets(stems, levels, SR, spans, a.measure), indent=1))
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="refdissect", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -149,6 +218,37 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--beats", type=int, default=6)
     s.add_argument("--out", required=True)
     s.set_defaults(run=_calibrate)
+    s = sub.add_parser("compare", help="measure a rebuild and its reference the same way (both separated)")
+    s.add_argument("reference", help="the reference's stems folder")
+    s.add_argument("rebuild", help="the rebuild's stems folder, from the same separation model")
+    s.add_argument("--span", default=None, help="seconds a-b to compare (default: all)")
+    s.add_argument("--out", default=None)
+    s.add_argument("--top", type=int, default=20)
+    s.add_argument("--kick-gap", type=float, default=0.2,
+                   help="seconds between kicks at least (raise it when other attacks bleed into the drums)")
+    s.set_defaults(run=_compare)
+
+    s = sub.add_parser("listening-round", help="numbered reference-beep-candidate files to choose by ear")
+    s.add_argument("reference")
+    s.add_argument("candidates", nargs="+")
+    s.add_argument("--question", required=True)
+    s.add_argument("--out", required=True)
+    s.add_argument("--reference-span", default=None, help="seconds a-b")
+    s.add_argument("--candidate-span", default=None, help="seconds a-b")
+    s.add_argument("--lufs", type=float, default=-14.0)
+    s.set_defaults(run=_round)
+
+    s = sub.add_parser("space", help="width per octave, and the band-pass between two spans")
+    s.add_argument("audio", help="a stereo stem")
+    s.add_argument("--spans", nargs="*", help="seconds a-b (two of them: the band-pass from the first to the second)")
+    s.set_defaults(run=_space)
+
+    s = sub.add_parser("mix-gains", help="the gain per recorded stem that reaches a target level")
+    s.add_argument("stems", help="folder of recorded (post-fader) stems")
+    s.add_argument("--targets", required=True, help='JSON: {"Kick": -12, "Pad": {"target_db": -20, "spans": ["8-24"]}}')
+    s.add_argument("--measure", choices=["lufs", "rms"], default="lufs")
+    s.set_defaults(run=_gains)
+
     a = p.parse_args(argv)
     a.run(a)
     return 0

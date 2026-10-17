@@ -32,6 +32,8 @@ def ab_file(reference: np.ndarray, candidate: np.ndarray, sr: int, path: str | P
     file would have gone over `ceiling` (both halves move together)."""
     def stereo(x):
         x = np.asarray(x, dtype=np.float64)
+        if x.ndim == 2 and x.shape[1] == 1:
+            x = x[:, 0]
         return np.stack([x, x], 1) if x.ndim == 1 else x[:, :2]
     b = beep(sr)
     y = np.concatenate([to_lufs(stereo(reference), sr, target_lufs), np.stack([b, b], 1),

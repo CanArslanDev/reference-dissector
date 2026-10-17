@@ -86,6 +86,13 @@ uv run refdissect fit-808 "$W/song/refdissect" --library-808 "$W/work/library_80
 uv run refdissect plan "$W/song/refdissect"            # plan.json + midi/drums.mid, midi/808.mid
 uv run --extra live refdissect live-build "$W/song/refdissect"   # into an empty Live set
 
+# comparing and choosing (docs/11)
+uv run refdissect separate rebuild.wav --out "$W/song/rebuild_stems"      # the same model as the reference
+uv run refdissect compare "$W/song/stems" "$W/song/rebuild_stems" --out "$W/song/compare.json"
+uv run refdissect listening-round ref.wav cand1.wav cand2.wav --question "Which chords?" --out "$W/song/round1"
+uv run refdissect space "$W/song/stems/other.wav" --spans 40-56 100-116
+uv run refdissect mix-gains "$W/song/recorded" --targets targets.json
+
 # calibration: synthetic beats from your own library, scored
 uv run refdissect calibrate "$W/work/inventory.json" --library "$W/work/library.npz" \
     --library-808 "$W/work/library_808.npz" --beats 6 --out "$W/work/calibration"
@@ -131,6 +138,8 @@ src/refdissect/
   loudness.py    BS.1770 integrated loudness
   listening.py   A/B files: reference, beep, candidate at equal loudness
   mixsim.py      gains decided on recorded stems instead of re-recording
+  symmetric.py   a rebuild and its reference measured the same way, against the reference's own spread
+  rounds.py      listening rounds: numbered reference-beep-candidate files and a manifest
   live.py        plan, MIDI files, the build through ableton-live-mcp
   calibrate.py   synthetic beats and their scoring
   pipeline.py    the steps, each writing JSON

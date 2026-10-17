@@ -49,6 +49,13 @@ About 7.7 hours of active work (228 minutes of tool time, the rest writing and d
 | 808 fit | ~10 min | ~24,000 loss evaluations, half of each in a 25 ms moving mean | 2× faster with the same result. |
 | Rebuilding the set | ~4 min each time | The Trial cannot save; Live restarted twice | – |
 
+## The commands
+
+- `refdissect compare REF_STEMS REBUILD_STEMS`: every measure on both stem sets (separate the rebuild with the same model first), flagged where the difference is larger than between the reference's own halves. On the v2 beat it put the 808's and the chords' kick curves 4.0 and 4.2 dB from the song's. Kicks come from the separated drums, which can hold other attacks; there, Demucs put the 808's entry (two 16ths after each kick) into the drums, so `--kick-gap 0.3` was needed.
+- `refdissect listening-round REF CANDIDATES... --question ...`: one numbered A/B file per candidate and a manifest.
+- `refdissect space STEM --spans a-b c-d`: width per octave, and the band-pass from the first span to the second.
+- `refdissect mix-gains STEMS --targets targets.json`: the gain per recorded stem that reaches a target level.
+
 ## Smaller findings
 
 - Basic Pitch returns no notes at all when its minimum frequency is under its lowest note, A0 (27.5 Hz): 25 Hz gave 0 notes on a bass stem, 30 Hz gave 232. ableton-live-mcp now raises the floor.

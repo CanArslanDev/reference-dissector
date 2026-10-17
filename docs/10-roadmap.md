@@ -8,7 +8,7 @@ In rough order of value. Each item names how it will be measured: the calibratio
      - an ADT model;
      - NMF with the templates as fixed bases, so co-occurring hits are explained together instead of one at a time.
    - **Measured by:** `calibrate`, F1 per sound, and the hand-checked bars of PIRAMIT.
-2. **Symmetric comparison.** Render the rebuilt parts from Live (ableton-live-mcp's `render_and_analyze` / `capture_stems`) and master them like the reference. Then separate them with the same Demucs and compare stems with stems: the separation's artifacts are then on both sides.
+2. **Symmetric comparison.** *Started:* `refdissect compare` measures two stem sets the same way against the reference's own spread ([11](11-style-beat-lessons.md)). Still to do: master the rebuild like the reference, and per-sound null tests. Render the rebuilt parts from Live (ableton-live-mcp's `render_and_analyze` / `capture_stems`) and master them like the reference. Then separate them with the same Demucs and compare stems with stems: the separation's artifacts are then on both sides.
    - **Measured by:** per-sound null tests and descriptor differences before/after.
 3. **The closed loop.** A listening report per sound ([06](06-listening-for-a-model.md)):
    - descriptor differences → suggested edits (decay, transpose/detune, EQ, drive, reverb);
@@ -33,8 +33,8 @@ In rough order of value. Each item names how it will be measured: the calibratio
    - Run the packaged `live-build` against Live in CI-like checks.
 
 9. **Style beats** ([11](11-style-beat-lessons.md)).
-   - A sketch step between `plan` and the build: 8-bar candidates per section, chosen by ear.
-   - Wire `groove`, `space` and `mixsim` into `refdissect` commands (today they are a library).
+   - Done: `listening-round` (numbered A/B files and a manifest), `compare`, `space` and `mix-gains` commands.
+   - Still to do: generating the 8-bar candidates themselves from a plan.
    - **Measured by:** the listener's picks, and ducking and balance against the reference.
 
 **Not planned:** publishing transcriptions or audio of songs, for the reasons in [09](09-data-and-copyright.md).
