@@ -39,8 +39,7 @@
   "consensus": 0.0,
   "a4_hz": 440.0,
   "808": 0.329,
-  "808_agreement": 0.64,
-  "note": "remeasured 2026-10-17 with grid.tuning's stable-peak method; the first run's librosa.estimate_tuning read +0.23..+0.32 for every stem"
+  "808_agreement": 0.635
  },
  "duration_s": 126.168,
  "sections": [
@@ -867,8 +866,8 @@
  "808": {
   "notes": 126,
   "by_pitch": {
-   "24": 105,
-   "25": 14,
+   "24": 107,
+   "25": 12,
    "31": 3,
    "27": 1,
    "28": 1,
@@ -878,34 +877,34 @@
   "slides_over_1.5_semitones": 3,
   "synth": {
    "params": {
-    "f_end_hz": 32.9029,
-    "f_start_hz": 41.4374,
-    "glide_ms": 59.7687,
-    "decay_s": 0.479,
-    "attack_ms": 78.41,
-    "drive": 1.8773,
-    "asym": 0.0107,
-    "phase": 6.1743
+    "f_end_hz": 32.9083,
+    "f_start_hz": 41.2459,
+    "glide_ms": 59.5382,
+    "decay_s": 0.4565,
+    "attack_ms": 76.2877,
+    "drive": 1.9518,
+    "asym": 0.0066,
+    "phase": 3.0596
    },
-   "glide_semitones": 3.99,
-   "pitch_hz": 33.24,
+   "glide_semitones": 3.91,
+   "pitch_hz": 33.33,
    "fit": {
-    "loss": 0.0665,
-    "seconds": 199.2
+    "loss": 0.0673,
+    "seconds": 49.3
    },
    "vs_reference": {
     "ncc": 0.975,
-    "harmonics_2_5_db": 7.7,
-    "harmonics_6_12_db": 7.4,
-    "envelope_db": 0.8,
-    "mel_db": 22.23
+    "harmonics_2_5_db": 7.4,
+    "harmonics_6_12_db": 7.7,
+    "envelope_db": 0.9,
+    "mel_db": 22.32
    },
    "best_library_808_vs_reference": {
-    "ncc": 0.945,
-    "harmonics_2_5_db": 6.6,
-    "harmonics_6_12_db": 2.4,
-    "envelope_db": 1.8,
-    "mel_db": 9.7,
+    "ncc": 0.947,
+    "harmonics_2_5_db": 7.8,
+    "harmonics_6_12_db": 2.3,
+    "envelope_db": 2.0,
+    "mel_db": 9.71,
     "file": "user library 808 #9654b5",
     "semitones": 0.0,
     "margin": 0.002

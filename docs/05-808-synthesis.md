@@ -46,15 +46,15 @@ The same reference fitted with two different scores (PIRAMIT, bass-stem referenc
 
 ## Against the library
 
-The fitted voice (drums + bass reference, 199 s fit) against the best of 865 library 808s, tried at ±12 semitones:
+The fitted voice (drums + bass reference, 49 s fit) against the best of 865 library 808s, tried at ±12 semitones:
 
 | | synth | best library 808 |
 |---|---|---|
-| waveform NCC | **0.975** | 0.945 |
-| harmonics 2–5 | 7.7 dB | **6.6 dB** |
-| harmonics 6–12 | 7.4 dB | **2.4 dB** |
-| envelope | **0.8 dB** | 1.8 dB |
-| log-mel distance | 22.2 dB | **9.7 dB** |
+| waveform NCC | **0.975** | 0.947 |
+| harmonics 2–5 | **7.4 dB** | 7.8 dB |
+| harmonics 6–12 | 7.7 dB | **2.3 dB** |
+| envelope | **0.9 dB** | 2.0 dB |
+| log-mel distance | 22.3 dB | **9.7 dB** |
 
 **Reading it.**
 - **The synth** has the pitch curve and the envelope; tanh drive at that level makes too few upper harmonics.
@@ -64,7 +64,7 @@ The fitted voice (drums + bass reference, 199 s fit) against the best of 865 lib
 
 ## In Live
 
-The one-shot is rendered at the 808's own pitch (at first the track's +28 cents, 33.24 Hz; measured on the 808's notes it is +33 cents), 3 s long, −1 dBFS. It goes into Simpler:
+The one-shot is rendered at the 808's own pitch, C1 + 33 cents = 33.33 Hz (33.24 Hz in the first build, at the track tuning then measured), 3 s long, −1 dBFS. It goes into Simpler:
 - **Transpose = 60 − 24 = +36.** MIDI note 24 then plays it at its own pitch, so the transcribed notes keep their real numbers.
 - **Warping off.** Pitch is changed by speed, as an 808 should be.
 - **Volume set to 0 dB.** Simpler loads at −12 dB.

@@ -50,7 +50,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     log(f"grid: {grid.bpm} BPM, first beat at {grid.phase} s")
     tunings = {s: tuning(read(stems_dir / f"{s}.wav")) for s in TONAL_STEMS
                if (stems_dir / f"{s}.wav").is_file()}
-    consensus = round(float(np.median(list(tunings.values()))), 2) if tunings else 0.0
+    consensus = round(float(np.median(list(tunings.values()))), 2) + 0.0 if tunings else 0.0  # no -0.0
     log(f"tuning (semitones from A440): {tunings} -> {consensus:+.2f}")
     templates = discover(drums, grid)
     events = detect(drums, templates)

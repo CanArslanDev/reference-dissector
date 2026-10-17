@@ -35,11 +35,11 @@ A Turkish trap track (album *VERITAS II*), 2:06.
 
 **Correction.** This section first said the whole track sat at +0.28 semitones (A4 ≈ 447 Hz). That came from `librosa.estimate_tuning`, which is off by up to 60 cents on synthetic tones. Measured with stable spectral peaks (within 1 cent on synthetic tones) and checked with pyin (+2 to +3 cents on piano and other), the melodic stems are at A440. Only the 808 is detuned: its sample sits about a third of a semitone sharp. The bass stem's +11 is the 808 mixed with cleaner bass notes.
 
-**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. With the 808's own offset removed before rounding, 105 of the 126 808 notes are C1.
+**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. With the 808's own offset removed before rounding, 107 of the 126 808 notes are C1 (105 with the first version's +28 cents).
 
 **What it is not.** It could have been a whole track sped up: 1.5 % faster would also turn 135 BPM into 137. Matching every drum sample shifted by +0.26 semitones made the matches *worse*: the snare fell from 0.86 to 0.25 and the hat from 0.90 to 0.63. The drums are at their own pitch, and so are the melodic parts.
 
-**In Live.** The 808 one-shot is rendered at the 808's pitch (C1 + 28 cents, 33.24 Hz in the first build; +33 cents measured on its notes). Melodic parts need no offset.
+**In Live.** The 808 one-shot is rendered at the 808's own pitch: C1 + 33 cents, 33.33 Hz (33.24 Hz in the first build). Melodic parts need no offset.
 
 ## Drums
 
@@ -72,33 +72,33 @@ What the table says about the beat:
 
   | pitch | C1 | C#1 | G1 | D#1 | E1 | G0 | C2 |
   |---|---|---|---|---|---|---|---|
-  | notes | 105 | 14 | 3 | 1 | 1 | 1 | 1 |
+  | notes | 107 | 12 | 3 | 1 | 1 | 1 | 1 |
 
   3 notes slide by more than 1.5 semitones (these are not played yet).
 - **Silences.** The 808 rests in bars 52–56: the breakdown.
-- **Isolated notes.** 73 C1 notes ring at least 600 ms alone; their average is the reference for the fit.
+- **Isolated notes.** 74 C1 notes ring at least 600 ms alone; their average is the reference for the fit.
 - **Pitch drop.** The pitch falls from about 42–44 Hz to 33.2 Hz in the first ~60 ms.
 
 **Fitted voice** (on drums + bass, so the attack is in):
 
 | | value |
 |---|---|
-| pitch | 32.90 Hz end, from 41.44 Hz (+4.0 semitones) |
+| pitch | 32.91 Hz end, from 41.25 Hz (+3.9 semitones) |
 | glide | time constant 60 ms |
-| attack | time constant 78 ms (a soft start, under a click) |
-| decay | 0.48 s |
-| drive | 1.88 (tanh), nearly symmetric |
-| fit | 199 s |
+| attack | time constant 76 ms (a soft start, under a click) |
+| decay | 0.46 s |
+| drive | 1.95 (tanh), nearly symmetric |
+| fit | 49 s (199 s before the fit was made faster) |
 
 **Compared with the average of the isolated notes:**
 
 | | synth | best of 865 library 808s (±12 st) |
 |---|---|---|
-| waveform NCC (808 band) | **0.975** | 0.945 (margin 0.002: no single 808 stands out) |
-| harmonics 2–5 off by | 7.7 dB | **6.6 dB** |
-| harmonics 6–12 off by | 7.4 dB | **2.4 dB** |
-| envelope off by | **0.8 dB** | 1.8 dB |
-| log-mel distance | 22.2 dB | **9.7 dB** |
+| waveform NCC (808 band) | **0.975** | 0.947 (margin 0.002: no single 808 stands out) |
+| harmonics 2–5 off by | **7.4 dB** | 7.8 dB |
+| harmonics 6–12 off by | 7.7 dB | **2.3 dB** |
+| envelope off by | **0.9 dB** | 2.0 dB |
+| log-mel distance | 22.3 dB | **9.7 dB** |
 
 The synth gets pitch, glide and envelope right; the library 808 has the right amount of grit. See [05](05-808-synthesis.md) for why a fit on waveform alone loses the grit entirely.
 
