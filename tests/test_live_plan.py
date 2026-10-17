@@ -61,3 +61,21 @@ def test_midi_files(tmp_path):
     assert len(ons) == 16
     tempo = next(m.tempo for m in mid.tracks[0] if m.type == "set_tempo")
     assert round(mido.tempo2bpm(tempo)) == 120
+
+
+def test_build_spec_for_build_tracks(tmp_path):
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    spec = {t["name"]: t for t in build_spec(plan)}
+    t808, drums = spec["808 (synth)"], spec["Drums (library)"]
+    # the one-shot is named after the song, so plans for different songs do not collide
+    assert t808["instrument"] == {"sample": plan["tracks"]["808"]["sample"], "warping": False}
+    assert t808["instrument"]["sample"].endswith("808 (synth).wav")
+    assert t808["settings"]["Transpose"] == 36.0 and t808["clips"][0]["notes"]
+    pad = drums["instrument"]["drum_rack"]["38"]
+    assert pad["sample"] == "snare.wav" and pad["settings"]["Transpose"] == -1.0
+    assert len(drums["clips"][0]["notes"]) == 16
+    ref = spec["REF drums"]
+    assert ref["kind"] == "audio" and ref["mute"] and ref["audio_clips"][0]["warping"] is False
+    assert not spec["REF other"]["mute"]

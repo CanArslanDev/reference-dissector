@@ -25,7 +25,7 @@ The work started from one question: *can an AI that cannot hear tell whether the
 | Snare (odd bars) | Not in the library: the best match is NCC 0.47. |
 | 808 | 126 notes, 107 of them on C1 (the 808 sits +33 cents sharp). A fitted synth voice reaches NCC 0.975 and a 0.9 dB envelope error, against the best of 865 library 808s at 0.947 and 2.0 dB. The library 808 is closer in the upper harmonics: 2.3 dB off, against 7.7 dB for the synth. |
 | Sections | A 1–24 · B 25–28 · C 29–32 · A 33–47 · D 48–51 · E 52–56 (breakdown) · A 57–71 · F 72–73 |
-| Live | `refdissect live-build` built it into an empty Live 12.4 set in 9.7 s: 6 Drum Rack pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators. |
+| Live | `refdissect live-build` builds it into an empty Live set with one `build_tracks` call: 6 Drum Rack pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators, in 4.9 s on Live 12.4.2 (9.7 s track by track before). |
 
 **Calibration**: 6 synthetic beats built from known library samples, mastered loud, passed through mp3 and Demucs.
 
@@ -59,7 +59,7 @@ song.mp3 ──Demucs──▶ stems ──▶ grid + tuning ──▶ drum temp
   - Identities are handed out from the strongest match down, so a hat that always plays along with a kick is not taken for the kick.
   - The verdict uses NCC, the margin over the next *different* sound, per-hit votes and a null test.
 - **808**: notes come from the bass stem, with the track's tuning removed before rounding. A sine + glide + envelope + tanh-drive voice is fitted by differential evolution. It is scored on waveform, harmonics and envelope, not on correlation alone.
-- **Live**: [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp)'s tools build the set (`browser_load`, `manage_clip`, `edit_clip_notes`, `set_track_mixer`, …). Our tracks are matched to the stems' levels and the stems are muted for A/B.
+- **Live**: [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp)'s `build_tracks` builds the whole set from one spec. Our tracks are matched to the stems' levels and the stems are muted for A/B.
 
 Each step is described in [docs/01-pipeline.md](docs/01-pipeline.md).
 

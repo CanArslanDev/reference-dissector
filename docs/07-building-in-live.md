@@ -33,15 +33,11 @@ Also set:
 |---|---|
 | look at the set | `get_session_overview` |
 | tempo, loop | `set_song_properties` |
-| tracks | `manage_track` (rename, create_midi, create_audio, set_color) |
-| Drum Rack | `add_device` |
-| samples onto pads and tracks | `browser_search`, `browser_load` (with `drum_pad`) |
-| Simpler settings | `lom_get` / `lom_set` / `param_set_display` on the device's parameters and `sample` |
-| clips and notes | `manage_clip` (create_arrangement_clip), `edit_clip_notes` (arrangement_clip_index), 200 notes per call |
-| stems | LOM `Track.create_audio_clip(path, beat)`, then `warping = False` on the clip |
-| mixer | `set_track_mixer` |
+| every track, device, setting, clip and note | `build_tracks` (ableton-live-mcp 2.1.2+), one call with the spec from `live.build_spec(plan)`: the 808 on a Simpler, the drums on a Drum Rack (a sample per pad), the stems on audio tracks |
 | locators | `place_locators` |
 | view | `select_in_live`, `transport` |
+
+Until 2026-10-17 the build called `manage_track`, `add_device`, `browser_load`, `edit_clip_notes` (200 notes per call), `set_track_mixer` and the LOM directly, track by track.
 
 Other ableton-live-mcp tools that fit this work:
 - **`separate_stems`**: Demucs, the same model.
@@ -80,3 +76,4 @@ Other ableton-live-mcp tools that fit this work:
 - **The first draft, by hand.** Before `live-build` existed, the PIRAMIT draft was built with a script calling the same tools: the same tracks plus a separate click track, with the snares chosen by hand. It built 8 tracks, 565 notes, 5 stems and 5 locators in 4.6 s.
 - **`refdissect live-build`, into an empty Live 12.4 set** (2026-10-11): 7 tracks, 6 Drum Rack pads with the identified samples and their transpositions, 549 drum notes, 126 808 notes, 5 stems and 8 locators in 9.7 s. That includes waiting for the browser to list the new 808 file.
   - Checked afterwards: every pad holds its sample, every note is in its clip (`read_clip_notes`), every stem is unwarped and starts at beat 0. That last point needed the start-marker fix above, found on this run.
+- **`live-build` on `build_tracks`, Live 12.4.2** (2026-10-17): the same plan re-run with the corrected tuning, seven tracks with no problem reported. Read back from Live: the 808's Simpler at +36 st and 0 dB with warping off, the pads at their transpositions (−3, −1, 0 st…), faders and stem mutes as planned, tempo 137, 8 locators. 4.9 s once the 808 file was listed (the first run waits for Live's browser to see it).

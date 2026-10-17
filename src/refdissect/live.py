@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from pathlib import Path
 
 import mido
@@ -210,12 +209,42 @@ def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
 
 # ── The build (needs ableton-live-mcp: pip install "reference-dissector[live]") ──
 
+def build_spec(plan: dict) -> list[dict]:
+    """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler,
+    the drums on a Drum Rack (one pad per sound), the reference stems as audio
+    tracks; Simplers at 0 dB with warping off and each sound's transposition,
+    faders from the plan's levels."""
+    levels = plan["levels"]
+    t808 = plan["tracks"]["808"]
+    spec = []
+    if "sample" in t808:
+        spec.append({"name": "808 (synth)",
+                     "instrument": {"sample": t808["sample"], "warping": False},
+                     "settings": {"Volume": "0.0 dB", "Transpose": float(t808["transpose"])},
+                     "volume_db": round(min(6.0, levels.get("808_track_db", -levels["headroom_db"])), 1),
+                     "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "808",
+                                "notes": t808["notes"]}] if t808["notes"] else []})
+    drums = plan["tracks"]["drums"]
+    spec.append({"name": "Drums (library)",
+                 "instrument": {"drum_rack": {
+                     str(note): {"sample": Path(pad["path"]).name, "warping": False,
+                                 "settings": {"Volume": "0.0 dB", "Transpose": float(pad["transpose"])}}
+                     for note, pad in drums["pads"].items()}},
+                 "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
+                 "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",
+                            "notes": drums["notes"]}] if drums["notes"] else []})
+    for stem, info in plan["stems"].items():
+        spec.append({"name": f"REF {stem}", "kind": "audio", "mute": bool(info["mute"]),
+                     "volume_db": round(min(6.0, levels["stems_track_db"]), 1),
+                     "audio_clips": [{"file": info["path"], "start": 0.0, "warping": False}]})
+    return spec
+
+
 async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, headroom: bool = True,
                 log=print) -> dict:
-    """Build the plan in the open Live set, through ableton-live-mcp's tools.
-    Refuses unless every track in the set is empty (nothing gets overwritten);
-    empty tracks are reused, the rest created."""
-    import asyncio
+    """Build the plan in the open Live set with ableton-live-mcp's build_tracks
+    (one call for every track, device, setting, clip and note). Refuses unless
+    every track in the set is empty; the set's empty tracks are left as they are."""
     import shutil
 
     try:
@@ -232,106 +261,27 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
             raise RuntimeError(f"{tool_name}: {text}")
         return text
 
-    def lom(command, **params):
-        return et._get_connection().send_command(command, params)
-
-    async def browser_id(name, wait=40):
-        for _ in range(wait):
-            found = json.loads(await call("browser_search", query=os.path.splitext(name)[0], category="all",
-                                          max_results=10))
-            exact = [r for r in found["results"] if r["name"] == name]
-            if exact:
-                return exact[0]["id"]
-            await asyncio.sleep(1.0)
-        raise RuntimeError(f"Live's browser does not list {name}")
-
-    def set_simpler(path, semitones):
-        names = [p.get("name") for p in lom("lom_get", path=f"{path} parameters", properties=["name"])["items"]]
-        result = {}
-        if "Volume" in names:
-            i = names.index("Volume")
-            lom("param_set_display", path=f"{path} parameters {i}", value="0.0 dB")
-            result["Volume"] = lom("lom_get", path=f"{path} parameters {i}", properties=["$display"])["$display"]
-        if "Transpose" in names:
-            i = names.index("Transpose")
-            lom("lom_set", path=f"{path} parameters {i}", property="value", value=float(semitones))
-            result["Transpose"] = lom("lom_get", path=f"{path} parameters {i}", properties=["$display"])["$display"]
-        if lom("lom_get", path=f"{path} sample", properties=["warping"]).get("warping"):
-            lom("lom_set", path=f"{path} sample", property="warping", value=False)
-        return result
-
     overview = json.loads(await call("get_session_overview"))
     busy = [t["name"] for t in overview["tracks"]
             if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
     if busy:
         raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
-    free = {"midi": [t["index"] for t in overview["tracks"] if t["type"] == "midi"],
-            "audio": [t["index"] for t in overview["tracks"] if t["type"] == "audio"]}
-    count = len(overview["tracks"])
-    wanted = [("808", "midi", "808 (synth)"), ("drums", "midi", "Drums (library)")]
-    wanted += [(f"stem:{s}", "audio", f"REF {s}") for s in plan["stems"]]
-    index: dict[str, int] = {}
-    for key, kind, name in wanted:
-        if free[kind]:
-            index[key] = free[kind].pop(0)
-            await call("manage_track", action="rename", track=index[key], name=name)
-        else:
-            await call("manage_track", action=f"create_{kind}", name=name)
-            index[key] = count
-            count += 1
     await call("set_song_properties", tempo=plan["tempo"], loop=False)
-    report: dict = {"tracks": {k: v for k, v in index.items()}}
-    # 808: the one-shot through the User Library and the browser
     t808 = plan["tracks"]["808"]
-    if "sample_path" in t808:
+    if "sample_path" in t808:  # Live's browser lists it a few seconds after it lands in the User Library
         target = Path(user_library).expanduser() / GENERATED / t808["sample"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(t808["sample_path"], target)
-        await call("browser_load", track=index["808"], item=await browser_id(t808["sample"]))
-        report["808"] = set_simpler(f"live_set tracks {index['808']} devices 0", t808["transpose"])
-    # drums: a Drum Rack, one pad per sound
-    await call("add_device", track=index["drums"], device="Drum Rack")
-    report["pads"] = {}
-    for note, pad in plan["tracks"]["drums"]["pads"].items():
-        await call("browser_load", track=index["drums"], item=await browser_id(Path(pad["path"]).name),
-                   drum_pad=int(note))
-        report["pads"][note] = set_simpler(f"live_set tracks {index['drums']} devices 0 drum_pads {note} "
-                                           f"chains 0 devices 0", pad["transpose"])
-    for key, name in (("808", "808"), ("drums", "Drums")):
-        notes = plan["tracks"][key]["notes"]
-        if not notes:
-            continue
-        await call("manage_clip", action="create_arrangement_clip", track=index[key], start_time=0.0,
-                   length=plan["length_beats"], name=name)
-        for a in range(0, len(notes), 200):
-            await call("edit_clip_notes", track=index[key], mode="add", notes=notes[a:a + 200],
-                       arrangement_clip_index=0)
-    report["stems"] = {}
-    for stem, info in plan["stems"].items():
-        tp = f"live_set tracks {index['stem:' + stem]}"
-        clip = f"{tp} arrangement_clips 0"
-        lom("lom_call", path=tp, method="create_audio_clip", args=[info["path"], 0.0])
-        lom("lom_set", path=clip, property="warping", value=False)
-        # Live's warp analysis moves the clip's start to the first transient
-        # (21-30 ms on these stems, 3.6 s on one with a quiet intro) and the
-        # start stays there with warping off: back to the file's start, or the
-        # stem plays early against the notes. loop_start carries start_marker.
-        lom("lom_set", path=clip, property="loop_start", value=0.0)
-        if lom("lom_get", path=clip, properties=["start_marker"]).get("start_marker"):
-            lom("lom_set", path=clip, property="start_marker", value=0.0)
-        report["stems"][stem] = lom("lom_get", path=clip, properties=["start_marker", "end_time"])
-    levels = plan["levels"]
-    faders = {index["808"]: levels.get("808_track_db", -levels["headroom_db"]),
-              index["drums"]: levels.get("drums_track_db", -levels["headroom_db"])}
-    for stem in plan["stems"]:
-        faders[index["stem:" + stem]] = levels["stems_track_db"]
-    for track, db in faders.items():
-        mute = any(index.get("stem:" + s) == track and info["mute"] for s, info in plan["stems"].items())
-        await call("set_track_mixer", track=track, volume_db=round(min(6.0, db), 1), mute=mute)
-    report["faders"] = faders
+    built = json.loads(await call("build_tracks", tracks=build_spec(plan)))
+    report: dict = {"tracks": built["tracks"]}
+    problems = {r["track"]: r["problems"] for r in built["tracks"] if r["problems"]}
+    if problems:
+        report["problems"] = problems
     if plan["locators"]:
         report["locators"] = et.place_locators([(n, float(round(b))) for n, b in plan["locators"]])
-    await call("select_in_live", view="arrangement", track=index["808"])
+    overview = json.loads(await call("get_session_overview"))
+    first = next((t["index"] for t in overview["tracks"] if t["name"] == "808 (synth)"), 0)
+    await call("select_in_live", view="arrangement", track=first)
     await call("transport", action="jump_to", time=0.0)
     log(json.dumps(report, ensure_ascii=False, default=str))
     return report
