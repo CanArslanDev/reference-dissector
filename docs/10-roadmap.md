@@ -32,4 +32,9 @@ In rough order of value. Each item names how it will be measured: the calibratio
    - Expose `analyze` / `match` / `plan` as jobs in ableton-live-mcp (`analyze_reference`, `build_from_blueprint`), so an AI client can run "make a beat like this song" end to end.
    - Run the packaged `live-build` against Live in CI-like checks.
 
+9. **Style beats** ([11](11-style-beat-lessons.md)).
+   - A sketch step between `plan` and the build: 8-bar candidates per section, chosen by ear.
+   - Wire `groove`, `space` and `mixsim` into `refdissect` commands (today they are a library).
+   - **Measured by:** the listener's picks, and ducking and balance against the reference.
+
 **Not planned:** publishing transcriptions or audio of songs, for the reasons in [09](09-data-and-copyright.md).

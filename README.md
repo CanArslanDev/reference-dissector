@@ -107,6 +107,7 @@ Every step writes JSON next to its inputs, so you can read what it decided befor
 | [08 – Pitfalls](docs/08-pitfalls.md) | Every mistake made here and how it showed up |
 | [09 – Data and copyright](docs/09-data-and-copyright.md) | What is published, what stays local, and why |
 | [10 – Roadmap](docs/10-roadmap.md) | What comes next |
+| [11 – A new beat in a song's style](docs/11-style-beat-lessons.md) | Two rejected beats: the groove, effect and same-pipeline checks they led to, and what each step cost |
 
 Türkçe özet: [README.tr.md](README.tr.md)
 
@@ -123,6 +124,13 @@ src/refdissect/
   describe.py    producer-facing descriptors: pitch/cents, glide, decay, harmonics, brightness
   synth808.py    the 808 voice, its fit, one-shots
   structure.py   per-bar activity and sections
+  groove.py      ducking under the kick, drum-role balance, one-shots cut by their notes
+  space.py       width per octave, reverb tails, the band-pass between two sections
+  rhythm.py      a layer's rhythm from onsets (48 points per bar)
+  basicpitch.py  posteriorgram frames by time
+  loudness.py    BS.1770 integrated loudness
+  listening.py   A/B files: reference, beep, candidate at equal loudness
+  mixsim.py      gains decided on recorded stems instead of re-recording
   live.py        plan, MIDI files, the build through ableton-live-mcp
   calibrate.py   synthetic beats and their scoring
   pipeline.py    the steps, each writing JSON
