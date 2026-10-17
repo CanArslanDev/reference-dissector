@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import librosa
 import numpy as np
+from scipy.ndimage import uniform_filter1d
 from scipy.signal import hilbert
 
 from .audio import SR, samples
@@ -21,7 +22,9 @@ def envelope_db(x: np.ndarray, window_ms: float) -> np.ndarray:
     period or more (25 ms for an 808), or the envelope follows the wave."""
     env = np.abs(hilbert(x))
     w = max(1, samples(window_ms))
-    env = np.sqrt(np.convolve(env ** 2, np.ones(w) / w, mode="same"))
+    # the moving mean of np.convolve(..., mode="same") in O(n) (the 808 fit calls
+    # this ~24,000 times; the convolution was half of each call)
+    env = np.sqrt(np.maximum(uniform_filter1d(env ** 2, w, mode="constant", cval=0.0), 0))
     return 20 * np.log10(env / (env.max() or 1.0) + 1e-9)
 
 
@@ -36,6 +39,9 @@ def note_name(hz: float) -> str:
     return f"{librosa.midi_to_note(round(midi), unicode=False)} {100 * (midi - round(midi)):+.0f} cents"
 
 
+_FREQS = np.fft.rfftfreq(1 << 16, 1 / SR)
+
+
 def harmonics(x: np.ndarray, f1: float, upto: int = 12, start_s: float = 0.15,
               end_s: float = 0.6) -> np.ndarray:
     """Levels of harmonics 2..upto relative to the fundamental (dB, floor -60),
@@ -43,8 +49,10 @@ def harmonics(x: np.ndarray, f1: float, upto: int = 12, start_s: float = 0.15,
     seg = x[int(start_s * SR):int(end_s * SR)]
     seg = seg * np.hanning(len(seg))
     p = np.abs(np.fft.rfft(seg, 1 << 16)) ** 2
-    f = np.fft.rfftfreq(1 << 16, 1 / SR)
-    level = [p[(f > h * f1 * 0.97) & (f < h * f1 * 1.03)].max() for h in range(1, upto + 1)]
+    # each harmonic's ±3 % band as a slice of the sorted frequency axis
+    lo = np.searchsorted(_FREQS, np.arange(1, upto + 1) * f1 * 0.97, side="right")
+    hi = np.searchsorted(_FREQS, np.arange(1, upto + 1) * f1 * 1.03, side="left")
+    level = [p[a:b].max() if b > a else 0.0 for a, b in zip(lo, hi)]
     return np.maximum(10 * np.log10(np.array(level[1:]) / (level[0] or 1e-12) + 1e-12), -60)
 
 

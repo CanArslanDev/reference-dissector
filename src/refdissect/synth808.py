@@ -5,7 +5,7 @@
     y(t)   = tanh(drive * (amp(t) * sin(phase + 2*pi*integral f) + asym)) - tanh(drive * asym)
 
 Everything a producer would set on Operator/Simpler plus Saturator. The fit
-(differential evolution, about one to three minutes) scores a candidate the
+(differential evolution, about half a minute to a minute and a half) scores a candidate the
 way the comparison does: waveform match in the 808 band, plus harmonics
 (the grit) and the loudness envelope. Scored on the waveform alone, the fit
 gets the highest correlation and loses the distortion entirely (harmonics
@@ -90,13 +90,21 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
     h_ref = harmonics(reference, f1)
     e_ref = np.maximum(envelope_db(reference, 25), -40)
     n = len(reference)
+    # ncc(target, ·) with the target's spectrum and norm computed once
+    size = 1 << int(np.ceil(np.log2(2 * len(target))))
+    spectrum, t_norm, lag = np.fft.rfft(target, size), float(np.linalg.norm(target)) or 1.0, samples(8)
+
+    def wave_match(c):
+        corr = np.fft.irfft(spectrum * np.conj(np.fft.rfft(c, size)), size)
+        v = np.r_[corr[: lag + 1], corr[-lag:]] / (t_norm * (float(np.linalg.norm(c)) or 1.0))
+        return float(np.max(np.abs(v)))
 
     def loss(v):
         p = Params.of(v)
         if p.f_start_hz < p.f_end_hz:
             return 2.0
         y = laid_out(p, n)
-        wave = 1 - abs(ncc(target, band(y, "808"), samples(8))[0])
+        wave = 1 - wave_match(band(y, "808"))
         if waveform_only:
             return wave
         harm = np.mean(np.abs(harmonics(y, p.f_end_hz) - h_ref)) / 20
