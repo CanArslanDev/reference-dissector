@@ -19,7 +19,7 @@ import numpy as np
 
 from . import describe as describe_mod
 from .audio import SR, band, read, samples, write
-from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram
+from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
 from .grid import Grid, fit_grid, offsets, tuning
 from .hits import group, template
 from .library import Library, null_test, per_hit_votes, verdict
@@ -72,7 +72,9 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
         log(f"  {tp.name:8s} ({tp.band} band, looks like a {tp.role}) {tp.hits:3d} hits in the template, "
             f"{len(events[tp.name]):3d} detected")
     notes = notes_808(bass, consensus)
-    log(f"808: {len(notes)} notes")
+    offset_808, agreement_808 = pitch_offset([n["midi_float"] for n in notes])
+    tuning_808 = offset_808 if agreement_808 >= 0.5 else consensus
+    log(f"808: {len(notes)} notes, tuned {100 * offset_808:+.0f} cents (agreement {agreement_808:.2f})")
     n_bars = int(np.ceil((duration - grid.phase) / grid.bar))
     stems = {s: read(stems_dir / f"{s}.wav") for s in ("other", "piano", "vocals")
              if (stems_dir / f"{s}.wav").is_file()}
@@ -82,7 +84,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     analysis = {"source": {"stems": str(stems_dir), "duration_s": round(duration, 3)},
                 "grid": {**grid.to_dict(), **fit_info, "offsets_by_beat": offsets(drums, grid)},
                 "tuning": {"per_stem": tunings, "consensus": consensus,
-                           "a4_hz": round(440 * 2 ** (consensus / 12), 1)},
+                           "a4_hz": round(440 * 2 ** (consensus / 12), 1),
+                           "808": tuning_808, "808_agreement": agreement_808},
                 "templates": out_templates, "events": events, "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
@@ -172,7 +175,7 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
             log=print) -> dict:
     """Fit the 808 on its isolated root notes (drums + bass, so the attack is
-    in) and write a one-shot at the track's tuning."""
+    in) and write a one-shot at the 808's own tuning."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])
@@ -185,7 +188,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
               min_db=-90)[0]
     ref, used = template(mix, g, 600)
     np.save(work / "templates" / "808.npy", ref)
-    f1 = float(librosa.midi_to_hz(root + analysis["tuning"]["consensus"]))
+    # the 808's own tuning (analyses written before it was measured: the track's)
+    f1 = float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
     log(f"808: {used} isolated notes at MIDI {root}, {f1:.2f} Hz; fitting (1-3 min)")
     params, info = fit(ref, f1)
     shot = one_shot(params, f1)

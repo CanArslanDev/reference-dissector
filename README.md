@@ -19,7 +19,7 @@ The work started from one question: *can an AI that cannot hear tell whether the
 | What | Found |
 |---|---|
 | Tempo grid | **137.00 BPM**, first beat 31.9 ms in. Every bar's onsets sit within a few ms of it (p90 4.6–11.8 ms). The 136.36 BPM a beat tracker gave drifts by up to 49 ms. |
-| Tuning | **+0.28 semitones** (bass +0.23, other +0.27, piano +0.28, vocals +0.32): A4 ≈ 447 Hz. The drums are not detuned. |
+| Tuning | The melodic stems at **A440** (other −2, piano +1.5 cents). The **808 alone sits at +33 cents**: its sample is detuned, not the track. (An earlier version read +0.28 semitones for everything; that was `librosa.estimate_tuning`'s error, see [01](docs/01-pipeline.md#tuning-gridtuning).) |
 | Hi-hat | **The same sample** as a hat in the local library. NCC 0.981; it wins 187 of 189 hits; null-test residual −14.3 dB (next best −7.4 dB). |
 | Snare (even bars) | **The same sample**, pitched **−1 semitone**. NCC 0.953; it wins 27 of 27 hits; residual −10.4 dB (next best −6.4 dB). |
 | Snare (odd bars) | Not in the library: the best match is NCC 0.47. |

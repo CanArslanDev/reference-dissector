@@ -114,7 +114,46 @@ def offsets(x: np.ndarray, grid: Grid, role: str = "snare", tolerance: float = 0
     return out
 
 
-def tuning(x: np.ndarray, seconds: float = 60.0) -> float:
-    """Deviation from A440 in semitones (-0.5..0.5) of the pitched content."""
-    x = x[: int(seconds * SR)]
-    return round(float(librosa.estimate_tuning(y=x, sr=SR, n_fft=8192, bins_per_octave=60)), 2)
+def tuning(x: np.ndarray, seconds: float = 60.0, fmin: float = 25.0, fmax: float = 2000.0) -> float:
+    """Deviation from A440 in semitones (-0.5..0.5) of the pitched content.
+
+    From stable spectral peaks: each frame's peaks (16384-point FFT, parabolic
+    interpolation) that stay within ~5 cents over five frames, their offsets from
+    equal temperament averaged on the circle (one semitone = one turn) and
+    weighted by level. librosa.estimate_tuning was off by up to 60 cents on
+    synthetic tones (it histograms every bin, sidelobes and noise included);
+    this stays within 1 cent of them.
+    """
+    import scipy.signal as ss
+
+    x = np.asarray(x, dtype=np.float64)[: int(seconds * SR)]
+    n, hop = 16384, 2048
+    if len(x) < n:
+        return 0.0
+    f, _t, Z = ss.stft(x, fs=SR, nperseg=n, noverlap=n - hop, window="hann", boundary=None)
+    L = 20 * np.log10(np.abs(Z) + 1e-12)
+    frames = []
+    for col in L.T:
+        top = col.max()
+        cur = {}
+        if top > -100:
+            pk, _ = ss.find_peaks(col, height=top - 30, distance=3)
+            pk = pk[(pk > 0) & (pk < len(col) - 1) & (f[pk] > fmin) & (f[pk] < fmax)]
+            a, b, c = col[pk - 1], col[pk], col[pk + 1]
+            d = 0.5 * (a - c) / np.where(a - 2 * b + c == 0, -1e-12, a - 2 * b + c)
+            cents = 1200 * np.log2((pk + d) * SR / n / 440.0)
+            for ct, lv in zip(cents, b):
+                cur[int(round(ct / 5))] = (float(ct), float(lv))
+        frames.append(cur)
+    keys = [set(fr) for fr in frames]
+    num, den = 0j, 0.0
+    for j in range(2, len(frames) - 2):
+        for key, (ct, lv) in frames[j].items():
+            near = {key - 1, key, key + 1}
+            if all(near & keys[jj] for jj in (j - 2, j - 1, j + 1, j + 2)):
+                w = 10 ** (lv / 20)
+                num += w * np.exp(2j * np.pi * ct / 100)
+                den += w
+    if den == 0:
+        return 0.0
+    return round(float(np.angle(num / den) / (2 * np.pi)), 3)

@@ -23,20 +23,23 @@ A Turkish trap track (album *VERITAS II*), 2:06.
 
 **Lesson.** Fit the grid; then check that the *last* bars still land on it.
 
-## Tuning: +0.28 semitones (A4 ≈ 447 Hz)
+## Tuning: the track at A440, the 808 at +33 cents
 
-| stem | deviation from A440 |
-|---|---|
-| bass | +0.23 |
-| other | +0.27 |
-| piano | +0.28 |
-| vocals | +0.32 |
+| stem | deviation from A440 (stable spectral peaks) | first version (`librosa.estimate_tuning`) |
+|---|---|---|
+| bass | +11 cents | +23 |
+| other | −2 | +27 |
+| piano | +1.5 | +28 |
+| vocals | −38 | +32 |
+| **808 notes** (circular mean of 126 pitches) | **+33** (agreement 0.64) | – |
 
-**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. With the offset removed before rounding, 105 of the 126 808 notes are C1.
+**Correction.** This section first said the whole track sat at +0.28 semitones (A4 ≈ 447 Hz). That came from `librosa.estimate_tuning`, which is off by up to 60 cents on synthetic tones. Measured with stable spectral peaks (within 1 cent on synthetic tones) and checked with pyin (+2 to +3 cents on piano and other), the melodic stems are at A440. Only the 808 is detuned: its sample sits about a third of a semitone sharp. The bass stem's +11 is the 808 mixed with cleaner bass notes.
 
-**What it is not.** It could have been a whole track sped up by its tuning: 1.5 % faster would also turn 135 BPM into 137. Matching every drum sample shifted by +0.26 semitones made the matches *worse*: the snare fell from 0.86 to 0.25 and the hat from 0.90 to 0.63. The drums are at their own pitch. The melodic parts, and the 808 tuned to them, are not.
+**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. With the 808's own offset removed before rounding, 105 of the 126 808 notes are C1.
 
-**In Live.** The 808 one-shot is rendered at C1 + 28 cents (33.24 Hz). Melodic parts will need the same offset: a detune on each instrument, or a tuning file with A4 = 447 Hz.
+**What it is not.** It could have been a whole track sped up: 1.5 % faster would also turn 135 BPM into 137. Matching every drum sample shifted by +0.26 semitones made the matches *worse*: the snare fell from 0.86 to 0.25 and the hat from 0.90 to 0.63. The drums are at their own pitch, and so are the melodic parts.
+
+**In Live.** The 808 one-shot is rendered at the 808's pitch (C1 + 28 cents, 33.24 Hz in the first build; +33 cents measured on its notes). Melodic parts need no offset.
 
 ## Drums
 

@@ -14,7 +14,7 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 
 **PIRAMIT:**
 - **Tempo:** 137,00 BPM. Beat tracker'ın 136,36'sı şarkı sonunda 49 ms kayıyor.
-- **Akort:** +0,28 yarım ton (A4 ≈ 447 Hz). Prototipteki 808'in "C mi C# mı" karışıklığı buradan geliyor; davullar ise akortsuz.
+- **Akort:** melodik kanallar A440'ta (other −2, piano +1,5 cent). Sadece **808 +33 cent**: akortsuz olan şarkı değil, 808 sample'ı. Prototipteki 808'in "C mi C# mı" karışıklığı buradan geliyor. (Önceki sürüm her şeyi +0,28 yarım ton okuyordu; bu `librosa.estimate_tuning`'in hatasıydı.)
 - **Hi-hat:** Kütüphanedeki bir sample'ın kendisi.
   - Benzerlik (NCC) 0,981.
   - 189 vuruşun 187'sinde en iyi eşleşme o.

@@ -64,7 +64,7 @@ The fitted voice (drums + bass reference, 199 s fit) against the best of 865 lib
 
 ## In Live
 
-The one-shot is rendered at the track's pitch: C1 + 28 cents = 33.24 Hz, 3 s long, −1 dBFS. It goes into Simpler:
+The one-shot is rendered at the 808's own pitch (at first the track's +28 cents, 33.24 Hz; measured on the 808's notes it is +33 cents), 3 s long, −1 dBFS. It goes into Simpler:
 - **Transpose = 60 − 24 = +36.** MIDI note 24 then plays it at its own pitch, so the transcribed notes keep their real numbers.
 - **Warping off.** Pitch is changed by speed, as an 808 should be.
 - **Volume set to 0 dB.** Simpler loads at −12 dB.

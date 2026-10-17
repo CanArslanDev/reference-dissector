@@ -33,9 +33,11 @@ Produced music sits on a fixed grid, so the grid is fitted rather than tracked:
 
 ### Tuning (`grid.tuning`)
 
-`librosa.estimate_tuning` on each pitched stem (bass, other, piano, vocals, guitar), over 60 s, with 60 bins per octave. The consensus is the median.
+Stable spectral peaks on each pitched stem (bass, other, piano, vocals, guitar), over 60 s: every frame's peaks (16384-point FFT, parabolic interpolation) that stay within ~5 cents for five frames, their offsets from equal temperament averaged on the circle and weighted by level. The consensus is the median.
 
-A track tuned off A440 makes notes land between semitones. PIRAMIT sits at +0.28: its 808 measured "C or C#" note by note until the offset was removed before rounding.
+The first version used `librosa.estimate_tuning`. On synthetic tones it was off by up to 60 cents (it histograms every bin, sidelobes and noise included), and it put all of PIRAMIT at +0.28 semitones. The peak method stays within 1 cent of synthetic tones and puts PIRAMIT's melodic stems at A440 (other −2, piano +1.5 cents; pyin agrees, +2 to +3).
+
+The 808 has a tuning of its own (`detect.pitch_offset`, the circular mean of its notes' pitches): PIRAMIT's notes sit at +33 cents (agreement 0.64). An 808 sample is often detuned by itself. Its notes are rounded with that offset, and `fit-808` renders the one-shot at it. Without removing it, the notes measured "C or C#" one by one.
 
 ### Drum templates (`detect.discover`)
 

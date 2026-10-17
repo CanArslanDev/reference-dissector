@@ -9,7 +9,8 @@
 
 ## Pitch
 
-- **A track not at A440.** +0.28 semitones made every 808 note "C or C#". Estimate the tuning first and remove it before rounding.
+- **An 808 not at A440.** PIRAMIT's 808 sits at +33 cents while the rest of the track is at A440; it made every 808 note "C or C#". Measure the 808's own offset and remove it before rounding.
+- **`librosa.estimate_tuning` is not reliable.** Up to 60 cents off on synthetic tones; it read PIRAMIT as +0.28 semitones throughout. Check any tuning method on tones of known pitch first.
 - **Sped up, or tuned?** Same pitch shift, different cause. Test it: shift every drum sample by the offset and see whether matches improve. On PIRAMIT they collapsed (0.86 → 0.25), so the drums were not shifted.
 - **Transposed samples decorrelate completely.** −1 semitone: 0.95 at −1, 0.15 at 0, 0.13 at ±0.25. Never assume 0, and do not shortlist candidates by their score at 0.
 

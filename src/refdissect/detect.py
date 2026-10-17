@@ -200,10 +200,27 @@ def peak_score_histogram(drums: np.ndarray, tp: Template) -> list[int]:
     return np.histogram(props["peak_heights"], bins=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])[0].tolist()
 
 
-def notes_808(bass: np.ndarray, tuning: float, fade_db: float = -35.0) -> list[dict]:
+def pitch_offset(midi: list[float] | np.ndarray) -> tuple[float, float]:
+    """Common offset from equal temperament (semitones, -0.5..0.5) of pitches,
+    averaged on the circle, and how much they agree on it (0..1)."""
+    m = np.asarray(midi, dtype=float)
+    if not len(m):
+        return 0.0, 0.0
+    z = np.mean(np.exp(2j * np.pi * (m - np.round(m))))
+    return round(float(np.angle(z) / (2 * np.pi)), 3), round(float(abs(z)), 3)
+
+
+def notes_808(bass: np.ndarray, tuning: float, fade_db: float = -35.0, own_tuning: bool = True,
+              min_agreement: float = 0.5) -> list[dict]:
     """808 notes from the bass stem: onset, end (where it falls fade_db below
-    its peak, or the next note), pitch rounded after removing the track's
-    tuning offset, and the pitch where it ends (a slide when they differ)."""
+    its peak, or the next note), pitch rounded after removing a tuning offset,
+    and the pitch where it ends (a slide when they differ).
+
+    The offset is the 808's own when its notes agree on one (own_tuning, at
+    least min_agreement): an 808 sample is often detuned on its own. On
+    PIRAMIT the melodic stems sit at A440 (-1..+3 cents by spectral peaks and by
+    pyin) while its 808 notes sit at +33 cents. Otherwise `tuning` (the
+    track's) is used."""
     lo = band(bass, "808")
     on = onsets(lo, delta=0.05)
     w = samples(25)
@@ -225,9 +242,13 @@ def notes_808(bass: np.ndarray, tuning: float, fade_db: float = -35.0) -> list[d
         below = np.where(seg[samples(100):] < peak * 10 ** (fade_db / 20))[0]
         end = s + samples(100) + int(below[0]) if len(below) else nxt
         notes.append({"t": round(s / SR, 4), "end": round(min(end, nxt) / SR, 4),
-                      "pitch": int(round(midi - tuning)), "midi_float": round(midi, 2),
+                      "midi_float": round(midi, 2),
                       "slide": round(float(librosa.hz_to_midi(np.median(tail))) - midi, 1),
                       "peak": round(peak, 5)})
+    offset, agreement = pitch_offset([n["midi_float"] for n in notes])
+    use = offset if own_tuning and agreement >= min_agreement else tuning
+    for n in notes:
+        n["pitch"] = int(round(n["midi_float"] - use))
     return notes
 
 

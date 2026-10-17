@@ -31,3 +31,13 @@ def test_sections_from_activity():
     assert [(s["start_bar"], s["end_bar"]) for s in secs] == [(1, 8), (9, 12), (13, 16)]
     assert secs[0]["name"] == secs[2]["name"] != secs[1]["name"]
     assert np.all([("808" in s["plays"]) for s in secs])
+
+
+def test_pitch_offset_is_a_circular_mean():
+    from refdissect.detect import pitch_offset
+    off, r = pitch_offset([24.33, 24.31, 31.35, 36.32])
+    assert abs(off - 0.33) < 0.01 and r > 0.99
+    # +0.45 and -0.45 sit 10 cents apart across the semitone boundary
+    off, _ = pitch_offset([24.45, 25.55])
+    assert abs(abs(off) - 0.5) < 0.06
+    assert pitch_offset([]) == (0.0, 0.0)

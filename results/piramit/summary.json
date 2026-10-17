@@ -31,13 +31,16 @@
  },
  "tuning": {
   "per_stem": {
-   "bass": 0.23,
-   "other": 0.27,
-   "piano": 0.28,
-   "vocals": 0.32
+   "bass": 0.108,
+   "other": -0.02,
+   "piano": 0.015,
+   "vocals": -0.385
   },
-  "consensus": 0.28,
-  "a4_hz": 447.2
+  "consensus": 0.0,
+  "a4_hz": 440.0,
+  "808": 0.329,
+  "808_agreement": 0.64,
+  "note": "remeasured 2026-10-17 with grid.tuning's stable-peak method; the first run's librosa.estimate_tuning read +0.23..+0.32 for every stem"
  },
  "duration_s": 126.168,
  "sections": [
