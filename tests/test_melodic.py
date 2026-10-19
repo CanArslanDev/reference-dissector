@@ -32,9 +32,15 @@ def render(notes: list[tuple[float, int, float]], seconds: float) -> np.ndarray:
 
 
 def test_floor_above_808():
-    notes = [{"pitch": p} for p in (28, 28, 31, 31, 39)]  # 39 heard once: a pitch-tracking slip
-    hz, top = M.floor_above_808(notes)
-    assert top == 31 and hz == pytest.approx(440 * 2 ** ((32 - 69) / 12), abs=0.01)
+    """The top of the range the 808 sounds in 95 % of its time: two octave-up
+    slips (pitch-tracking errors, 0.2 s) leave it where it was, and its
+    floor a semitone above. The highest pitch heard twice moved to 45."""
+    pitches = [28, 28, 31, 31, 33, 28, 31, 33] * 3
+    line = [{"t": 2.0 * k, "end": 2.0 * k + 1.5, "pitch": p} for k, p in enumerate(pitches)]
+    slips = [{"t": 3.0, "end": 3.2, "pitch": 45}, {"t": 9.0, "end": 9.2, "pitch": 45}]
+    hz, top = M.floor_above_808(line + slips)
+    assert top == 33 and hz == pytest.approx(440 * 2 ** ((34 - 69) / 12), abs=0.01)
+    assert M.floor_above_808(line) == (hz, top)
     assert M.floor_above_808([]) == (None, None)
 
 
@@ -307,11 +313,12 @@ def test_harte_labels():
 
 # ── The step and the plan, with the worker faked ─────────────────────────────
 
-def fake_transcribe(audio, out_dir, settings):
+def fake_transcribe(audio, out_dir, presets, files=None):
     """What the worker writes, for one bar of a C major arpeggio per stem."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    result = {"stems": {}, "model": "basic-pitch 0.4.0", "backend": "FAKE", "python": "3.11", "settings": settings}
+    result = {"stems": {}, "model": "basic-pitch 0.4.0", "backend": "FAKE", "python": "3.11",
+              "settings": {"presets": presets, "files": files or {}}}
     for path in audio:
         name = Path(path).stem
         notes = [{"start_s": 0.5 + 0.5 * k, "end_s": 0.9 + 0.5 * k, "start_frame": 0, "end_frame": 1, "midi": m,
@@ -328,7 +335,7 @@ def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
     stems = tmp_path / "stems"
     stems.mkdir()
     x = render([(0.5, 60, 0.3), (1.0, 64, 0.3), (1.5, 67, 0.3)], 3.0)
-    for name in ("other", "piano"):
+    for name in ("other", "piano", "vocals"):
         sf.write(stems / f"{name}.wav", x, SR)
     for name in ("drums", "bass"):
         sf.write(stems / f"{name}.wav", np.zeros_like(x), SR)
@@ -338,8 +345,10 @@ def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
     (tmp_path / "analysis.json").write_text(json.dumps(analysis))
     monkeypatch.setattr(basicpitch, "transcribe", fake_transcribe)
     out = pipeline.melodic(tmp_path, log=lambda *a: None)
-    assert out["source"]["settings"]["melodic"]["min_hz"] == pytest.approx(69.3, abs=0.01)  # above the 808's C2
-    assert set(out["stems"]) == {"other", "piano"} and out["stems"]["other"]["tuning_cents"] == -3
+    files = out["source"]["settings"]["files"]
+    assert files["other"]["min_hz"] == pytest.approx(69.3, abs=0.01)  # above the 808's C2
+    assert files["vocals"]["min_hz"] is None  # no 808 floor on a vocal
+    assert set(out["stems"]) == {"other", "piano", "vocals"} and out["stems"]["other"]["tuning_cents"] == -3
     assert [n["start_time"] for n in out["stems"]["other"]["notes"]] == [1.0, 2.0, 3.0]
     assert [c["label"] for c in out["chords"]["segments"]] == ["C:maj"]  # the 808 (C2) is the bass
     plan = pipeline.plan(tmp_path, log=lambda *a: None)

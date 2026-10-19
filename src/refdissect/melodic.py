@@ -5,8 +5,9 @@ and two presets are decoded from that run (basicpitch.PRESETS): `melodic` for
 the notes that go to Live, `chord` (melodia on) kept for the pads. Per stem:
 
 - pitch: Basic Pitch's semitone; the stem's tuning (analysis.json) as cents.
-- minimum frequency: just above the 808's highest note, so the 808 bleeding
-  into a melodic stem is not transcribed (`floor_above_808`).
+- minimum frequency: just above the 808's usual range, so the 808 bleeding
+  into other, piano and guitar is not transcribed (`floor_above_808`,
+  FLOOR_STEMS); a vocal keeps its low notes.
 - velocity: from the level in the note's own CQT bin (`note_levels`), not
   Basic Pitch's amplitude, which is the mean frame posterior, a confidence.
   Rank correlation with the true velocity on synthetic renders: plucks 0.75
@@ -55,6 +56,10 @@ from .live import velocities
 
 MELODIC_STEMS = ("other", "piano", "guitar", "vocals")
 CHORD_STEMS = ("other", "piano", "guitar")  # a rap vocal names no chord
+# the stems whose lowest notes are cut at the 808's range (floor_above_808):
+# the 808 bleeds into them, not into a vocal, whose own low notes it would
+# cut (HAYIR DEMELIYDIM: 458 of 768 vocal notes under the first rule's floor)
+FLOOR_STEMS = ("other", "piano", "guitar")
 
 # Harte qualities (add9 is maj(9), 6 is maj6), intervals from the root
 QUALITIES = {"maj": (0, 4, 7), "min": (0, 3, 7), "7": (0, 4, 7, 10), "maj7": (0, 4, 7, 11),
@@ -77,15 +82,28 @@ LOW_BONUS = 0.02
 QUALITY_PRIOR = {"maj6": -0.01, "min6": -0.01}
 
 
-def floor_above_808(notes_808: list[dict], at_least: int = 2) -> tuple[float | None, int | None]:
-    """The minimum frequency for the melodic stems: the semitone above the
-    808's highest note heard at least `at_least` times (one pitch-tracking
-    slip does not move it), and that note. (None, None) without an 808."""
-    counts = Counter(n["pitch"] for n in notes_808)
-    held = [p for p, c in counts.items() if c >= at_least]
-    if not held:
+def floor_above_808(notes_808: list[dict], share: float = 0.95) -> tuple[float | None, int | None]:
+    """The minimum frequency for the stems the 808 bleeds into: the semitone
+    above the top of its usual range, and that top, the lowest pitch at or
+    under which the 808 sounds `share` of its time (note lengths, t to end).
+    (None, None) without an 808.
+
+    The highest pitch heard twice was the first rule. HAYIR DEMELIYDIM has
+    273 808 notes, 266 at or under MIDI 43 (96.9 % of the 808's time), but
+    two at MIDI 51 put that floor at E3 (164.8 Hz); with share 0.95 it is
+    G#2 (103.8 Hz), and guitar keeps 157 notes instead of 128 (159 with no
+    floor). On the 63 synthetic renders both rules give the same floors
+    (macro onset F1 0.705); with two octave-up slips of 0.2 s added to every
+    808 line, the first rule's floor rose an octave and F1 fell to 0.700
+    (pads with an 808 by up to 0.18), this one's held (0.706)."""
+    if not notes_808:
         return None, None
-    top = max(held)
+    pitch = np.array([n["pitch"] for n in notes_808])
+    length = np.array([max(n["end"] - n["t"], 0.0) for n in notes_808])
+    length = length if length.sum() > 0 else np.ones(len(pitch))
+    order = np.argsort(pitch, kind="stable")
+    k = int(np.searchsorted(np.cumsum(length[order]) / length.sum(), share))
+    top = int(pitch[order][min(k, len(pitch) - 1)])
     return round(float(librosa.midi_to_hz(top + 1)), 2), top
 
 

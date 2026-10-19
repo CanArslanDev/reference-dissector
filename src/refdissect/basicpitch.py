@@ -84,22 +84,23 @@ def column(midi: int) -> int:
     return midi - MIDI_OFFSET
 
 
-def command(audio: list[str | Path], out_dir: str | Path, settings: dict) -> list[str]:
+def command(audio: list[str | Path], out_dir: str | Path, presets: dict, files: dict | None = None) -> list[str]:
     uv = os.environ.get("UV") or shutil.which("uv")
     if not uv:
         raise RuntimeError("uv is needed to run Basic Pitch in its own environment: https://docs.astral.sh/uv/")
     cmd = [uv, "run", "--isolated", "--no-project", "--python", PYTHON]
     for p in PACKAGES:
         cmd += ["--with", p]
-    return cmd + ["python", "-I", str(WORKER), str(Path(out_dir).expanduser()), json.dumps(settings),
-                  *(str(Path(a).expanduser()) for a in audio)]
+    return cmd + ["python", "-I", str(WORKER), str(Path(out_dir).expanduser()),
+                  json.dumps({"presets": presets, "files": files or {}}), *(str(Path(a).expanduser()) for a in audio)]
 
 
-def transcribe(audio: list[str | Path], out_dir: str | Path, settings: dict) -> dict:
-    """Run the model once per file and decode every setting ({name: {onset,
-    frame, min_ms, melodia, min_hz, max_hz}}): OUT_DIR/<stem>.json (notes per
-    setting) and OUT_DIR/<stem>.npz (posteriorgrams, float16)."""
-    done = subprocess.run(command(audio, out_dir, settings), capture_output=True, text=True)
+def transcribe(audio: list[str | Path], out_dir: str | Path, presets: dict, files: dict | None = None) -> dict:
+    """Run the model once per file and decode every preset ({name: {onset,
+    frame, min_ms, melodia, min_hz, max_hz}}); files ({file stem: {min_hz}})
+    overrides the presets for a file. Writes OUT_DIR/<stem>.json (notes per
+    preset) and OUT_DIR/<stem>.npz (posteriorgrams, float16)."""
+    done = subprocess.run(command(audio, out_dir, presets, files), capture_output=True, text=True)
     if done.returncode != 0:
         raise RuntimeError(f"Basic Pitch failed:\n{done.stderr[-2000:]}")
     return json.loads(done.stdout.strip().splitlines()[-1])
