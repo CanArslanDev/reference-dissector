@@ -98,12 +98,14 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(suite, "separate_many", stub_separator(calls))
     monkeypatch.setattr(pipeline, "fit", functools.partial(synth808.fit, **QUICK_FIT))
     lib = ["--library", str(library / "library.npz"), "--library-808", str(library / "library_808.npz")]
-    assert main(["suite", "run", str(root), *lib, "--tag", "a", "--jobs", "1", "--render"]) == 0
+    # no beat tracker here (it would download beat_this): the grid is fit_grid's
+    assert main(["suite", "run", str(root), *lib, "--tag", "a", "--jobs", "1", "--render", "--no-tracker"]) == 0
     assert sorted(calls) == ["meter68-1", "v1-1"]
     assert "2 beats scored under a (0 failed)" in capsys.readouterr().out
     rec = json.loads((root / "v1-1" / "runs" / "a" / "scores.json").read_text())
     assert rec["separation"]["seed"] == 0 and rec["separation"]["shifts"] == 1
-    assert rec["options"] == {"analyze": {"bpm_range": [100.0, 180.0]}, "match": {"detune": None}}
+    assert rec["options"] == {"analyze": {"bpm_range": [100.0, 180.0], "bpm": None, "meter": None, "tracker": False},
+                              "match": {"detune": None}}
     assert rec["analysis"]["estimate_from"] == "analysis" and rec["plan"]["estimate_from"] == "plan"
     assert rec["plan"]["levels"]["sounds"] and not (root / "v1-1" / "runs" / "a" / "render").exists()
     for step in ("analyze", "match", "fit_808", "plan", "score_analysis", "render", "score_plan", "total"):
@@ -120,7 +122,8 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
 
     # the stems are kept per model, and two processes give the numbers one gives (the options travel
     # to them; the patched fit does not)
-    options = {"analyze": {"bpm_range": (100.0, 180.0)}, "match": {"detune": None}, "fit_808": QUICK_FIT}
+    options = {"analyze": {"bpm_range": (100.0, 180.0), "tracker": False}, "match": {"detune": None},
+               "fit_808": QUICK_FIT}
     b = suite.run(root, library / "library.npz", library / "library_808.npz", "b", jobs=2, options=options)
     assert len(calls) == 2 and b["last_run"] == {"beats": 2, "jobs": 2, "wall_s": b["last_run"]["wall_s"]}
     for name in ("v1", "meter68"):

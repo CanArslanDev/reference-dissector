@@ -19,8 +19,9 @@ import numpy as np
 
 from . import describe as describe_mod
 from .audio import SR, band, read, samples, write
+from .beats import track_stems
 from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
-from .grid import Grid, fit_grid, offsets, tuning
+from .grid import Grid, estimate, offsets, onset_grid, tuning
 from .hits import group, template
 from .library import Library, null_test, per_hit_votes, verdict
 from .structure import bar_activity, sections
@@ -41,18 +42,46 @@ def _load(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print) -> dict:
+def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
+            meter: str | None = None, tracker: bool = True) -> dict:
+    """tracker=False (or a tracker that cannot run) fits the grid as before:
+    fit_grid in bpm_range, first grid beat as phase."""
     stems_dir, work = Path(stems_dir), Path(work)
     drums, bass = read(stems_dir / "drums.wav"), read(stems_dir / "bass.wav")
     duration = len(drums) / SR
     log(f"stems: {duration:.1f} s")
-    grid, fit_info = fit_grid(drums, bpm_range)
-    log(f"grid: {grid.bpm} BPM, first beat at {grid.phase} s")
+    beats = track_stems(stems_dir, log) if tracker else None
+    grid, fit_info = estimate(drums, beats, bpm_range, bpm, meter)
+    what = "first beat" if fit_info["tracker"] is None else f"{grid.beats_per_bar}/{grid.beat_unit}, first bar line"
+    log(f"grid: {grid.bpm} BPM, {what} at {grid.phase} s")
+    if beats is not None and fit_info["tracker"] is None:
+        log(f"  {fit_info['level']['why']}: the grid is fit_grid's")
+    if fit_info["tracker"] is not None:
+        level, swing = fit_info["level"], fit_info["swing"]
+        log(f"  {level['level']} of the tracker's {level['tracker_bpm']} BPM ({level['why']}); phase "
+            f"{fit_info['phase_correction_ms']:+.1f} ms onto the attacks; swing: 16ths {swing['ratio_16']}, "
+            f"8ths {swing['ratio_8']}")
+    if fit_info["tempo_map"]:
+        log(f"  the beats drift up to {fit_info['drift_ms']} ms from a constant tempo: tempo_map kept "
+            f"({len(fit_info['tempo_map'])} beats); the grid stays constant")
+    change = fit_info["tempo_change"]
+    if change:
+        at = sorted((change["until"], change["from"]))
+        log(f"  the tempo changes by x{change['ratio']} at {at[0]}-{at[1]} s: the grid follows the "
+            f"{change['grid_follows']} part ({change['span_s'][0]}-{change['span_s'][1]} s); the rest is off it")
+    down = fit_info["downbeat"]
+    if down and down["ambiguous"]:
+        why = down.get("why") or f"{down.get('share', 0):.0%} of the tracker's downbeats agree"
+        log(f"  the first bar line is unsure ({why}); --meter sets the meter")
+    for warning in fit_info["warnings"]:
+        log(f"  warning: {warning}")
+    # discover() and offsets() read onset-strength peaks, which come a few ms after the attacks
+    peaks_grid = onset_grid(grid, fit_info)
     tunings = {s: tuning(read(stems_dir / f"{s}.wav")) for s in TONAL_STEMS
                if (stems_dir / f"{s}.wav").is_file()}
     consensus = round(float(np.median(list(tunings.values()))), 2) + 0.0 if tunings else 0.0  # no -0.0
     log(f"tuning (semitones from A440): {tunings} -> {consensus:+.2f}")
-    templates = discover(drums, grid)
+    templates = discover(drums, peaks_grid)
     events = detect(drums, templates)
     tdir = work / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
@@ -82,7 +111,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     secs = sections(rows)
     log("sections: " + ", ".join(f"{s['name']} {s['start_bar']}-{s['end_bar']}" for s in secs))
     analysis = {"source": {"stems": str(stems_dir), "duration_s": round(duration, 3)},
-                "grid": {**grid.to_dict(), **fit_info, "offsets_by_beat": offsets(drums, grid)},
+                "grid": {**grid.to_dict(), **fit_info, "offsets_by_beat": offsets(drums, peaks_grid)},
                 "tuning": {"per_stem": tunings, "consensus": consensus,
                            "a4_hz": round(440 * 2 ** (consensus / 12), 1),
                            "808": tuning_808, "808_agreement": agreement_808},
