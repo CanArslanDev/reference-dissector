@@ -90,12 +90,13 @@ def note_levels(x: np.ndarray, notes: list[dict], tuning: float = 0.0, window_s:
 def to_beats(t: float, grid: Grid, snap_ms: float | None = None, per_beat: int = 4) -> tuple[float, float]:
     """Beats from the start of the audio (as Grid.beats), and how far the time
     moved (ms): with snap_ms, to the nearest 1/per_beat of a beat on the grid
-    when that is within snap_ms."""
+    when that is within snap_ms and not before the audio starts (a MIDI file
+    cannot hold a negative time)."""
     moved = 0.0
     if snap_ms:
         step = grid.beat / per_beat
         line = grid.phase + round((t - grid.phase) / step) * step
-        if abs(line - t) * 1000 <= snap_ms:
+        if line >= 0 and abs(line - t) * 1000 <= snap_ms:
             moved, t = (line - t) * 1000, line
     return float(grid.beats(t)), moved
 
@@ -219,8 +220,11 @@ def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
 
 
 def _restored(cluster: list[tuple], bar: int, grid: Grid) -> dict:
+    """The cluster's note put into `bar`; its place is the median offset of
+    the others, which can be up to 50 ms before the bar line (Grid.bar_of),
+    so a note in the first bar is kept at or after 0."""
     model = cluster[len(cluster) // 2][3]
-    t = grid.phase + bar * grid.bar + float(np.median([e[1] for e in cluster]))
+    t = max(0.0, grid.phase + bar * grid.bar + float(np.median([e[1] for e in cluster])))
     length = float(np.median([e[3]["end"] - e[3]["t"] for e in cluster]))
     return {**model, "t": round(t, 4), "end": round(t + length, 4), "onset": 0.0, "bend": [],
             "amplitude": round(float(np.median([e[3]["amplitude"] for e in cluster])), 4), "voted": "restored"}
