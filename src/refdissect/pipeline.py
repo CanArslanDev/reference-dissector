@@ -215,11 +215,16 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
 def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float | None = None,
             snap_ms: float | None = None, voting: bool = True, drop_below: float | None = None, log=print) -> dict:
     """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
-    stem in its own environment, on the stem moved onto A440 by its tuning
-    (analysis.json); its notes and posteriorgrams go to basicpitch/. The
-    minimum frequency is just above the 808's usual range for the stems it
-    bleeds into (melodic.FLOOR_STEMS), or min_hz (as heard) for every stem
-    when given."""
+    stem in its own environment, on the stem moved onto A440 by its tuning;
+    its notes and posteriorgrams go to basicpitch/. The minimum frequency is
+    just above the 808's usual range for the stems it bleeds into
+    (melodic.FLOOR_STEMS), or min_hz (as heard) for every stem when given.
+
+    The tuning is measured here on each stem (grid.tuning, as analyze does):
+    an analysis.json written before the stable-peak estimator has other
+    values (HAYIR DEMELIYDIM's: +21 to +35 cents where the stems measure -2
+    to -5), and taking those out moved in-tune stems off A440: the other
+    stem kept 165 of its 520 notes."""
     from . import melodic as mel
     from .basicpitch import PRESETS, transcribe
     work = Path(work)
@@ -228,13 +233,18 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     stems = [s for s in mel.MELODIC_STEMS if (stems_dir / f"{s}.wav").is_file()]
     if not stems:
         raise ValueError(f"No tonal stem ({', '.join(mel.MELODIC_STEMS)}) in {stems_dir}")
+    audio = {s: read(stems_dir / f"{s}.wav") for s in stems}
+    tunings = {s: round(float(tuning(audio[s])), 3) for s in stems}
+    stale = [f"{s} {100 * mel.stem_tuning(analysis, s):+.0f}" for s in stems
+             if abs(tunings[s] - mel.stem_tuning(analysis, s)) > 0.05]
+    if stale:
+        log(f"analysis.json has other tunings ({', '.join(stale)} cents; an older analyze?): measured on the stems")
     floor_hz, top = (min_hz, None) if min_hz else mel.floor_above_808(analysis["notes_808"])
     files = {}
     for s in stems:
-        tuning = mel.stem_tuning(analysis, s)
         # the 808's floor is a semitone (on A440 already); a given min_hz is as heard
-        hz = min_hz * 2 ** (-tuning / 12) if min_hz else (floor_hz if s in mel.FLOOR_STEMS else None)
-        files[s] = {"tuning": tuning, "min_hz": round(hz, 2) if hz else None}
+        hz = min_hz * 2 ** (-tunings[s] / 12) if min_hz else (floor_hz if s in mel.FLOOR_STEMS else None)
+        files[s] = {"tuning": tunings[s], "min_hz": round(hz, 2) if hz else None}
     floored = [s for s in stems if files[s]["min_hz"]]
     log(f"melodic: {', '.join(stems)}; tuning taken out: "
         + ", ".join(f"{s} {100 * files[s]['tuning']:+.0f} cents" for s in stems) + "; minimum frequency "
@@ -247,8 +257,7 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
         if s in mel.CHORD_STEMS:
             with np.load(run["stems"][s]["posteriorgram"]) as z:
                 pgs[s] = z["note"].astype(np.float32)
-    out = mel.build(analysis, transcribed, {s: read(stems_dir / f"{s}.wav") for s in stems}, pgs, snap_ms, voting,
-                    drop_below)
+    out = mel.build(analysis, transcribed, audio, pgs, snap_ms, voting, drop_below, tunings)
     floor_from = "808" if top is not None else ("parameter" if min_hz else None)
     out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
                      "python": run["python"], "settings": {"presets": PRESETS, "files": files},
