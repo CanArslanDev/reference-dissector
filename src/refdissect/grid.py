@@ -45,6 +45,9 @@ from .hits import HOP, strength_peaks
 # ternary relatives (reported; see _choose)
 LEVELS = (("x1", 1.0), ("x2", 2.0), ("x1/2", 0.5), ("x3/2", 1.5), ("x2/3", 2 / 3))
 WINDOW = 0.03  # each level is refined by the comb within +-3 %
+# bpm_range's edges give this much: 90 BPM's x2 was refined to 180.001-180.004
+# and left the range, so 90 BPM stayed at 90 where fit_grid had read 180.002
+RANGE_SLACK = 0.005
 DRIFT_MS = 10.0  # beyond this the tracker's beats are kept as a tempo map
 BAR_SLACK = 0.05  # a bar line up to 50 ms before the audio starts is the first one (as Grid.bar_of counts)
 
@@ -221,8 +224,13 @@ def octave_candidates(env: np.ndarray, fps: float, onsets: np.ndarray, tracker_b
         score, bpm, phase = _fit(env, fps, (c * (1 - WINDOW), c * (1 + WINDOW)))
         rows.append({"level": level, "bpm": round(float(bpm), 3), "phase": float(phase),
                      "score": round(float(score), 3), "on_16ths": round(_on_16ths(onsets, bpm, phase), 2),
-                     "in_range": bool(bpm_range is not None and bpm_range[0] <= bpm <= bpm_range[1])})
+                     "in_range": _in_range(bpm, bpm_range)})
     return rows
+
+
+def _in_range(bpm: float, bpm_range: tuple[float, float] | None) -> bool:
+    return bool(bpm_range is not None and
+                bpm_range[0] * (1 - RANGE_SLACK) <= bpm <= bpm_range[1] * (1 + RANGE_SLACK))
 
 
 def _choose(rows: list[dict], bpm_range: tuple[float, float] | None) -> tuple[dict, str]:
