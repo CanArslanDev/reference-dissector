@@ -133,12 +133,16 @@ def note_similarity(a: list[dict], b: list[dict], bar_a: int, bar_b: int, grid: 
 
 def loop_groups(sections: list[dict], similar, periods=(1, 2, 4, 8), min_similarity: float = 0.35,
                 margin: float = 0.05) -> list[dict]:
-    """Where bars repeat. Per section name (a section that returns is the same
-    music), the period in bars whose bar pairs (b, b + period inside one
-    section) are most alike by similar(b1, b2) -> 0..1; the shortest period
-    within `margin` of the best wins, a loop of 4 bars being also one of 8.
-    None reaching min_similarity: no loop there. Per loop position, the bars
-    (0-based) that repeat it, counted from each section's start.
+    """Where bars repeat. Per section name, the period in bars whose bar pairs
+    (b, b + period inside one occurrence) are most alike by similar(b1, b2)
+    -> 0..1; the shortest period within `margin` of the best wins, a loop of 4
+    bars being also one of 8. None reaching min_similarity: no loop there.
+
+    The occurrences of a name are then put together only where they play the
+    same music (`_occurrences`). structure.sections names a run by its drums
+    and 808 alone, so a verse and a hook over the same drums share a name,
+    and a section can return at another point of its loop. One group per set
+    of occurrences that repeat: per loop position, the bars (0-based).
 
     min_similarity 0.35 sits between the renders that repeat and those that do
     not: 12 synthetic 4-bar loops played four times scored 0.40-0.82 (period 4
@@ -156,14 +160,51 @@ def loop_groups(sections: list[dict], similar, periods=(1, 2, 4, 8), min_similar
         if not scored or max(s for s, _ in scored) < min_similarity:
             continue
         best = max(s for s, _ in scored)
-        sim, period = min(((s, p) for s, p in scored if s >= best - margin), key=lambda sp: sp[1])
-        positions: dict[int, list[int]] = {}
-        for a, e in spans:
-            for b in range(a, e + 1):
-                positions.setdefault((b - a) % period, []).append(b)
-        out.append({"section": name, "period_bars": period, "similarity": round(sim, 3),
-                    "positions": [positions[k] for k in sorted(positions)]})
+        period = min((p for s, p in scored if s >= best - margin))
+        out += [{"section": name, "period_bars": period, **g}
+                for g in _occurrences(spans, similar, period, min_similarity)]
     return out
+
+
+def _occurrences(spans: list[tuple[int, int]], similar, period: int, min_similarity: float) -> list[dict]:
+    """The occurrences (first, last bar) of one section name, grouped. An
+    occurrence joins a group when its bars match the group's bars at the
+    same loop position (mean similar() at least min_similarity), at the loop
+    phase that matches best: it can start 0..period-1 bars into the loop (the
+    phase that keeps the loop running through the song is tried first).
+    Otherwise it starts a group of its own. A group votes when its pairs
+    (bar and next repeat inside an occurrence, and the matches that joined
+    it) average min_similarity; its loop positions count from its first
+    occurrence's start."""
+    groups: list[dict] = []
+    for a, e in spans:
+        own = [similar(b, b + period) for b in range(a, e - period + 1)]
+        best = None  # (mean, group, shift, similarities)
+        for g in groups:
+            first = g["runs"][0][0]
+            for shift in sorted(range(period), key=lambda s: s != (a - first) % period):
+                found = [similar(x, b) for b in range(a, e + 1) for x in g["at"].get((b - a + shift) % period, [])]
+                if found and (best is None or np.mean(found) > best[0]):
+                    best = (float(np.mean(found)), g, shift, found)
+        if best is not None and best[0] >= min_similarity:
+            _, g, shift, found = best
+        else:
+            g, shift, found = {"runs": [], "at": {}, "pairs": []}, 0, []
+            groups.append(g)
+        g["runs"].append((a, e))
+        g["pairs"] += own + found
+        for b in range(a, e + 1):
+            g["at"].setdefault((b - a + shift) % period, []).append(b)
+    return [{"similarity": round(float(np.mean(g["pairs"])), 3), "runs": [[a + 1, e + 1] for a, e in g["runs"]],
+             "positions": [sorted(g["at"][k]) for k in sorted(g["at"])]}
+            for g in groups if g["pairs"] and np.mean(g["pairs"]) >= min_similarity
+            and max(len(v) for v in g["at"].values()) >= 2]
+
+
+def note_loops(notes: list[dict], grid: Grid, sections: list[dict]) -> list[dict]:
+    """loop_groups with bars compared by their notes (note_similarity)."""
+    by_bar = bar_notes(notes, grid)
+    return loop_groups(sections, lambda a, b: note_similarity(by_bar.get(a, []), by_bar.get(b, []), a, b, grid))
 
 
 def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
@@ -189,8 +230,9 @@ def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
     out = [n for b, ns in by_bar.items() for n in ns if not any(b in pos for g in groups for pos in g["positions"])]
     report = []
     for g in groups:
-        row = {"section": g["section"], "period_bars": g["period_bars"], "similarity": g["similarity"],
-               "repeats": max(len(p) for p in g["positions"]), "notes": 0, "restored": 0, "dropped": 0}
+        row = {"section": g["section"], "runs": g.get("runs"), "period_bars": g["period_bars"],
+               "similarity": g["similarity"], "repeats": max(len(p) for p in g["positions"]), "notes": 0,
+               "restored": 0, "dropped": 0}
         for bars in g["positions"]:
             entries = sorted(((n["pitch"], _offset(n, grid, b), b, n) for b in bars for n in by_bar.get(b, [])),
                              key=lambda e: (e[0], e[1]))
@@ -420,9 +462,7 @@ def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, 
               "onset": n.get("onset", 0.0), "bend": n.get("bend", [])} for n in raw]
     report: list[dict] = []
     if voting and sections and notes:
-        by_bar = bar_notes(notes, grid)
-        groups = loop_groups(sections, lambda a, b: note_similarity(by_bar.get(a, []), by_bar.get(b, []), a, b, grid))
-        notes, report = vote(notes, grid, groups, drop_below=drop_below)
+        notes, report = vote(notes, grid, note_loops(notes, grid, sections), drop_below=drop_below)
     levels = note_levels(x, notes, tuning) if notes else np.array([])
     fill = float(np.nanmedian(levels)) if np.isfinite(levels).any() else -60.0
     levels = np.where(np.isfinite(levels), levels, fill)
