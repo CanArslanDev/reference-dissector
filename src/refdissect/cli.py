@@ -11,6 +11,12 @@
     refdissect live-build work/song          (needs the [live] extra and Live running)
     refdissect calibrate work/inventory.json --library work/library.npz --out work/calibration
 
+  calibration v2, a suite of beats with every answer kept (scenarios.py, suite.py):
+    refdissect suite build work/inventory.json --out work/calibration-v2 --v1-truth calib-truth
+    refdissect suite run work/calibration-v2 --library work/library.npz --library-808 work/library_808.npz \
+        --tag base --render                                         (scores-<tag>.json: means per scenario)
+    refdissect suite report work/calibration-v2 --tags base,new --out report.md
+
   comparing and choosing (docs/11):
     refdissect compare ref/stems rebuild/stems --out compare.json   (both separated by the same model)
     refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
@@ -27,6 +33,8 @@ import sys
 from pathlib import Path
 
 from .separate import DEFAULT_MODEL
+
+USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
 
 
 def _inventory(a):
@@ -55,15 +63,32 @@ def _separate(a):
     print(json.dumps(separate(a.audio, a.out, a.model, a.device, a.seed, a.shifts), indent=1))
 
 
+def _analyze_options(s) -> None:
+    """analyze's options; `suite run` takes them too and passes them on unchanged."""
+    s.add_argument("--bpm-range", nargs=2, type=float, default=[100.0, 180.0])
+
+
+def _analyze_kwargs(a) -> dict:
+    return {"bpm_range": tuple(a.bpm_range)}
+
+
+def _match_options(s) -> None:
+    s.add_argument("--detune", type=float, default=None, help="also try every sound shifted by this many semitones")
+
+
+def _match_kwargs(a) -> dict:
+    return {"detune": a.detune}
+
+
 def _analyze(a):
     from .pipeline import analyze
-    analyze(a.stems, a.work, tuple(a.bpm_range))
+    analyze(a.stems, a.work, **_analyze_kwargs(a))
 
 
 def _match(a):
     from .library import Library
     from .pipeline import match
-    match(a.work, Library.load(a.library), detune=a.detune)
+    match(a.work, Library.load(a.library), **_match_kwargs(a))
 
 
 def _fit(a):
@@ -107,6 +132,34 @@ def _calibrate(a):
             f"{s} {v['f1']}" for s, v in results["blind"][-1]["transcription"].items()))
     (out / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     print(f"-> {out / 'results.json'}")
+
+
+def _list(text: str | None, cast=str) -> list | None:
+    return [cast(x.strip()) for x in text.split(",") if x.strip()] if text else None
+
+
+def _suite_build(a):
+    from .library import load_rows
+    from .suite import build
+    beats = build(load_rows(a.inventory), a.out, _list(a.scenarios), _list(a.seeds, int), a.midi_dir, a.v1_truth,
+                  a.bars)
+    print(f"{len(beats)} beats in {a.out}")
+
+
+def _suite_run(a):
+    from .suite import run
+    s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume)
+    o = s["overall"]
+    print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
+          f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
+          f"-> {Path(a.dir) / f'scores-{a.tag}.json'}")
+
+
+def _suite_report(a):
+    from .suite import report
+    text = report(a.dir, _list(a.tags), a.out)
+    print(f"-> {a.out}" if a.out else text)
 
 
 def _spans(values):
@@ -172,6 +225,38 @@ def _gains(a):
     print(json.dumps(gains_to_targets(stems, levels, SR, spans, a.measure), indent=1))
 
 
+def _suite_parser(sub) -> None:
+    suite = sub.add_parser("suite", help="calibration v2: scenario beats with their truth, run and scored per tag")
+    ss = suite.add_subparsers(dest="suite_command", required=True)
+    s = ss.add_parser("build", help="the scenario beats (and the v1 rebuilds) with their truth")
+    s.add_argument("inventory")
+    s.add_argument("--out", required=True)
+    s.add_argument("--scenarios", default=None, help="comma-separated (default: all; v1orig comes from --v1-truth)")
+    s.add_argument("--seeds", default="1,2")
+    s.add_argument("--midi-dir", default=str(USER_LIBRARY), help="producer MIDI patterns (without: no producer)")
+    s.add_argument("--v1-truth", default=None, help="the v1 beats rebuilt with truth stems (beatN): v1orig-N")
+    s.add_argument("--bars", type=int, default=None, help="shorter scenario beats (a multiple of 4), for tests")
+    s.set_defaults(run=_suite_build)
+    s = ss.add_parser("run", help="separate, analyze, match, fit-808, plan and score every beat under a tag")
+    s.add_argument("dir")
+    s.add_argument("--library", required=True)
+    s.add_argument("--library-808", default=None)
+    s.add_argument("--tag", required=True, help="names this run: runs/<tag>/ per beat, scores-<tag>.json")
+    s.add_argument("--model", default=DEFAULT_MODEL, help="Demucs model; stems are kept per model")
+    s.add_argument("--scenarios", default=None, help="comma-separated (default: every beat under dir)")
+    s.add_argument("--jobs", type=int, default=3, help="beats in parallel processes (each loads the library, 0.5 GB)")
+    s.add_argument("--render", action="store_true", help="render each plan offline for the level scores (deleted)")
+    s.add_argument("--resume", action="store_true", help="skip the beats this tag has scored already")
+    _analyze_options(s)
+    _match_options(s)
+    s.set_defaults(run=_suite_run)
+    s = ss.add_parser("report", help="markdown tables per scenario, with the deltas between tags")
+    s.add_argument("dir")
+    s.add_argument("--tags", required=True, help="comma-separated; deltas are last minus first")
+    s.add_argument("--out", default=None)
+    s.set_defaults(run=_suite_report)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="refdissect", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -197,12 +282,12 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("analyze", help="grid, tuning, drum templates and hits, 808 notes, sections")
     s.add_argument("stems")
     s.add_argument("--work", required=True)
-    s.add_argument("--bpm-range", nargs=2, type=float, default=[100.0, 180.0])
+    _analyze_options(s)
     s.set_defaults(run=_analyze)
     s = sub.add_parser("match", help="the library's closest sound for each template")
     s.add_argument("work")
     s.add_argument("--library", required=True)
-    s.add_argument("--detune", type=float, default=None, help="also try every sound shifted by this many semitones")
+    _match_options(s)
     s.set_defaults(run=_match)
     s = sub.add_parser("fit-808", help="synthesize the 808 and write a one-shot")
     s.add_argument("work")
@@ -213,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(run=_plan)
     s = sub.add_parser("live-build", help="build the plan in the open (empty) Live set")
     s.add_argument("plan", help="plan.json or the work folder")
-    s.add_argument("--user-library", default=str(Path.home() / "Music" / "Ableton" / "User Library"))
+    s.add_argument("--user-library", default=str(USER_LIBRARY))
     s.set_defaults(run=_build)
     s = sub.add_parser("calibrate", help="synthetic beats from known samples, scored")
     s.add_argument("inventory")
@@ -222,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--beats", type=int, default=6)
     s.add_argument("--out", required=True)
     s.set_defaults(run=_calibrate)
+    _suite_parser(sub)
     s = sub.add_parser("compare", help="measure a rebuild and its reference the same way (both separated)")
     s.add_argument("reference", help="the reference's stems folder")
     s.add_argument("rebuild", help="the rebuild's stems folder, from the same separation model")

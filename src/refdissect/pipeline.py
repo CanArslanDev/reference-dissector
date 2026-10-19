@@ -173,9 +173,10 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
 
 
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
-            log=print) -> dict:
+            log=print, **fit_options) -> dict:
     """Fit the 808 on its isolated root notes (drums + bass, so the attack is
-    in) and write a one-shot at the 808's own tuning."""
+    in) and write a one-shot at the 808's own tuning. fit_options go to
+    synth808.fit (maxiter, popsize: a smaller search for tests)."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])
@@ -191,7 +192,7 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     # the 808's own tuning (analyses written before it was measured: the track's)
     f1 = float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
     log(f"808: {used} isolated notes at MIDI {root}, {f1:.2f} Hz; fitting (1-3 min)")
-    params, info = fit(ref, f1)
+    params, info = fit(ref, f1, **fit_options)
     shot = one_shot(params, f1)
     name = "808 (synth).wav"
     write(work / name, shot, peak=None)
