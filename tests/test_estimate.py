@@ -55,6 +55,8 @@ def test_estimate_through_a_change_of_level(kit):
     (72, 8, False, (100.0, 180.0), 144),  # bpm_range prefers the octave it holds
     (72, 8, False, None, 72),  # no range: the tracker's level
     (160, 12, True, (100.0, 180.0), 160),  # the tracker at half tempo, as beat_this read PIRAMIT
+    (90, 8, False, (100.0, 180.0), 180),  # x2 refined to 180.004: the range's edge gives 0.5 %
+    (50, 12, False, (100.0, 180.0), 100),  # x2 refined to 99.9996
 ])
 def test_the_octave(kit, bpm, bars, half, rng, want):
     truth = drum_beat(kit, bpm, bars)
