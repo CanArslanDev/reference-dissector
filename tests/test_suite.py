@@ -166,7 +166,16 @@ def test_the_export_keeps_means_per_scenario_only(tmp_path):
     text = (tmp_path / "results" / "calibration" / "suite-t.json").read_text()
     assert out["failed"] == 1 and "/Users/" not in text and ".wav" not in text and "v1-3" not in text
     assert json.loads(text)["scenarios"]["v1"]["analysis"] == {"strict_f1_20": 0.5}
-    agg["options"] = [{"analyze": {"model_path": "/Users/someone/model.npz"}}]
+    # an option a later step adds may hold a path or a file name: only numbers, booleans, null and short
+    # identifiers go out
+    for bad in ("/Users/someone/model.npz", "/Volumes/Samples/Some Kit/", "~/Music/Reference Dissect/work",
+                "/private/tmp/x", "C:\\Users\\me", "some kit snare 1", "kick.m4a", "set.als", "rack.adg", "take.ogg"):
+        agg["options"] = [{"analyze": {"templates": bad}}]
+        (tmp_path / "scores-t.json").write_text(json.dumps(agg))
+        with pytest.raises(ValueError, match="short identifier|local file"):
+            ns["suite_scores"](tmp_path, "t")
+    agg["options"] = [{"analyze": {"bpm_range": [100.0, 180.0], "model": "htdemucs_ft"}, "match": {"detune": None}}]
     (tmp_path / "scores-t.json").write_text(json.dumps(agg))
-    with pytest.raises(ValueError, match="local file"):
-        ns["suite_scores"](tmp_path, "t")
+    assert ns["suite_scores"](tmp_path, "t")["options"] == agg["options"]
+    for bad in ("/Volumes/Samples/kick", "~/Music/x", "/Applications/Some App.app/x", "a.m4a"):
+        assert ns["LOCAL"].search(json.dumps({"x": bad})), bad

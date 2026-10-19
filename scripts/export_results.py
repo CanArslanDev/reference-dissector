@@ -59,19 +59,44 @@ def calibration(work: Path) -> dict:
 
 SUITE_KEEP = ("schema", "tag", "model", "options", "render", "refdissect", "beats", "last_run")
 SCENARIO_KEEP = ("beats", "seeds", "analysis", "plan", "seconds")
-LOCAL = re.compile(r"/Users/|/home/|[A-Za-z]:\\\\|\.(wav|flac|mp3|aiff?|mid|npy|npz)\b", re.IGNORECASE)
+LOCAL = re.compile(r"/Users/|/home/|/Volumes/|/private/|/tmp/|/Applications/|~/|[A-Za-z]:\\\\|"
+                   r"\.(wav|flac|mp3|m4a|ogg|opus|aac|aiff?|mid|midi|npy|npz|als|alc|adg|adv)\b", re.IGNORECASE)
+WORD = re.compile(r"[A-Za-z0-9_.+:-]{1,64}")  # a model, a curve, a version: no path, no file name with spaces
+
+
+def plain(value, where: str = "options") -> None:
+    """Refuse anything in value but numbers, booleans, null and short
+    identifier strings (keys too), so that an option a later step adds can
+    not carry a path or a file name into results/."""
+    if value is None or isinstance(value, bool | int | float):
+        return
+    if isinstance(value, str):
+        if not WORD.fullmatch(value):
+            raise ValueError(f"{where}: {value!r} is not a short identifier")
+    elif isinstance(value, list | tuple):
+        for i, v in enumerate(value):
+            plain(v, f"{where}[{i}]")
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            plain(k, f"{where} key")
+            plain(v, f"{where}.{k}")
+    else:
+        raise ValueError(f"{where}: {type(value).__name__} is not exported")
 
 
 def suite_scores(root: Path, tag: str) -> dict:
     """results/calibration/suite-<tag>.json from root/scores-<tag>.json: how
     the run was made (model, seed, shifts, versions, options) and the means
-    per scenario and overall. Refuses to write anything that looks like a
-    local path or an audio, MIDI or array file name."""
+    per scenario and overall. The run's description must be plain(), and
+    nothing may look like a local path or an audio, MIDI, array or Live
+    file name."""
     agg = json.loads((root / f"scores-{tag}.json").read_text(encoding="utf-8"))
     sep = agg.get("separation") or {}
     out = {k: agg.get(k) for k in SUITE_KEEP}
     out["separation"] = {k: sep.get(k) for k in ("model", "seed", "shifts", "devices", "versions")}
     out["failed"] = len(agg.get("failed") or [])
+    for key in ("tag", "model", "options", "render", "refdissect", "separation"):
+        plain(out[key], key)
     out["scenarios"] = {name: {k: v[k] for k in SCENARIO_KEEP} for name, v in agg["scenarios"].items()}
     out["overall"] = agg["overall"]
     text = json.dumps(out, indent=1)
