@@ -5,6 +5,7 @@
     refdissect index-library work/inventory.json --808 --out work/library_808.npz
     refdissect separate song.mp3 --out work/song/stems
     refdissect analyze work/song/stems --work work/song
+    refdissect melodic work/song                 (Basic Pitch in its own uv environment)
     refdissect match work/song --library work/library.npz
     refdissect fit-808 work/song --library-808 work/library_808.npz
     refdissect plan work/song
@@ -56,6 +57,11 @@ def _separate(a):
 def _analyze(a):
     from .pipeline import analyze
     analyze(a.stems, a.work, tuple(a.bpm_range))
+
+
+def _melodic(a):
+    from .pipeline import melodic
+    melodic(a.work, a.stems, a.min_hz, a.snap_ms, not a.no_vote)
 
 
 def _match(a):
@@ -195,6 +201,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--work", required=True)
     s.add_argument("--bpm-range", nargs=2, type=float, default=[100.0, 180.0])
     s.set_defaults(run=_analyze)
+    s = sub.add_parser("melodic", help="notes per tonal stem and chords, with Basic Pitch (after analyze)")
+    s.add_argument("work")
+    s.add_argument("--stems", default=None, help="stems folder (default: the one analyze used)")
+    s.add_argument("--min-hz", type=float, default=None,
+                   help="lowest note frequency (default: just above the 808's highest note)")
+    s.add_argument("--snap-ms", type=float, default=None, help="snap onsets to the 16th grid within this many ms")
+    s.add_argument("--no-vote", action="store_true", help="no voting across loop repeats")
+    s.set_defaults(run=_melodic)
     s = sub.add_parser("match", help="the library's closest sound for each template")
     s.add_argument("work")
     s.add_argument("--library", required=True)

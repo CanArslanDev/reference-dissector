@@ -79,3 +79,27 @@ def test_build_spec_for_build_tracks(tmp_path):
     ref = spec["REF drums"]
     assert ref["kind"] == "audio" and ref["mute"] and ref["audio_clips"][0]["warping"] is False
     assert not spec["REF other"]["mute"]
+
+
+def test_melodic_tracks_in_the_plan(tmp_path):
+    """melodic.json adds one muted MIDI track per stem; the drums and the 808
+    are planned exactly as without it."""
+    from refdissect.live import MELODIC_INSTRUMENT, build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    melodic = {"stems": {"other": {"tuning_cents": 12, "notes": [
+        {"pitch": 64, "start_time": 1.0, "duration": 2.0, "velocity": 90, "t": 0.5, "level_db": -20.0},
+        {"pitch": 64, "start_time": 2.0, "duration": 1.0, "velocity": 80, "t": 1.0, "level_db": -21.0}]}}}
+    plain = make_plan(analysis, matches, synth, tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path, melodic=melodic)
+    assert "melodic" not in plain["tracks"]
+    assert {k: plan["tracks"][k] for k in ("drums", "808")} == {k: plain["tracks"][k] for k in ("drums", "808")}
+    track = plan["tracks"]["melodic"]["other"]
+    assert track["instrument"] == MELODIC_INSTRUMENT and track["cents"] == 12
+    assert [n["duration"] for n in track["notes"]] == [0.995, 1.0]  # ends before the next note of its pitch
+    spec = {t["name"]: t for t in build_spec(plan)}
+    assert spec["other (notes)"]["mute"] is True and spec["other (notes)"]["instrument"] == MELODIC_INSTRUMENT
+    assert spec["other (notes)"]["clips"][0]["notes"] == track["notes"]
+    written = write_midi(plan, tmp_path / "midi")
+    assert [w.name for w in written] == ["drums.mid", "808.mid", "other.mid"]
+    ons = [m for m in mido.MidiFile(str(written[2])).tracks[0] if m.type == "note_on"]
+    assert [m.note for m in ons] == [64, 64] and ons[0].channel == 0
