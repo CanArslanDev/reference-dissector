@@ -76,9 +76,40 @@ def test_an_unrelated_sound_is_extra():
     odd = 0.125 + np.arange(32) * 0.5
     stray = np.r_[KICK[:3], odd[:5]]
     s = drum_scores(truth(), estimate(pads=(*KIT, ("50", "perc", odd), ("51", "perc", stray))))
-    assert s["extra"] == [{"sound": "50", "closest": None, "hits": 32, "matched_50": 0, "share": 0.0},
-                          {"sound": "51", "closest": "kick", "hits": 8, "matched_50": 3, "share": 0.375}]
+    assert s["extra"] == [{"sound": "50", "closest": None, "hits": 32, "matched_50": 0, "moments": 32, "share": 0.0},
+                          {"sound": "51", "closest": "kick", "hits": 8, "matched_50": 3, "moments": 8,
+                           "share": 0.375}]
     assert s["macro"] == {"f1_20": 1.0, "f1_50": 1.0, "v1_f1": 1.0}
+
+
+def test_doubled_hits_score_alike_on_one_pad_or_two():
+    """16 snares. A pad that plays each one twice is pooled (precision 0.5,
+    F1 2/3); with one stray hit too it still is (16 of its 17 moments match:
+    F1 32/49), where counting hits made it extra (16 of 33) and scored the
+    snare 0. With 8 strays, one pad and the same 40 hits on two pads score
+    the same, F1 4/7."""
+    snares = events("truth", hits("snare", "snare", SNARE))
+    stray = 0.25 + np.arange(8) * 1.0  # 250 ms from every snare
+
+    def f1(*pads):
+        d = drum_scores(snares, events("estimate", [e for name, times in pads for e in hits(name, "snare", times)]))
+        return d["sounds"]["snare"]["f1_20"], d["extra"]
+    assert f1(("38", np.r_[SNARE, SNARE])) == (pytest.approx(2 / 3, abs=1e-4), [])
+    assert f1(("38", np.r_[SNARE, SNARE, stray[:1]])) == (pytest.approx(32 / 49, abs=1e-4), [])
+    one, two = f1(("38", np.r_[SNARE, SNARE, stray])), f1(("38", SNARE), ("40", np.r_[SNARE, stray]))
+    assert one == two == (pytest.approx(4 / 7, abs=1e-4), [])
+    many = f1(("38", np.r_[SNARE, 0.25 + np.arange(17) * 1.0]))  # 16 snares among 33 moments: extra
+    assert many[0] == 0.0 and many[1][0]["moments"] == 33 and many[1][0]["share"] == pytest.approx(16 / 33, abs=1e-3)
+
+
+def test_a_snare_pad_with_a_stray_hit_on_a_hat_stays_the_snare():
+    """Every snare also sits on a hat. A snare pad with one more hit on a hat
+    position matches the hat 17 times and the snare 16: assigned by matches
+    it went to the hat and the snare scored 0; by F1 at 50 ms (0.97 against
+    0.42) it is the snare's."""
+    s = drum_scores(truth(), estimate(pads=(KIT[0], ("38", "snare", np.r_[SNARE, HAT[1]]), KIT[2])))
+    assert s["assignment"]["38"]["to"] == "snare" and s["assignment"]["38"]["matched_50"] == 16
+    assert s["sounds"]["snare"]["f1_20"] == pytest.approx(32 / 33, abs=1e-4) and s["sounds"]["hat"]["f1_20"] == 1.0
 
 
 def test_a_missing_sound_scores_zero_and_a_layer_is_a_sound_of_its_own():
