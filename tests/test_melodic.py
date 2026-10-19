@@ -126,6 +126,25 @@ def test_stem_notes_vote_and_drop_on_request():
     assert M.stem_notes(raw, x, g, sections=sections, voting=False)[1] == []
 
 
+def test_vote_puts_back_only_where_the_stem_sounds():
+    """A 1-bar loop played four times, then a silent bar (a drop-out). The
+    transcription missed a note in bar 2 that the audio has: it comes back.
+    Nothing goes into the silent bar; without the level check all four notes
+    did, at velocity 35."""
+    g = Grid(120.0, 0.0)
+    played = [(2.0 * b + o, p) for b in range(4) for o, p in PATTERN]
+    x = render([(t, p, 0.3) for t, p in played], 11.0)
+    heard = [note(t, p) for t, p in played if (t, p) != (3.0, 67)]
+    raw = [{"start_s": n["t"], "end_s": n["end"], "midi": n["pitch"], "amplitude": n["amplitude"],
+            "onset": n["onset"], "bend": []} for n in heard]
+    sections = [{"name": "A", "start_bar": 1, "end_bar": 5}]
+    notes, report = M.stem_notes(raw, x, g, sections=sections)
+    assert [(n["t"], n["pitch"]) for n in notes if n.get("voted")] == [(3.0, 67)]
+    assert report[0]["restored"] == 1 and report[0]["too_quiet"] == 4
+    loose, _ = M.vote(heard, g, M.note_loops(heard, g, sections))  # no level: the silent bar is filled
+    assert sum(n.get("voted") == "restored" for n in loose) == 5
+
+
 def test_a_section_that_returns_off_its_loop_phase():
     """A 2-bar loop (bars alternate P and Q) runs through the song; the drums
     name bars 1-4 and 8-11 A and bars 5-7 B, so the second A starts on a Q
