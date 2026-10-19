@@ -568,17 +568,18 @@ def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, 
 
 def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndarray],
           note_pgs: dict[str, np.ndarray], snap_ms: float | None = None, voting: bool = True,
-          drop_below: float | None = None) -> dict:
+          drop_below: float | None = None, tunings: dict[str, float] | None = None) -> dict:
     """melodic.json from the worker's output per stem (transcribed: its JSON,
     notes per preset, on A440 when the worker took the stem's tuning out),
-    the stems' audio and the posteriorgrams of the chord stems."""
+    the stems' audio and the posteriorgrams of the chord stems. tunings: per
+    stem, the tuning the worker took out (default: analysis.json's)."""
     g = analysis["grid"]
     grid = Grid(g["bpm"], g["phase"], g.get("beats_per_bar", 4))
     sections = analysis.get("sections") or []
     _, top = floor_above_808(analysis["notes_808"])
     out: dict = {"grid": {"bpm": grid.bpm, "phase": grid.phase}, "stems": {}}
     for stem, t in transcribed.items():
-        st = stem_tuning(analysis, stem)
+        st = tunings[stem] if tunings and stem in tunings else stem_tuning(analysis, stem)
         notes, report = stem_notes(t["notes"]["melodic"], audio[stem], grid, st, sections, snap_ms, voting,
                                    drop_below)
         out["stems"][stem] = {"tuning_cents": int(round(100 * st)), "notes": notes, "voting": report,

@@ -347,8 +347,9 @@ def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
     stems = tmp_path / "stems"
     stems.mkdir()
     x = render([(0.5, 60, 0.3), (1.0, 64, 0.3), (1.5, 67, 0.3)], 3.0)
-    for name in ("other", "piano", "vocals"):
+    for name in ("piano", "vocals"):
         sf.write(stems / f"{name}.wav", x, SR)
+    sf.write(stems / "other.wav", render([(0.5, 60.2, 0.3), (1.0, 64.2, 0.3), (1.5, 67.2, 0.3)], 3.0), SR)
     for name in ("drums", "bass"):
         sf.write(stems / f"{name}.wav", np.zeros_like(x), SR)
     analysis = {"source": {"stems": str(stems), "duration_s": 3.0}, "grid": {"bpm": 120.0, "phase": 0.5},
@@ -356,17 +357,20 @@ def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
                 "notes_808": [{"t": 0.5, "end": 2.5, "pitch": 36, "peak": 1.0}] * 2, "sections": []}
     (tmp_path / "analysis.json").write_text(json.dumps(analysis))
     monkeypatch.setattr(basicpitch, "transcribe", fake_transcribe)
-    out = pipeline.melodic(tmp_path, log=lambda *a: None)
+    logs = []
+    out = pipeline.melodic(tmp_path, log=logs.append)
     files = out["source"]["settings"]["files"]
     assert files["other"]["min_hz"] == pytest.approx(69.3, abs=0.01)  # above the 808's C2
     assert files["vocals"]["min_hz"] is None  # no 808 floor on a vocal
-    assert files["other"]["tuning"] == -0.03 and files["piano"]["tuning"] == 0.0  # taken out by the worker
-    assert set(out["stems"]) == {"other", "piano", "vocals"} and out["stems"]["other"]["tuning_cents"] == -3
+    # the tuning the worker takes out is measured on the stem, not taken from a stale analysis.json (-3 cents)
+    assert files["other"]["tuning"] == pytest.approx(0.2, abs=0.01) and abs(files["piano"]["tuning"]) < 0.01
+    assert any("other -3" in line for line in logs)
+    assert set(out["stems"]) == {"other", "piano", "vocals"} and out["stems"]["other"]["tuning_cents"] == 20
     assert [n["start_time"] for n in out["stems"]["other"]["notes"]] == [1.0, 2.0, 3.0]
     assert [c["label"] for c in out["chords"]["segments"]] == ["C:maj"]  # the 808 (C2) is the bass
     plan = pipeline.plan(tmp_path, log=lambda *a: None)
     track = plan["tracks"]["melodic"]["other"]
-    assert len(track["notes"]) == 3 and track["cents"] == -3
+    assert len(track["notes"]) == 3 and track["cents"] == 20
     spec = {t["name"]: t for t in build_spec(plan)}
     assert spec["other (notes)"]["mute"] is True and spec["other (notes)"]["clips"][0]["notes"] == track["notes"]
     assert (tmp_path / "midi" / "other.mid").is_file()
