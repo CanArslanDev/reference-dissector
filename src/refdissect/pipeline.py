@@ -215,10 +215,11 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
 def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float | None = None,
             snap_ms: float | None = None, voting: bool = True, drop_below: float | None = None, log=print) -> dict:
     """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
-    stem in its own environment, its notes and posteriorgrams go to
-    basicpitch/. The minimum frequency is just above the 808's usual range
-    for the stems it bleeds into (melodic.FLOOR_STEMS), or min_hz for every
-    stem when given."""
+    stem in its own environment, on the stem moved onto A440 by its tuning
+    (analysis.json); its notes and posteriorgrams go to basicpitch/. The
+    minimum frequency is just above the 808's usual range for the stems it
+    bleeds into (melodic.FLOOR_STEMS), or min_hz (as heard) for every stem
+    when given."""
     from . import melodic as mel
     from .basicpitch import PRESETS, transcribe
     work = Path(work)
@@ -228,9 +229,15 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     if not stems:
         raise ValueError(f"No tonal stem ({', '.join(mel.MELODIC_STEMS)}) in {stems_dir}")
     floor_hz, top = (min_hz, None) if min_hz else mel.floor_above_808(analysis["notes_808"])
-    files = {s: {"min_hz": floor_hz if min_hz or s in mel.FLOOR_STEMS else None} for s in stems}
+    files = {}
+    for s in stems:
+        tuning = mel.stem_tuning(analysis, s)
+        # the 808's floor is a semitone (on A440 already); a given min_hz is as heard
+        hz = min_hz * 2 ** (-tuning / 12) if min_hz else (floor_hz if s in mel.FLOOR_STEMS else None)
+        files[s] = {"tuning": tuning, "min_hz": round(hz, 2) if hz else None}
     floored = [s for s in stems if files[s]["min_hz"]]
-    log(f"melodic: {', '.join(stems)}; minimum frequency "
+    log(f"melodic: {', '.join(stems)}; tuning taken out: "
+        + ", ".join(f"{s} {100 * files[s]['tuning']:+.0f} cents" for s in stems) + "; minimum frequency "
         + (f"{floor_hz} Hz for {', '.join(floored)}" if floored else "none")
         + (f" (above the 808's MIDI {top})" if top is not None and floored else ""))
     run = transcribe([stems_dir / f"{s}.wav" for s in stems], work / "basicpitch", PRESETS, files)

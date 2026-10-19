@@ -67,6 +67,22 @@ def test_worker_decode_corrects_bends_and_uses_copies(monkeypatch):
     (n,) = got
     assert n["bend"] == [0] * 9 + [1] and n["midi"] == 60 and n["onset"] == pytest.approx(0.7)
     assert n["start_s"] == pytest.approx(round(float(block_times(151)[150]), 4))
+    slower = w.decode(out, {"onset": 0.6, "frame": 0.3, "min_ms": 35.0, "melodia": False}, scale=0.97)
+    assert slower[0]["start_s"] == pytest.approx(round(float(block_times(151)[150]) * 0.97, 4))
+
+
+def test_worker_moves_a_detuned_file_onto_a440(tmp_path):
+    """A tone 45 cents above A4, read with tuning +0.45: handed to the model
+    as 22050 Hz it is A4 itself, 2.6 % slower, and the time scale brings its
+    seconds back."""
+    w = worker()
+    t = np.arange(SR) / SR
+    sf.write(tmp_path / "x.wav", (0.5 * np.sin(2 * np.pi * 440 * 2 ** (0.45 / 12) * t)).astype(np.float32), SR)
+    audio, scale = w.load(str(tmp_path / "x.wav"), 0.45)
+    spectrum = np.abs(np.fft.rfft(audio * np.hanning(len(audio)), 1 << 18))
+    assert np.argmax(spectrum) * w.SR / (1 << 18) == pytest.approx(440.0, abs=0.5)
+    assert len(audio) / w.SR * scale == pytest.approx(1.0, abs=1e-3) and scale == pytest.approx(0.974, abs=1e-3)
+    assert w.load(str(tmp_path / "x.wav"))[1] == 1.0
 
 
 def test_transcribe_runs_the_worker_in_its_own_environment(monkeypatch, tmp_path):
@@ -87,18 +103,21 @@ def test_transcribe_runs_the_worker_in_its_own_environment(monkeypatch, tmp_path
 
 
 @pytest.mark.skipif(not os.environ.get("REFDISSECT_SLOW"), reason="runs Basic Pitch (REFDISSECT_SLOW=1)")
-def test_real_worker_on_tones(tmp_path):
-    """Four plucked tones: every one found at its pitch within 30 ms."""
-    melody = [(0.5, 60), (1.0, 64), (1.5, 67), (2.0, 72)]
-    x = np.zeros(int(3.5 * SR), np.float32)
+@pytest.mark.parametrize("tuning", [0.0, -0.45])
+def test_real_worker_on_tones(tmp_path, tuning):
+    """Eight plucked tones, in tune and 45 cents flat (that tuning taken out
+    before inference): every one found at its pitch within 30 ms of the
+    file's time. Not taken out, 2 of the 8 flat tones came a semitone low."""
+    melody = [(0.5, 60), (1.0, 64), (1.5, 67), (2.0, 72), (2.5, 71), (3.0, 67), (3.5, 62), (4.0, 65)]
+    x = np.zeros(int(5.5 * SR), np.float32)
     t = np.arange(int(0.4 * SR)) / SR
     for start, midi in melody:
-        f = 440 * 2 ** ((midi - 69) / 12)
+        f = 440 * 2 ** ((midi + tuning - 69) / 12)
         y = 0.4 * sum(np.sin(2 * np.pi * k * f * t) / k for k in range(1, 5)) * np.exp(-t / 0.25)
         x[int(start * SR):int(start * SR) + len(y)] += (y * np.minimum(1, t / 0.002)).astype(np.float32)
     sf.write(tmp_path / "other.wav", x, SR)
     settings = {"melodic": {**basicpitch.PRESETS["melodic"], "min_hz": None}}
-    out = basicpitch.transcribe([tmp_path / "other.wav"], tmp_path / "bp", settings)
+    out = basicpitch.transcribe([tmp_path / "other.wav"], tmp_path / "bp", settings, {"other": {"tuning": tuning}})
     notes = json.loads((tmp_path / "bp" / "other.json").read_text())["notes"]["melodic"]
     assert out["stems"]["other"]["notes_per_preset"]["melodic"] == len(notes)
     for start, midi in melody:

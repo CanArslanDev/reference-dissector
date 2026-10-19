@@ -97,9 +97,11 @@ def command(audio: list[str | Path], out_dir: str | Path, presets: dict, files: 
 
 def transcribe(audio: list[str | Path], out_dir: str | Path, presets: dict, files: dict | None = None) -> dict:
     """Run the model once per file and decode every preset ({name: {onset,
-    frame, min_ms, melodia, min_hz, max_hz}}); files ({file stem: {min_hz}})
-    overrides the presets for a file. Writes OUT_DIR/<stem>.json (notes per
-    preset) and OUT_DIR/<stem>.npz (posteriorgrams, float16)."""
+    frame, min_ms, melodia, min_hz, max_hz}}); files ({file stem: {tuning,
+    min_hz}}) overrides the presets for a file, whose tuning (semitones from
+    A440) is taken out before inference. Writes OUT_DIR/<stem>.json (notes per
+    preset in the file's seconds, tuning, time_scale) and OUT_DIR/<stem>.npz
+    (posteriorgrams, float16; frame times block_times x time_scale)."""
     done = subprocess.run(command(audio, out_dir, presets, files), capture_output=True, text=True)
     if done.returncode != 0:
         raise RuntimeError(f"Basic Pitch failed:\n{done.stderr[-2000:]}")
