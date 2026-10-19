@@ -144,15 +144,48 @@ def test_unsure_meter_is_four_four(kit):
     assert grid.beats_per_bar == 4 and not info["meter"]["accepted"]
 
 
-@pytest.mark.parametrize("swing, hats, want16", [(0.5, 1, 0.5), (0.66, 1, 0.66), (0.58, 1, 0.58), (0.5, 2, None)])
-def test_swing(kit, swing, hats, want16):
-    truth = drum_beat(kit, 95, 8, swing=swing, hats=hats)
+@pytest.mark.parametrize("bpm, swing, hats, want16", [(95, 0.5, 1, 0.5), (95, 0.66, 1, 0.66), (95, 0.58, 1, 0.58),
+                                                       (136, 0.66, 1, 0.66), (95, 0.5, 2, None)])
+def test_swing(kit, bpm, swing, hats, want16):
+    """From the hats' attacks: onset-strength peaks read 66 % up to 3.6
+    points low, the hats on the 8th lines peaking later than the swung ones."""
+    truth = drum_beat(kit, bpm, 12, swing=swing, hats=hats)
     _, info = estimate(truth["audio"], tracked(truth), (100, 180))
     if want16 is None:  # hats on 8ths only: no 16ths to read
         assert info["swing"]["ratio_16"] is None
     else:
-        assert abs(info["swing"]["ratio_16"] - want16) < 0.02
-    assert abs(info["swing"]["ratio_8"] - 0.5) < 0.02
+        assert abs(info["swing"]["ratio_16"] - want16) < 0.002
+    assert abs(info["swing"]["ratio_8"] - 0.5) < 0.002
+
+
+def hats_at(truth: dict, kit: dict, times) -> dict:
+    x = truth["audio"].copy()
+    for t in times:
+        a = int(round(t * SR))
+        x[a:a + len(kit["hat"])] += 0.3 * kit["hat"][: max(0, min(len(kit["hat"]), len(x) - a))]
+    return {**truth, "audio": x}
+
+
+def test_no_swing_from_straight_beats(kit):
+    """Straight beats with hats on 8ths read 0.74 (a kick sample's own second
+    transient 158 ms in), 0.43 (a 32nd roll every 4th bar) and 0.51 (8th
+    triplets every other bar; 0.60 on a library kit)."""
+    kick = np.zeros(int(0.3 * SR), np.float32)
+    kick[:len(kit["kick"])] = kit["kick"]
+    a = int(0.158 * SR)
+    kick[a:a + len(kit["hat"])] += 0.05 * kit["hat"]
+    echo = drum_beat({**kit, "kick": kick}, 136, 16, beats_per_bar=3, hats=2)
+    plain = drum_beat(kit, 160, 16, hats=2)
+    q = 60 / 160
+    rolls = hats_at(plain, kit, [plain["beats"][0] + (b * 4 + 3 + k / 8) * q for b in range(3, 16, 4)
+                                 for k in range(8)])
+    plain = drum_beat(kit, 140, 16, hats=2)
+    q = 60 / 140
+    triplets = hats_at(plain, kit, [plain["beats"][0] + (b * 4 + 2 + k * 2 / 3) * q for b in range(1, 16, 2)
+                                    for k in range(6)])
+    for truth in (echo, rolls, triplets):
+        _, info = estimate(truth["audio"], tracked(truth), (100, 180))
+        assert info["swing"]["ratio_16"] is None and abs(info["swing"]["ratio_8"] - 0.5) < 0.002
 
 
 def test_drift_keeps_a_tempo_map_for_a_ramp(kit):
