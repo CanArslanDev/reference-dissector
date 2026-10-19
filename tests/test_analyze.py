@@ -7,7 +7,7 @@ import subprocess
 import numpy as np
 import pytest
 import soundfile as sf
-from conftest import drum_beat, tracked
+from conftest import drum_beat, switch, tracked
 
 from refdissect import beats, pipeline
 from refdissect.audio import SR, read
@@ -61,6 +61,19 @@ def test_an_unsure_bar_line_is_logged(stems, tmp_path, monkeypatch):
     a = pipeline.analyze(stems["dir"], tmp_path, log=logs.append)
     assert a["grid"]["downbeat"]["ambiguous"]
     assert any(line.startswith("  the first bar line is unsure (the tracker's bars disagree") for line in logs)
+
+
+def test_a_tempo_change_is_logged(kit, tmp_path, monkeypatch):
+    truth = switch(kit, 136, 160, 6)
+    d = tmp_path / "stems"
+    d.mkdir()
+    sf.write(d / "drums.wav", truth["audio"], SR, subtype="FLOAT")
+    sf.write(d / "bass.wav", np.zeros_like(truth["audio"]), SR, subtype="FLOAT")
+    monkeypatch.setattr(beats, "track", lambda paths, **kw: tracked(truth))
+    logs = []
+    a = pipeline.analyze(d, tmp_path / "work", log=logs.append)
+    assert a["grid"]["tempo_change"]["grid_follows"] == "first" and abs(a["grid"]["bpm"] - 136) < 0.05
+    assert any(line.startswith("  the tempo changes by x1.17") and "follows the first part" in line for line in logs)
 
 
 def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypatch):

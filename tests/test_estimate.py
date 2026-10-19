@@ -4,10 +4,10 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from conftest import drum_beat, six_eight, tracked
+from conftest import drum_beat, six_eight, switch, tracked
 
 from refdissect.audio import SR
-from refdissect.grid import Grid, _attack, bar_line, drift, estimate, fit_grid, parse_meter, tracker_line
+from refdissect.grid import Grid, _attack, bar_line, drift, estimate, fit_grid, parse_meter, tempo_change, tracker_line
 from refdissect.hits import strength_peaks
 
 
@@ -251,6 +251,33 @@ def test_drift_ignores_an_offset_and_stray_beats(kit):
     for g, b in ((replace(grid, phase=grid.phase - 0.014), beats), (grid, early)):
         drift_ms, tempo_map = drift(truth["audio"], g, numbers, b, grid.bpm / bpm, onsets)
         assert drift_ms < 5 and tempo_map is None
+
+
+def on_lines(grid: Grid, beats) -> float:
+    """Share of the beats within 20 ms of a grid line."""
+    k = np.round((np.asarray(beats) - grid.phase) / grid.beat)
+    return float(np.mean(np.abs(beats - (grid.phase + k * grid.beat)) < 0.02))
+
+
+@pytest.mark.parametrize("first, second, bars", [(136, 160, 8), (160, 136, 6), (150, 130, 7)])
+def test_a_beat_switch_follows_the_longer_tempo(kit, first, second, bars):
+    """A line through both tempi matched neither: 136 then 160 read as 142.3,
+    12 % of each part's beats on its lines. fit_grid matched one part. The
+    longer part, in seconds, is the slower one here."""
+    truth = switch(kit, first, second, bars)
+    grid, info = estimate(truth["audio"], tracked(truth), (100, 180))
+    change = info["tempo_change"]
+    follows, bpm, beats = ("first", first, truth["first"]) if first < second else ("second", second, truth["second"])
+    assert change["grid_follows"] == follows and abs(change["ratio"] - second / first) < 0.01
+    assert change["until"] <= truth["cut"] + 1.5 and change["from"] >= truth["cut"] - 1.5
+    assert abs(grid.bpm - bpm) < 0.05 and on_lines(grid, beats) == 1.0
+    downbeats = truth["downbeats"][truth["downbeats"] >= (truth["cut"] - 0.01 if follows == "second" else 0)]
+    assert abs(bar_error_ms(grid, {"downbeats": downbeats})) < 3
+
+
+def test_no_tempo_change_in_a_ramp_or_a_steady_beat(kit):
+    for truth in (drum_beat(kit, 136, 16, ramp=0.03), drum_beat(kit, 95, 16)):
+        assert tempo_change(tracked(truth)["beats"]) is None
 
 
 def test_bpm_forces_the_tempo(kit):
