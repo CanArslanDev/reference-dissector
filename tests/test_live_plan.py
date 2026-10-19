@@ -52,6 +52,15 @@ def test_plan(tmp_path):
     assert "drums_track_db" in plan["levels"] and "808_track_db" in plan["levels"]
 
 
+def test_locators_on_the_bar_lines(tmp_path):
+    """Bar 1 starts at the grid's phase (here 1 s = 2 beats), bars of 3 beats in 3/4."""
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["grid"].update(phase=1.0, beats_per_bar=3, beat_unit=4)
+    analysis["sections"] = [{"name": "A", "start_bar": 1, "end_bar": 2}, {"name": "B", "start_bar": 3, "end_bar": 4}]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert plan["locators"] == [["A (1)", 2.0], ["B (3)", 8.0]]
+
+
 def test_midi_files(tmp_path):
     analysis, matches, synth = _fixture(tmp_path)
     plan = make_plan(analysis, matches, synth, tmp_path)

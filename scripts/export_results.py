@@ -131,7 +131,8 @@ def song(work: Path, name: str) -> dict:
                         for x in mm["top"][:3]],
                 "per_hit_wins": list(mm["per_hit"]["wins"].values()) if mm.get("per_hit") else None,
                 "null_test_db": list(mm["null_test_db"].values())}
-    out = {"song": name, "grid": a["grid"], "tuning": a["tuning"], "duration_s": a["source"]["duration_s"],
+    grid = {k: v for k, v in a["grid"].items() if k != "tempo_map"}  # beat times stay local (docs/09)
+    out = {"song": name, "grid": grid, "tuning": a["tuning"], "duration_s": a["source"]["duration_s"],
            "sections": a["sections"], "sounds": sounds,
            "808": {"notes": len(notes), "by_pitch": dict(Counter(n["pitch"] for n in notes).most_common()),
                    "slides_over_1.5_semitones": sum(abs(n["slide"]) >= 1.5 for n in notes)}}
