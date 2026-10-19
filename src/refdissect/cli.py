@@ -138,18 +138,22 @@ def _list(text: str | None, cast=str) -> list | None:
     return [cast(x.strip()) for x in text.split(",") if x.strip()] if text else None
 
 
+def _say(msg) -> None:
+    print(msg, flush=True)  # progress of a long run, also when it goes to a file
+
+
 def _suite_build(a):
     from .library import load_rows
     from .suite import build
     beats = build(load_rows(a.inventory), a.out, _list(a.scenarios), _list(a.seeds, int), a.midi_dir, a.v1_truth,
-                  a.bars)
+                  a.bars, log=_say)
     print(f"{len(beats)} beats in {a.out}")
 
 
 def _suite_run(a):
     from .suite import run
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
-            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume)
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
