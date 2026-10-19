@@ -1,16 +1,22 @@
 """Turn local work folders into the public results/ and figures/.
 
     uv run python scripts/export_results.py WORK_ROOT
+    uv run python scripts/export_results.py --suite SUITE_DIR TAG [TAG ...]
 
 WORK_ROOT holds work/calibration/results.json, work/library*.npz and
 <song>/refdissect/ (as in the README). Nothing
 audio goes out, and files from a personal sample library are named by role
 and a short hash (Ableton's Core Library keeps its names): the numbers are
 the point, not where the sounds came from.
+
+SUITE_DIR is a calibration-v2 suite (refdissect suite); its scores-<tag>.json
+becomes results/calibration/suite-<tag>.json with the means per scenario
+only: no beat, file, path, note or event time.
 """
 
 import hashlib
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -48,6 +54,32 @@ def calibration(work: Path) -> dict:
     (ROOT / "results" / "calibration").mkdir(parents=True, exist_ok=True)
     (ROOT / "results" / "calibration" / "summary.json").write_text(json.dumps(out, indent=1))
     calibration_scatter(r["oracle"], ROOT / "figures" / "calibration_identification.png")
+    return out
+
+
+SUITE_KEEP = ("schema", "tag", "model", "options", "render", "refdissect", "beats", "last_run")
+SCENARIO_KEEP = ("beats", "seeds", "analysis", "plan", "seconds")
+LOCAL = re.compile(r"/Users/|/home/|[A-Za-z]:\\\\|\.(wav|flac|mp3|aiff?|mid|npy|npz)\b", re.IGNORECASE)
+
+
+def suite_scores(root: Path, tag: str) -> dict:
+    """results/calibration/suite-<tag>.json from root/scores-<tag>.json: how
+    the run was made (model, seed, shifts, versions, options) and the means
+    per scenario and overall. Refuses to write anything that looks like a
+    local path or an audio, MIDI or array file name."""
+    agg = json.loads((root / f"scores-{tag}.json").read_text(encoding="utf-8"))
+    sep = agg.get("separation") or {}
+    out = {k: agg.get(k) for k in SUITE_KEEP}
+    out["separation"] = {k: sep.get(k) for k in ("model", "seed", "shifts", "devices", "versions")}
+    out["failed"] = len(agg.get("failed") or [])
+    out["scenarios"] = {name: {k: v[k] for k in SCENARIO_KEEP} for name, v in agg["scenarios"].items()}
+    out["overall"] = agg["overall"]
+    text = json.dumps(out, indent=1)
+    if LOCAL.search(text):
+        raise ValueError(f"suite-{tag}.json would name a local file: {LOCAL.search(text).group(0)!r}")
+    path = ROOT / "results" / "calibration" / f"suite-{tag}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + "\n", encoding="utf-8")
     return out
 
 
@@ -126,7 +158,12 @@ def figure(work: Path, name: str, library: Path, library_808: Path) -> None:
     spectrogram_rows(rows, ROOT / "figures" / f"{name.lower()}_sounds.png")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1] == "--suite":
+    root = Path(sys.argv[2]).expanduser()
+    for tag in sys.argv[3:]:
+        out = suite_scores(root, tag)
+        print(f"{tag}: {out['beats']} beats, {len(out['scenarios'])} scenarios -> results/calibration/suite-{tag}.json")
+elif __name__ == "__main__":
     work = Path(sys.argv[1]).expanduser()
     c = calibration(work)
     print(json.dumps(c["summary"], indent=1))

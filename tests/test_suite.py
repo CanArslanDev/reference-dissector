@@ -1,10 +1,13 @@
-"""The suite commands on a tiny synthetic suite: a fake inventory, 4-bar
-beats and a stub separator (the truth's group stems handed back as Demucs'
-stems), so no sample library, Demucs or model download is needed."""
+"""The suite commands on a tiny synthetic suite: a fake inventory, 8-bar
+beats (4 bars find no drum templates) and a stub separator (the truth's group
+stems handed back as Demucs' stems), so no sample library, Demucs or model
+download is needed; and the export of the means, which must name no file."""
 
 import functools
 import json
+import runpy
 import shutil
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,7 +20,7 @@ from refdissect.cli import main
 from refdissect.library import Library, inventory
 from refdissect.synth808 import Params, voice
 
-pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="the scenario beats need ffmpeg")
+needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="the scenario beats need ffmpeg")
 QUICK_FIT = {"maxiter": 2, "popsize": 4}  # the 808 fit's search, cut from 150 x 20 (about 50 s a beat) for tests
 
 
@@ -77,6 +80,7 @@ def stub_separator(calls):
     return separate_many
 
 
+@needs_ffmpeg
 def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     root = tmp_path / "suite"
     args = ["suite", "build", str(library / "inventory.json"), "--out", str(root), "--scenarios",
@@ -127,6 +131,7 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     assert "+0.000" in text  # the same numbers under both tags
 
 
+@needs_ffmpeg
 def test_a_failed_beat_is_recorded_and_resume_skips_done_beats(library, tmp_path, monkeypatch):
     root = tmp_path / "suite"
     main(["suite", "build", str(library / "inventory.json"), "--out", str(root), "--scenarios", "v1",
@@ -141,3 +146,24 @@ def test_a_failed_beat_is_recorded_and_resume_skips_done_beats(library, tmp_path
     assert "no grid" in json.loads((root / "v1-1" / "runs" / "x" / "scores.json").read_text())["failed"]
     s = suite.run(root, library / "library.npz", tag="x", jobs=1, resume=True)
     assert s["last_run"]["beats"] == 0  # both have a scores.json, failed or not
+
+
+def test_the_export_keeps_means_per_scenario_only(tmp_path):
+    ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
+    ns["suite_scores"].__globals__["ROOT"] = tmp_path
+    agg = {"schema": "refdissect.suite/1", "tag": "t", "model": "htdemucs", "options": [{}], "render": [True],
+           "refdissect": [{"version": "0.1.0"}], "beats": 2, "last_run": {"beats": 2},
+           "separation": {"model": "htdemucs", "seed": 0, "shifts": 1, "devices": ["mps"], "versions": {},
+                          "audio": "/Users/someone/beat/mix_mp3.wav"},
+           "failed": ["v1-3"], "overall": {"scenarios": 1, "analysis": {"strict_f1_20": 0.5}},
+           "scenarios": {"v1": {"beats": 2, "seeds": [1, 2], "analysis": {"strict_f1_20": 0.5}, "plan": {},
+                                "seconds": {}, "records": [{"beat": "v1-1", "path": "/Users/someone/x.wav"}]}}}
+    (tmp_path / "scores-t.json").write_text(json.dumps(agg))
+    out = ns["suite_scores"](tmp_path, "t")
+    text = (tmp_path / "results" / "calibration" / "suite-t.json").read_text()
+    assert out["failed"] == 1 and "/Users/" not in text and ".wav" not in text and "v1-3" not in text
+    assert json.loads(text)["scenarios"]["v1"]["analysis"] == {"strict_f1_20": 0.5}
+    agg["options"] = [{"analyze": {"model_path": "/Users/someone/model.npz"}}]
+    (tmp_path / "scores-t.json").write_text(json.dumps(agg))
+    with pytest.raises(ValueError, match="local file"):
+        ns["suite_scores"](tmp_path, "t")

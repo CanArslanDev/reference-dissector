@@ -113,8 +113,9 @@ def build(rows: list[dict], root: str | Path, scenarios=None, seeds=(1, 2), midi
 
 
 def source() -> dict:
-    """The code a run used: the package version and, when it runs from a git
-    checkout, the commit and whether the package differs from it."""
+    """The code a process loaded: the package version and, when it runs from
+    a git checkout, the commit and whether the package's files differed from
+    it (read once, at import: an edit made later does not change what ran)."""
     here = Path(__file__).parent
     try:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=here, capture_output=True, text=True,
@@ -126,6 +127,9 @@ def source() -> dict:
     if sha.returncode != 0:
         return {"version": __version__}
     return {"version": __version__, "commit": sha.stdout.strip(), "dirty": bool(dirty.stdout.strip())}
+
+
+SOURCE = source()
 
 
 # ── Separation, once per beat and model ──
@@ -185,7 +189,7 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
     whose 808 never rings alone gets no fitted one-shot (fit_808's
     ValueError), so its plan has no 808 track, as with the CLI."""
     problems = {}
-    with open(work / "log.txt", "w", encoding="utf-8") as f:
+    with open(work / "log.txt", "w", encoding="utf-8", buffering=1) as f:  # line by line, to follow a run
         def log(msg) -> None:
             f.write(f"{msg}\n")
         pipeline.analyze(stems_dir(beat, model), work, log=log, **options.get("analyze", {}))
@@ -248,7 +252,7 @@ def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, librar
     seconds["total"] = round(sum(v for k, v in seconds.items() if k != "separate" and v is not None), 2)
     record = {"beat": beat.name, "scenario": truth["scenario"], "seed": truth["seed"], "tag": tag, "model": model,
               "separation": {k: sep.get(k) for k in ("model", "seed", "shifts", "device", "versions")},
-              "options": options, "refdissect": source(), "render": render, "seconds": seconds,
+              "options": options, "refdissect": SOURCE, "render": render, "seconds": seconds,
               "problems": problems, "missing": missing,
               "plan_size": {"pads": len(plan["tracks"]["drums"]["pads"]),
                             "drum_notes": len(plan["tracks"]["drums"]["notes"]),
