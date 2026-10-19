@@ -46,6 +46,13 @@ def test_a_failing_tracker_falls_back_to_before(stems, tmp_path, monkeypatch):
     assert any("unavailable" in line for line in logs)
 
 
+def test_tracker_beats_without_a_line_fall_back_to_before(stems, tmp_path, monkeypatch):
+    monkeypatch.setattr(beats, "track", lambda paths, **kw: {"beats": [1.0, 2.0], "downbeats": [1.0]})
+    logs = []
+    assert_as_before(pipeline.analyze(stems["dir"], tmp_path, log=logs.append), stems)
+    assert "  no line through the tracker's 2 beats: the grid is fit_grid's" in logs
+
+
 def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypatch):
     truth = stems["truth"]
     monkeypatch.setattr(beats, "track", lambda paths, **kw: tracked(truth))

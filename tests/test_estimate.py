@@ -21,6 +21,33 @@ def test_without_a_tracker_it_is_fit_grid(beat):
         assert (grid.bpm, grid.phase, grid.beats_per_bar) == (old.bpm, old.phase, old.beats_per_bar)
         assert info["score"] == old_info["score"] and info["tracker"] is None
         assert info["phase_correction_ms"] == 0.0 and info["alternatives"] == []
+    assert info["level"]["why"] == "no line through the tracker's 2 beats"
+
+
+def switching(bpm: float, start: float, n8: int, n4: int) -> np.ndarray:
+    """Tracker beats on n8 8ths, then n4 quarters, 5 ms late on 20 ms frames."""
+    q = 60 / bpm
+    beats = np.r_[start + np.arange(n8 + 1) * q / 2, start + n8 * q / 2 + np.arange(1, n4 + 1) * q]
+    return np.round((beats + 0.005) / 0.02) * 0.02
+
+
+@pytest.mark.parametrize("n8, n4", [(40, 40), (30, 30), (48, 48), (62, 62), (48, 47), (60, 20)])
+def test_tracker_line_through_a_change_of_level(n8, n4):
+    """beat_this tapped a sparse 72 BPM beat in 8ths, then in quarters. Their
+    median interval (0.63 s) is on neither level: 97.9 BPM at 40 + 40, no
+    line at all at 48 + 48. The line starts from the level tapped most."""
+    beats = switching(72, 0.031, n8, n4)
+    bpm, numbers, kept = tracker_line(beats)
+    assert abs(bpm - 144) < 0.02 and len(kept) == len(beats) and numbers[-1] == n8 + 2 * n4
+
+
+def test_estimate_through_a_change_of_level(kit):
+    truth = drum_beat(kit, 72, 12)
+    beats = switching(72, truth["beats"][0], 24, 24)  # median interval: 0.625 s
+    tracker = {**tracked(truth), "beats": beats.tolist()}
+    grid, info = estimate(truth["audio"], tracker, (100, 180))
+    assert abs(grid.bpm - 144) < 0.05 and abs(bar_error_ms(grid, truth)) < 3
+    assert info["drift_ms"] < 10 and info["tempo_map"] is None
 
 
 @pytest.mark.parametrize("bpm, bars, half, rng, want", [
