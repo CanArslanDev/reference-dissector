@@ -4,7 +4,9 @@ The model runs once per stem (basicpitch.transcribe, in its own environment)
 and two presets are decoded from that run (basicpitch.PRESETS): `melodic` for
 the notes that go to Live, `chord` (melodia on) kept for the pads. Per stem:
 
-- pitch: Basic Pitch's semitone; the stem's tuning (analysis.json) as cents.
+- pitch: Basic Pitch's semitone, on the stem moved onto A440 by its tuning
+  (measured on the stem by the pipeline; the worker takes it out), and that
+  tuning as cents; bends are relative to it.
 - minimum frequency: just above the 808's usual range, so the 808 bleeding
   into other, piano and guitar is not transcribed (`floor_above_808`,
   FLOOR_STEMS); a vocal keeps its low notes.
@@ -16,7 +18,8 @@ the notes that go to Live, `chord` (melodia on) kept for the pads. Per stem:
   90th percentile, as the drum hits' (live.velocities).
 - beats: seconds x BPM / 60 from the start of the audio, like the drum notes
   in the plan; no quantization unless a snap tolerance is given (`to_beats`).
-- loop voting where the sections repeat (`loop_groups`, `vote`).
+- loop voting where a section's notes repeat (`note_loops`, `vote`); a note
+  is put back only where the stem sounds at its pitch.
 
 Chords (`chords`): Basic Pitch's note posteriorgram of the melodic stems
 summed into pitch classes per 8th note, matched against 14 chord qualities,
@@ -25,20 +28,24 @@ of the loops that the same stems' notes show (`note_loops`). The 808 stays
 out of those pitch classes (only pitches above its highest note count) but
 names the bass: the 808 note sounding in a span gives the slash bass, and so
 the inversion; without one, the lowest chord tone of the melodic stems does.
+Chords with the same tones go to that bass, else to min7 and hdim7 over maj6
+and min6 (LOW_BONUS, QUALITY_PRIOR).
 
 On 36 synthetic renders (pads with 7ths, sus, dim and slash chords changing
 on beat 3, beat 4 and the "and" of 2; full mixes; 4-bar loops played four
 times), each one section as analyze gives a steady beat, with the truth's
-grid and 808 notes, mir_eval gives majmin 0.955, majmin_inv 0.810, sevenths
-0.904, sevenths_inv 0.788 (root 0.837), against 0.732 / 0.512 / 0.201 /
-0.017 for one major or minor triad per bar from chroma. When the lower root
-index broke ties between chords with the same tones (A:min7 read C:maj6),
-it was 0.880 / 0.744 / 0.824 / 0.720. The vote acted on 11 of the 12 loops
-(sevenths_inv there 0.903 -> 0.952) and on none of the 24 others. A vote on
-the cosine of the bars' pitch classes found a loop in all 36 (same-key bars
-scored 0.37-0.61 whether they repeat or not) and gave majmin 0.515 where it
-was 0.880 (before the tie-break). Without the 808 as bass majmin_inv is
-0.725; per half bar 0.780, and sevenths 0.848.
+grid and 808 notes and each render's measured tuning taken out, mir_eval
+gives majmin 0.953, majmin_inv 0.804, sevenths 0.904, sevenths_inv 0.783
+(root 0.837), against 0.732 / 0.512 / 0.201 / 0.017 for one major or minor
+triad per bar from chroma. When the lower root index broke ties between
+chords with the same tones (A:min7 read C:maj6), it was 0.877 / 0.738 /
+0.824 / 0.714. The vote acted on 11 of the 12 loops (sevenths_inv there
+0.894 -> 0.950) and on none of the 63 renders without repeats. A vote on
+the cosine of the bars' pitch classes, the first version's, found a loop in
+all 36 (same-key bars scored 0.37-0.61 whether they repeat or not) and gave
+majmin 0.515 where the vote on notes gave 0.880 (both before the tie-break
+and without the tuning step). Without the 808 as bass majmin_inv is 0.715;
+per half bar 0.779, and sevenths 0.843.
 """
 
 from __future__ import annotations
