@@ -124,8 +124,12 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         path = stems_dir / f"{stem}.wav"
         if path.is_file():
             plan["stems"][stem] = {"path": str(path), "mute": stem in STEMS_MUTED}
+    # sections count bars from the grid's first bar line, in its meter
+    grid = analysis["grid"]
+    first = max(0.0, grid.get("phase", 0.0)) * beats_per_second
+    bar = grid.get("beats_per_bar", 4) * 4 / grid.get("beat_unit", 4)
     for s in analysis.get("sections", []):
-        plan["locators"].append([f"{s['name']} ({s['start_bar']})", 4.0 * (s["start_bar"] - 1)])
+        plan["locators"].append([f"{s['name']} ({s['start_bar']})", round(first + bar * (s["start_bar"] - 1), 3)])
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
 
