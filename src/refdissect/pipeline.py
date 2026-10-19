@@ -64,6 +64,11 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     if fit_info["tempo_map"]:
         log(f"  the beats drift up to {fit_info['drift_ms']} ms from a constant tempo: tempo_map kept "
             f"({len(fit_info['tempo_map'])} beats); the grid stays constant")
+    change = fit_info["tempo_change"]
+    if change:
+        log(f"  the tempo changes by x{change['ratio']} between {change['until']} and {change['from']} s: the grid "
+            f"follows the {change['grid_follows']} part ({change['span_s'][0]}-{change['span_s'][1]} s); the rest is "
+            f"off it")
     down = fit_info["downbeat"]
     if down and down["ambiguous"]:
         why = down.get("why") or f"{down.get('share', 0):.0%} of the tracker's downbeats agree"

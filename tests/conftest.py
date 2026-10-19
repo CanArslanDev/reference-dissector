@@ -94,6 +94,15 @@ def drum_beat(kit: dict, bpm: float, bars: int, beats_per_bar: int = 4, swing: f
             "downbeats": downbeats[downbeats >= crop] - crop, "bar": beats_per_bar * 60.0 / bpm}
 
 
+def switch(kit: dict, first: float, second: float, bars: int) -> dict:
+    """`bars` bars at `first` BPM, then `bars` at `second` (a beat switch)."""
+    a, b = drum_beat(kit, first, bars), drum_beat(kit, second, bars, lead=0.0)
+    cut = 0.03 + bars * 4 * 60.0 / first
+    return {"audio": np.concatenate([a["audio"][:int(round(cut * SR))], b["audio"]]), "cut": cut,
+            "beats": np.r_[a["beats"], cut + b["beats"]], "downbeats": np.r_[a["downbeats"], cut + b["downbeats"]],
+            "first": a["beats"], "second": cut + b["beats"]}
+
+
 def six_eight(kit: dict, bpm: float, bars: int, lead: float = 0.03) -> dict:
     """6/8 at bpm quarter notes a minute: a hat on every 8th, accented on the
     dotted quarters, kick on 1, snare on 4. Its beats are the dotted quarters."""
