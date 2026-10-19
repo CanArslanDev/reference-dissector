@@ -155,7 +155,7 @@ def test_swing_with_two_beat_bars_stays_binary(kit):
     at 1/3 and 5/6 of the beat, never at 2/3: no dotted quarters."""
     truth = drum_beat(kit, 95, 12, swing=0.66)
     grid, info = estimate(truth["audio"], tracked(truth, every=2), (100.0, 180.0))
-    assert abs(grid.bpm - 95) < 0.05 and info["level"]["level"] == "x1" and info["meter"]["two"]
+    assert abs(grid.bpm - 95) < 0.05 and info["level"]["level"] == "x1" and info["meter"]["two_beat_bars"]
 
 
 def test_unsure_meter_is_four_four(kit):
