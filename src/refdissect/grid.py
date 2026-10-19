@@ -36,9 +36,10 @@ from fractions import Fraction
 
 import librosa
 import numpy as np
+from scipy.ndimage import maximum_filter1d
 from scipy.signal import savgol_filter
 
-from .audio import SR, attack_time
+from .audio import ATTACK_BAND, BANDS, SR, attack, band, samples
 from .hits import HOP, strength_peaks
 
 # The tracker's tempo times these: its own level, the octaves, and the
@@ -304,16 +305,24 @@ def phase_near(env: np.ndarray, fps: float, bpm: float, beats: np.ndarray, ratio
 
 
 def _attack(x: np.ndarray, t: float, role: str) -> float | None:
-    """The attack (audio.attack_time in the role's band) of an onset-strength
-    peak at t: searched from 40 ms before it over 60 ms. None when it lands
-    more than 20 ms before the peak: the window opened on the sound before,
-    still ringing. A low tail swings through 30 % of the window's peak a few
-    ms in; on the test beats such 'attacks' came 25-39 ms before peaks that
-    sat 0-20 ms from the beat, where nothing played."""
+    """The attack (audio.attack, in the role's attack band) of an
+    onset-strength peak at t, searched from where the level (held over 10 ms,
+    so a low tail's ripple counts at its crests) is lowest in the 40 ms
+    before the peak: the sound before, still ringing, is left out. None when
+    even there it holds 30 % of the peak, or the attack lands more than 20 ms
+    before the peak. Searched from the window's start, a 45-55 Hz tail
+    swinging through 30 % of the peak a few ms in was taken for the attack
+    (25-39 ms before peaks 0-20 ms from the beat, where nothing played)."""
     a = int((t - 0.04) * SR)
     if a < 0:
         return None
-    at = attack_time(x[a:a + int(0.1 * SR)], role, search_s=0.06)
+    y = band(x[a:a + int(0.1 * SR)], ATTACK_BAND.get(role, role if role in BANDS else "full"))
+    held = maximum_filter1d(np.abs(y), samples(10))
+    search = int(0.06 * SR)
+    v = int(np.argmin(held[:samples(38)]))
+    if held[v] >= 0.3 * held[:search].max():
+        return None
+    at = (v + attack(y[v:], search=search - v)) / SR
     return a / SR + at if at >= 0.02 else None
 
 
@@ -378,31 +387,71 @@ def bar_line(phase: float, grid: Grid, downbeats) -> tuple[float, dict]:
                    "ambiguous": second >= 0.8 * top}
 
 
+def _ratio(pos: np.ndarray, wrap: np.ndarray, s: np.ndarray, on: np.ndarray, off: np.ndarray,
+           min_share: float = 0.25, min_strength: float = 0.25, max_iqr: float = 0.08) -> float | None:
+    """The median place of the `off` attacks, less that of the `on` ones (an
+    offset of the grid), or None unless they are a real part of the beat: 8
+    or more and min_share of the `on` count, at min_strength of their median
+    onset strength, and in one cluster (interquartile range up to max_iqr)."""
+    n = int(off.sum())
+    if n < max(8, min_share * on.sum()) or not on.any() or np.median(s[off]) < min_strength * np.median(s[on]):
+        return None
+    q1, q3 = np.percentile(pos[off], [25, 75])
+    if q3 - q1 > max_iqr:
+        return None
+    return float(np.median(pos[off]) - (np.median(wrap[on]) if on.sum() >= 8 else 0.0))
+
+
+def _echoes(x: np.ndarray, t: np.ndarray, share: float = 0.8, tol: float = 0.003) -> np.ndarray:
+    """Which of the onsets at t follow a kick (an onset below 200 Hz, where
+    hats have nothing) within 250 ms at one lag, when `share` of them do: the
+    kick sample's own second transient, not a hat. A straight 3/4 beat read
+    69.2 % from one, 158 ms into its kick sample."""
+    k, _ = strength_peaks(x, "low")
+    if len(k) < 2 or not len(t):
+        return np.zeros(len(t), bool)
+    j = np.searchsorted(k, t) - 1
+    lag = np.where(j >= 0, t - k[np.maximum(j, 0)], np.inf)
+    if np.mean(lag < 0.25) < share:
+        return np.zeros(len(t), bool)
+    same = np.abs(lag - np.median(lag)) < tol
+    return same if same.mean() >= share else np.zeros(len(t), bool)
+
+
 def swing(x: np.ndarray, grid: Grid, role: str = "hat") -> dict:
-    """Where the off-beat 16ths and 8ths sit, from onsets in the hat band
-    against the grid's beats. ratio_16: the odd 16th's place in its 8th (0.5
-    straight, 0.66 a triplet swing); ratio_8: the off-beat 8th's place in the
-    beat. Each is the median place, less the median place of the onsets on
-    the lines (the onset detector's delay); None from fewer than 8 onsets, and
-    ratio_16 when the 8ths themselves swing. On the test beats ratio_16 was
-    within 0.6 and 0.75 points (median; largest 3.3) of 58 and 66 %, and
-    read straight 16ths as 50.2-51.4 %."""
-    t, _ = strength_peaks(x, role)
+    """Where the off-beat 16ths and 8ths sit: the attacks (_attack) of the
+    onsets in the hat band against the grid's beats. ratio_16: the odd 16th's
+    place in its 8th (0.5 straight, 0.66 a triplet swing); ratio_8: the
+    off-beat 8th's place in the beat. None when those onsets are not a real
+    part of the beat (_ratio), and ratio_16 when the 8ths themselves swing.
+
+    Onset-strength peaks read 66 % as 62.4-66.4 %: the peaks of the hats on
+    the 8th lines, the delay taken off, came 0.01-0.04 of an 8th later than
+    those of the swung 16ths. Attacks read 66 and 58 % within 0.1 points and
+    straight 16ths at 49.8-50.1 %. Without the guards, straight beats read
+    up to 69.2 %: a kick sample's own second transient 158 ms in (strength
+    0.11 of the hats'), 32nd rolls (0.20), triplet fills (two clusters, an
+    interquartile range of 13-32 points against 2.8 at most for a swing).
+    Onsets at one lag after each kick are left out (_echoes)."""
+    t, s = strength_peaks(x, role)
+    a = np.array([np.nan if (at := _attack(x, ti, role)) is None else at for ti in t])
+    t, s = a[~np.isnan(a)], s[~np.isnan(a)]
     u = ((t - grid.phase) / grid.beat) % 1.0  # place in the beat
     v = (2 * u) % 1.0  # place in the 8th
     wrap_u, wrap_v = np.where(u > 0.5, u - 1, u), np.where(v > 0.5, v - 1, v)
     on_beat, on_8th = np.abs(wrap_u) < 0.06, np.abs(wrap_v) < 0.12
     off_8, off_16 = (u >= 0.4) & (u <= 0.72), (v >= 0.3) & (v <= 0.8)
-    delay_u = float(np.median(wrap_u[on_beat])) if on_beat.sum() >= 8 else 0.0
-    delay_v = float(np.median(wrap_v[on_8th])) if on_8th.sum() >= 8 else 0.0
-    r8 = float(np.median(u[off_8])) - delay_u if off_8.sum() >= 8 else None
-    r16 = float(np.median(v[off_16])) - delay_v if off_16.sum() >= 8 and (r8 is None or r8 < 0.55) else None
-    q16 = np.percentile(v[off_16], [25, 75]) if off_16.sum() >= 8 else (0.0, 0.0)
+    off_16[off_16] = ~_echoes(x, t[off_16])
+    r8 = _ratio(u, wrap_u, s, on_beat, off_8)
+    r16 = _ratio(v, wrap_v, s, on_8th, off_16) if r8 is None or r8 < 0.55 else None
+    q16 = np.percentile(v[off_16], [25, 75]) if off_16.any() else (0.0, 0.0)
+    strength = np.median(s[off_16]) / np.median(s[on_8th]) if off_16.any() and on_8th.any() else 0.0
+    offset = float(np.median(wrap_v[on_8th])) if on_8th.any() else 0.0
     return {"ratio_16": None if r16 is None else round(r16, 3), "ratio_8": None if r8 is None else round(r8, 3),
-            "evidence": {"band": role, "onsets": len(t), "on_8ths": int(on_8th.sum()),
+            "evidence": {"band": role, "attacks": len(t), "on_8ths": int(on_8th.sum()),
                          "off_16ths": int(off_16.sum()), "off_8ths": int(off_8.sum()),
-                         "iqr_16_pp": round(100 * float(q16[1] - q16[0]), 1),
-                         "delay_ms": round(1000 * delay_v * grid.beat / 2, 1)}}
+                         "strength_16": round(float(strength), 2), "iqr_16_pp": round(100 * float(q16[1] - q16[0]), 1),
+                         "offset_ms": round(1000 * offset * grid.beat / 2, 1)}}
 
 
 def _running(r: np.ndarray, size: int, how) -> np.ndarray:
