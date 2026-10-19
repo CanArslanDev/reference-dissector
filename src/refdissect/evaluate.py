@@ -572,6 +572,13 @@ def _first_downbeat(tm: dict) -> float | None:
     return float(tm["downbeats_s"][0]) if tm.get("downbeats_s") else None
 
 
+def _beat_s(tm: dict) -> float:
+    """Seconds per beat. bpm counts quarter notes, as Live and the scenarios
+    count it, also in 6/8, where a beat (beat_unit 8) is an eighth: a 6/8 bar
+    at 136 BPM is 1.32 s, not the 2.65 s six beats of 60/bpm would make."""
+    return 60 / tm["bpm"] * 4 / tm.get("beat_unit", 4)
+
+
 def _f_beats(ref: list[float], est: list[float], span: tuple[float, float]) -> float:
     """mir_eval's beat F-measure (70 ms) over the truth's beat span: a truth
     lists beats where music plays, a grid runs to both ends of the file (on
@@ -582,8 +589,8 @@ def _f_beats(ref: list[float], est: list[float], span: tuple[float, float]) -> f
 
 def rhythm_scores(truth: dict, est: dict) -> dict | None:
     """Tempo (relative error and octave class), meter, the first downbeat's
-    error modulo one bar (a bar = beats_per_bar beats at the truth's tempo)
-    and the downbeat F-measure when the estimate has downbeats, the beat
+    error modulo one bar (beats_per_bar of the truth's beats, _beat_s) and
+    the downbeat F-measure when the estimate has downbeats, the beat
     F-measure when both have beats, and swing when either has it."""
     tt, et = truth.get("time") or {}, est.get("time") or {}
     if not tt.get("bpm") or not et:
@@ -595,7 +602,7 @@ def rhythm_scores(truth: dict, est: dict) -> dict | None:
                         "octave": octave(ratio)}
     meters = [(m.get("beats_per_bar", 4), m.get("beat_unit", 4)) for m in (tt, et)]
     out["meter"] = {"truth": list(meters[0]), "est": list(meters[1]), "equal": meters[0] == meters[1]}
-    beat = 60 / tt["bpm"]
+    beat = _beat_s(tt)
     first_t, first_e = _first_downbeat(tt), _first_downbeat(et)
     beats = tt.get("beats_s") or tt.get("downbeats_s") or []
     span = (beats[0] - beat / 2, beats[-1] + beat / 2) if beats else (0.0, 0.0)
@@ -646,10 +653,13 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     master's small-signal gain, to compare in the truth stems' domain).
     balance_db is each level minus their median over sounds, which no
     overall gain changes. A truth sound without a stem or a rendered track is
-    None."""
+    None. A stem written below unity is read back at its level, divided by
+    audio.master.stems_gain (a scenario halves a stem that would clip in
+    FLAC: three group stems of the 27 real beats, none of a sound)."""
     render_dir = Path(render_dir)
     tracks = _load(render_dir / "render.json")["tracks"]
-    stems = (truth.get("audio") or {}).get("stems") or {}
+    audio = truth.get("audio") or {}
+    stems, gains = audio.get("stems") or {}, (audio.get("master") or {}).get("stems_gain") or {}
     t_drums, e_times, assignment, _ = _drum_assignment(truth, est)
     roles = _roles(truth, truth.get("drums") or [])
     jobs = [(s, roles[s], ref, [e for e, a in assignment.items() if a["to"] == s]) for s, ref in t_drums.items()]
@@ -659,12 +669,12 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     out: dict = {}
     for s, role, ref, ids in jobs:
         ids = [e for e in ids if e in tracks]
-        stem = stems.get(s) or stems.get(role)
-        if not stem or not ids:
+        key = s if stems.get(s) else role
+        if not stems.get(key) or not ids:
             out[s] = None
             continue
         b = ATTACK_BAND.get(role, "full")
-        x_truth = band(read(resolve(stem, truth_dir)), b)
+        x_truth = band(read(resolve(stems[key], truth_dir)) / gains.get(key, 1.0), b)
         x_rebuild = band(sum(read(render_dir / tracks[e]) for e in ids) * render_gain, b)
         est_t = np.sort(np.concatenate([e_times[e] for e in ids]))
         out[s] = {"role": role, **_level(x_truth, x_rebuild, ref, est_t, samples(ms))}

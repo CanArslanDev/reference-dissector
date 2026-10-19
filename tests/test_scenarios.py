@@ -11,6 +11,7 @@ import pytest
 import soundfile as sf
 from scipy.signal import butter, sosfilt
 
+from refdissect import evaluate
 from refdissect import scenarios as S
 from refdissect.audio import SR, read
 from refdissect.calibrate import build_beat
@@ -85,6 +86,24 @@ def test_every_scenario_is_valid_and_matches_its_stems(built):
         assert v["groups_max_abs"] < 1e-5, name
         assert v["mp3_lag_samples"] == 0 and v["mp3_samples"] == v["mix_samples"], name
         assert abs(v["mix_rms_db"] + 8.6) < 1.5, name
+
+
+def test_the_scorer_reads_every_truth(built):
+    """evaluate reads each scenario's truth as written: it validates and
+    scores 1.0 against itself on every part it has; a 6/8 grid one bar and
+    10 ms late is 10 ms late (time.bpm counts quarter notes there)."""
+    for name, (ev, folder) in built.items():
+        s = evaluate.score(ev, ev | {"kind": "estimate"}, truth_dir=folder)
+        assert s["summary"]["strict_f1_20"] == 1.0 and s["808"]["note_f1_20"] == 1.0, name
+        assert s["drums"]["extra"] == [] and s["rhythm"]["beat_f"] == 1.0, name
+        assert s["rhythm"]["downbeat"]["first_error_ms"] == 0.0, name
+        assert not ev["notes"] or s["melodic"]["pooled"]["note_f1"] == 1.0, name
+        assert not ev["chords"] or all(s["chords"][r] in (1.0, None) for r in evaluate.CHORD_RULES), name
+    ev = built["meter68"][0]
+    t, late = ev["time"], 3 * 60 / ev["time"]["bpm"] + 0.010  # a 6/8 bar holds three quarter notes
+    shifted = {**t, "downbeat_s": t["downbeat_s"] + late, "beats_s": [x + late for x in t["beats_s"]],
+               "downbeats_s": [x + late for x in t["downbeats_s"]]}
+    assert evaluate.rhythm_scores(ev, {"time": shifted})["downbeat"]["first_error_ms"] == pytest.approx(10.0, abs=0.01)
 
 
 def test_same_seed_same_files(rows, built, tmp_path):
