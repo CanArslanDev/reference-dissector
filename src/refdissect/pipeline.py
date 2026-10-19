@@ -1,6 +1,7 @@
 """The steps in order, each writing what it found to a work folder:
 
     analyze(stems)   -> analysis.json, templates/*.npy|wav    (grid, tuning, drums, 808, sections)
+    melodic()        -> melodic.json, basicpitch/             (notes per tonal stem, chords)
     match(library)   -> matches.json                          (library sound per template, verdicts)
     fit_808()        -> synth808.json, 808 one-shot .wav      (the synthesized 808)
     plan()           -> plan.json, midi/                      (what Live gets)
@@ -211,18 +212,60 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     return result
 
 
+def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float | None = None,
+            snap_ms: float | None = None, voting: bool = True, log=print) -> dict:
+    """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
+    stem in its own environment, its notes and posteriorgrams go to
+    basicpitch/. The minimum frequency is just above the 808's highest note
+    unless min_hz is given."""
+    from . import melodic as mel
+    from .basicpitch import PRESETS, transcribe
+    work = Path(work)
+    analysis = _load(work / "analysis.json")
+    stems_dir = Path(stems_dir or analysis["source"]["stems"])
+    stems = [s for s in mel.MELODIC_STEMS if (stems_dir / f"{s}.wav").is_file()]
+    if not stems:
+        raise ValueError(f"No tonal stem ({', '.join(mel.MELODIC_STEMS)}) in {stems_dir}")
+    floor_hz, top = (min_hz, None) if min_hz else mel.floor_above_808(analysis["notes_808"])
+    log(f"melodic: {', '.join(stems)}; minimum frequency {floor_hz or 'none'}"
+        + (f" Hz (above the 808's MIDI {top})" if top is not None else ""))
+    settings = {name: {**preset, "min_hz": floor_hz} for name, preset in PRESETS.items()}
+    run = transcribe([stems_dir / f"{s}.wav" for s in stems], work / "basicpitch", settings)
+    transcribed = {s: _load(Path(run["stems"][s]["notes"])) for s in stems}
+    pgs = {}
+    for s in stems:
+        if s in mel.CHORD_STEMS:
+            with np.load(run["stems"][s]["posteriorgram"]) as z:
+                pgs[s] = z["note"].astype(np.float32)
+    out = mel.build(analysis, transcribed, {s: read(stems_dir / f"{s}.wav") for s in stems}, pgs, snap_ms, voting)
+    floor_from = "808" if top is not None else ("parameter" if min_hz else None)
+    out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
+                     "python": run["python"], "settings": settings, "min_hz_from": floor_from}
+    for s, info in out["stems"].items():
+        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored"
+                            for r in info["voting"]) or "no loop"
+        log(f"  {s:7s} {len(info['notes']):4d} notes ({changed})")
+    if "chords" in out:
+        log(f"  chords: {len(out['chords']['segments'])} segments")
+    _save(work / "melodic.json", out)
+    return out
+
+
 def plan(work: str | Path, stems_dir: str | Path | None = None, log=print) -> dict:
     from .live import make_plan, write_midi
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
     synth = _load(work / "synth808.json") if (work / "synth808.json").is_file() else None
-    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"])
+    melodic_notes = _load(work / "melodic.json") if (work / "melodic.json").is_file() else None
+    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes)
     _save(work / "plan.json", p)
     written = write_midi(p, work / "midi")
+    tonal = ", ".join(f"{len(t['notes'])} {s}" for s, t in p["tracks"].get("melodic", {}).items())
     log(f"plan: {len(p['tracks']['drums']['notes'])} drum notes on {len(p['tracks']['drums']['pads'])} pads, "
-        f"{len(p['tracks']['808']['notes'])} 808 notes; MIDI: {', '.join(str(w) for w in written)}")
+        f"{len(p['tracks']['808']['notes'])} 808 notes" + (f", notes: {tonal}" if tonal else "")
+        + f"; MIDI: {', '.join(str(w) for w in written)}")
     return p
 
 
-__all__ = ["analyze", "match", "fit_808", "plan", "Grid", "Template", "Params", "LENGTH_MS"]
+__all__ = ["analyze", "melodic", "match", "fit_808", "plan", "Grid", "Template", "Params", "LENGTH_MS"]

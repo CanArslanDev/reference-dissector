@@ -35,6 +35,9 @@ PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44,
 STEMS_MUTED = {"drums", "bass", "vocals"}  # replaced by ours, or not part of the beat
 DEFAULT_USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
 GENERATED = Path("Samples") / "AbletonMCP Generated"
+# a placeholder for the melodic tracks until a sound is chosen per stem; they
+# are built muted, so the reference stems still play as before
+MELODIC_INSTRUMENT = "Drift"
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -64,13 +67,14 @@ def velocities(gains: list[float], low: int = 35) -> list[int]:
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
               headroom_db: float = 4.0, min_hits: int = 12, min_clean: float = 0.5,
-              min_ncc: float = 0.75) -> dict:
+              min_ncc: float = 0.75, melodic: dict | None = None) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad when it was detected often and
     cleanly and the library has something close (NCC >= min_ncc), or when
     it is a kick or snare (the backbone, played with the closest sound even
-    if far). A sound found twice (same_as) shares the first one's pad."""
+    if far). A sound found twice (same_as) shares the first one's pad.
+    With melodic (melodic.json), each tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -126,6 +130,11 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             plan["stems"][stem] = {"path": str(path), "mute": stem in STEMS_MUTED}
     for s in analysis.get("sections", []):
         plan["locators"].append([f"{s['name']} ({s['start_bar']})", 4.0 * (s["start_bar"] - 1)])
+    for stem, info in (melodic or {}).get("stems", {}).items():
+        notes = [{k: n[k] for k in ("pitch", "start_time", "duration", "velocity")} for n in info["notes"]]
+        plan["tracks"].setdefault("melodic", {})[stem] = {"instrument": MELODIC_INSTRUMENT,
+                                                          "cents": info.get("tuning_cents", 0),
+                                                          "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
 
@@ -179,12 +188,14 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
 
 
 def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
-    """drums.mid and 808.mid at the plan's tempo (for import_midi_file)."""
+    """drums.mid and 808.mid (and <stem>.mid per melodic track) at the plan's
+    tempo (for import_midi_file)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
-    for key in ("drums", "808"):
-        notes = plan["tracks"][key]["notes"]
+    parts = {"drums": plan["tracks"]["drums"], "808": plan["tracks"]["808"], **plan["tracks"].get("melodic", {})}
+    for key, part in parts.items():
+        notes = part["notes"]
         mid = mido.MidiFile(ticks_per_beat=ppq)
         track = mido.MidiTrack()
         mid.tracks.append(track)
@@ -211,9 +222,9 @@ def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
 
 def build_spec(plan: dict) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler,
-    the drums on a Drum Rack (one pad per sound), the reference stems as audio
-    tracks; Simplers at 0 dB with warping off and each sound's transposition,
-    faders from the plan's levels."""
+    the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
+    tracks (muted), the reference stems as audio tracks; Simplers at 0 dB with
+    warping off and each sound's transposition, faders from the plan's levels."""
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -233,6 +244,11 @@ def build_spec(plan: dict) -> list[dict]:
                  "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
                  "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",
                             "notes": drums["notes"]}] if drums["notes"] else []})
+    for stem, t in plan["tracks"].get("melodic", {}).items():
+        spec.append({"name": f"{stem} (notes)", "instrument": t["instrument"], "mute": True,
+                     "volume_db": round(min(6.0, levels["stems_track_db"]), 1),
+                     "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": stem,
+                                "notes": t["notes"]}] if t["notes"] else []})
     for stem, info in plan["stems"].items():
         spec.append({"name": f"REF {stem}", "kind": "audio", "mute": bool(info["mute"]),
                      "volume_db": round(min(6.0, levels["stems_track_db"]), 1),

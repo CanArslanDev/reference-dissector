@@ -1,8 +1,12 @@
 """Melodic notes and chords on inputs whose answer is known: synthetic tones,
 hand-made posteriorgrams and fake worker output (no model)."""
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
+import soundfile as sf
 
 from refdissect import melodic as M
 from refdissect.audio import SR
@@ -176,3 +180,48 @@ def test_harte_labels():
     assert M.harte(9, "min7", 7) == "A:min7/b7"
     assert M.harte(0, "maj", 0) == "C:maj" and M.harte(0, "maj(9)", None) == "C:maj(9)"
     assert M.harte(7, "7", 11) == "G:7/3"
+
+
+# ── The step and the plan, with the worker faked ─────────────────────────────
+
+def fake_transcribe(audio, out_dir, settings):
+    """What the worker writes, for one bar of a C major arpeggio per stem."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = {"stems": {}, "model": "basic-pitch 0.4.0", "backend": "FAKE", "python": "3.11", "settings": settings}
+    for path in audio:
+        name = Path(path).stem
+        notes = [{"start_s": 0.5 + 0.5 * k, "end_s": 0.9 + 0.5 * k, "start_frame": 0, "end_frame": 1, "midi": m,
+                  "amplitude": 0.5, "onset": 0.9, "bend": [0]} for k, m in enumerate((60, 64, 67))]
+        (out_dir / f"{name}.json").write_text(json.dumps({"stem": name, "notes": {"melodic": notes, "chord": notes}}))
+        np.savez_compressed(out_dir / f"{name}.npz", note=posteriorgram([(0.0, 3.0, (60, 64, 67))], 3.0))
+        result["stems"][name] = {"notes": str(out_dir / f"{name}.json"), "posteriorgram": str(out_dir / f"{name}.npz")}
+    return result
+
+
+def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
+    from refdissect import basicpitch, pipeline
+    from refdissect.live import build_spec
+    stems = tmp_path / "stems"
+    stems.mkdir()
+    x = render([(0.5, 60, 0.3), (1.0, 64, 0.3), (1.5, 67, 0.3)], 3.0)
+    for name in ("other", "piano"):
+        sf.write(stems / f"{name}.wav", x, SR)
+    for name in ("drums", "bass"):
+        sf.write(stems / f"{name}.wav", np.zeros_like(x), SR)
+    analysis = {"source": {"stems": str(stems), "duration_s": 3.0}, "grid": {"bpm": 120.0, "phase": 0.5},
+                "tuning": {"per_stem": {"other": -0.03}, "consensus": 0.0}, "templates": {}, "events": {},
+                "notes_808": [{"t": 0.5, "end": 2.5, "pitch": 36, "peak": 1.0}] * 2, "sections": []}
+    (tmp_path / "analysis.json").write_text(json.dumps(analysis))
+    monkeypatch.setattr(basicpitch, "transcribe", fake_transcribe)
+    out = pipeline.melodic(tmp_path, log=lambda *a: None)
+    assert out["source"]["settings"]["melodic"]["min_hz"] == pytest.approx(69.3, abs=0.01)  # above the 808's C2
+    assert set(out["stems"]) == {"other", "piano"} and out["stems"]["other"]["tuning_cents"] == -3
+    assert [n["start_time"] for n in out["stems"]["other"]["notes"]] == [1.0, 2.0, 3.0]
+    assert [c["label"] for c in out["chords"]["segments"]] == ["C:maj"]  # the 808 (C2) is the bass
+    plan = pipeline.plan(tmp_path, log=lambda *a: None)
+    track = plan["tracks"]["melodic"]["other"]
+    assert len(track["notes"]) == 3 and track["cents"] == -3
+    spec = {t["name"]: t for t in build_spec(plan)}
+    assert spec["other (notes)"]["mute"] is True and spec["other (notes)"]["clips"][0]["notes"] == track["notes"]
+    assert (tmp_path / "midi" / "other.mid").is_file()
