@@ -28,7 +28,7 @@ import numpy as np
 
 from . import __version__
 from . import scenarios as S
-from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, samples
+from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples
 from .calibrate import _f1
 from .render import as_played, fader_db, pad_settings, pitch_808, resolve, settings_808, velocity_gain
 
@@ -671,8 +671,22 @@ def _level(stem: np.ndarray, rebuild: np.ndarray, ref: np.ndarray, est: np.ndarr
             "spread_p90_db": round(float(np.percentile(np.abs(np.array(d) - med), 90)), 2)}
 
 
+def _kit(audio: dict, truth_dir, reference: dict) -> dict:
+    """Per group with a reference stem: RMS (dB) of the reference and of the
+    truth's group stem, and kit_db, their difference."""
+    stems, gains = audio.get("stems") or {}, (audio.get("master") or {}).get("stems_gain") or {}
+    out = {}
+    for group, path in reference.items():
+        if stems.get(group) and path and Path(path).is_file():
+            ref_db = rms_db(read(path))
+            truth_db = rms_db(read(resolve(stems[group], truth_dir)) / gains.get(group, 1.0))
+            out[group] = {"reference_db": round(ref_db, 2), "truth_db": round(truth_db, 2),
+                          "kit_db": round(ref_db - truth_db, 2)}
+    return out
+
+
 def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str | Path | None = None,
-                 render_gain: float = 1.0, ms: float = 50.0) -> dict:
+                 render_gain: float = 1.0, ms: float = 50.0, reference: dict | None = None) -> dict:
     """Per truth sound, how loud the rebuild plays it: over its hits matched
     within 50 ms (strict times), the energy in the role's band over `ms` from
     each side's own attack, rebuild over truth stem; level_db is the median
@@ -684,7 +698,17 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     overall gain changes. A truth sound without a stem or a rendered track is
     None. A stem written below unity is read back at its level, divided by
     audio.master.stems_gain (a scenario halves a stem that would clip in
-    FLAC: three group stems of the 27 real beats, none of a sound)."""
+    FLAC: three group stems of the 27 real beats, none of a sound).
+
+    reference names the stems the plan's track faders were matched to, per
+    group ({"drums": path, "bass": path}: the separated stems): a fader puts
+    its track's RMS (at render_gain) on the reference's, so a perfect kit
+    (the truth's sounds at the truth's relative gains) plays every sound of
+    a group at its kit_db, RMS(reference) - RMS(truth group stem), and a
+    sound's vs_kit_db (level_db - kit_db) is what is wrong within the kit.
+    On the htdemucs baseline the drums' kit_db is -5.6 dB (median over 48
+    beats; Demucs separates the clipped mix, the truth is before the
+    clipper) and the bass's -1.0 dB: per-role level_db mostly showed that."""
     render_dir = Path(render_dir)
     tracks = _load(render_dir / "render.json")["tracks"]
     audio = truth.get("audio") or {}
@@ -695,6 +719,7 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     e_bass = _by_sound(est.get("bass808") or [])
     jobs += [(s, "808", ref, list(e_bass)) for s, ref in _by_sound(truth.get("bass808") or []).items()]
     e_times |= e_bass
+    kit = _kit(audio, truth_dir, reference or {})
     out: dict = {}
     for s, role, ref, ids in jobs:
         ids = [e for e in ids if e in tracks]
@@ -707,23 +732,27 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
         x_rebuild = band(sum(read(render_dir / tracks[e]) for e in ids) * render_gain, b)
         est_t = np.sort(np.concatenate([e_times[e] for e in ids]))
         out[s] = {"role": role, **_level(x_truth, x_rebuild, ref, est_t, samples(ms))}
+        group = kit.get("bass" if role == "808" else "drums")
+        if group and "level_db" in out[s]:
+            out[s]["vs_kit_db"] = round(out[s]["level_db"] - group["kit_db"], 2)
     measured = [v["level_db"] for v in out.values() if v and "level_db" in v]
     for v in out.values():
         if v and "level_db" in v:
             v["balance_db"] = round(v["level_db"] - float(np.median(measured)), 2)
-    return {"render_gain": render_gain, "window_ms": ms, "sounds": out}
+    return {"render_gain": render_gain, "window_ms": ms, "kit": kit, "sounds": out}
 
 
 # ── Everything ──
 
 def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str | Path | None = None,
-          truth_dir: str | Path | None = None, render_gain: float = 1.0) -> dict:
+          truth_dir: str | Path | None = None, render_gain: float = 1.0, reference: dict | None = None) -> dict:
     """Every score above for one truth and one estimate (dicts, or paths of
     events files: a truth file's audio paths are read from its folder).
     levels needs render_dir, render_plan's output for the plan the estimate
-    came from. summary: the strict macro F1 at 20 ms over the truth's drum
-    sounds and the 808 onsets, the end-to-end replica number, and the same
-    macro by v1's rule."""
+    came from (and reference, the stems its faders were set against, for
+    the kit levels). summary: the strict macro F1 at 20 ms over the truth's
+    drum sounds and the 808 onsets, the end-to-end replica number, and the
+    same macro by v1's rule."""
     if isinstance(truth, str | Path):
         truth_dir = truth_dir or Path(truth).parent
         truth = load_events(truth)
@@ -737,7 +766,7 @@ def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str
                  "melodic": melodic_scores(truth, estimate), "chords": chord_scores(truth, estimate),
                  "rhythm": rhythm_scores(truth, estimate)}
     if render_dir is not None:
-        out["levels"] = level_scores(truth, estimate, render_dir, truth_dir, render_gain)
+        out["levels"] = level_scores(truth, estimate, render_dir, truth_dir, render_gain, reference=reference)
     parts = {s: (v["f1_20"], v["v1"]["f1"]) for s, v in ((out["drums"] or {}).get("sounds") or {}).items()}
     if out["808"]:
         parts["808 onsets"] = (out["808"]["f1_20"], out["808"]["v1"]["f1"])
