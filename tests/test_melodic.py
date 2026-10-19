@@ -126,6 +126,37 @@ def test_stem_notes_vote_and_drop_on_request():
     assert M.stem_notes(raw, x, g, sections=sections, voting=False)[1] == []
 
 
+def test_a_section_that_returns_off_its_loop_phase():
+    """A 2-bar loop (bars alternate P and Q) runs through the song; the drums
+    name bars 1-4 and 8-11 A and bars 5-7 B, so the second A starts on a Q
+    bar. Its bars are lined up with the first A's by the loop, not by where
+    the section starts, and a Q note missed in bar 10 comes back as Q's."""
+    g = Grid(120.0, 0.0)
+    P, Q = ((0.0, 60), (1.0, 64)), ((0.0, 62), (1.0, 65))
+    notes = [note(2.0 * b + o, p) for b in range(11) for o, p in (P if b % 2 == 0 else Q) if (b, p) != (9, 65)]
+    sections = [{"name": "A", "start_bar": 1, "end_bar": 4}, {"name": "B", "start_bar": 5, "end_bar": 7},
+                {"name": "A", "start_bar": 8, "end_bar": 11}]
+    (a,) = M.note_loops(notes, g, sections)
+    assert a["section"] == "A" and a["period_bars"] == 2 and a["runs"] == [[1, 4], [8, 11]]
+    assert a["positions"] == [[0, 2, 8, 10], [1, 3, 7, 9]]  # by start: [[0, 2, 7, 9], [1, 3, 8, 10]]
+    voted, _ = M.vote(notes, g, [a])
+    assert [(n["t"], n["pitch"]) for n in voted if n.get("voted")] == [(19.0, 65)]
+
+
+def test_same_named_sections_with_other_music_vote_apart():
+    """The drums name bars 1-8, 9-16 and 17-24 all A, but bars 9-16 play
+    another melody: the two melodies are voted apart, and none of the first
+    one's notes goes into bars 9-16 (pooled, all 32 did, at velocity 35)."""
+    g = Grid(120.0, 0.0)
+    other = ((0.0, 57), (0.75, 62), (1.25, 65))
+    notes = [note(2.0 * b + o, p) for b in range(24) for o, p in (other if 8 <= b < 16 else PATTERN)]
+    sections = [{"name": "A", "start_bar": a, "end_bar": a + 7} for a in (1, 9, 17)]
+    groups = M.note_loops(notes, g, sections)
+    assert sorted(x["runs"] for x in groups) == [[[1, 8], [17, 24]], [[9, 16]]]
+    voted, report = M.vote(notes, g, groups)
+    assert len(voted) == len(notes) and sum(r["restored"] for r in report) == 0
+
+
 def test_vote_keeps_a_same_pitch_roll_apart():
     g = Grid(120.0, 0.0)
     notes = [note(2.0 * b + o, 60) for b in range(4) for o in (0.0, 0.0625)]  # two 32nds at 120 BPM
