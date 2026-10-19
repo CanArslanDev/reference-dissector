@@ -108,8 +108,11 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     assert rec["plan"]["levels"]["sounds"] and not (root / "v1-1" / "runs" / "a" / "render").exists()
     for step in ("analyze", "match", "fit_808", "plan", "score_analysis", "render", "score_plan", "total"):
         assert rec["seconds"][step] >= 0, step
+    # the stub's stems are the truth's groups, so a perfect kit would sit at the truth's level
+    assert {g: v["kit_db"] for g, v in rec["plan"]["levels"]["kit"].items()} == {"drums": 0.0, "bass": 0.0}
     agg = json.loads((root / "scores-a.json").read_text())
     assert list(agg["scenarios"]) == ["v1", "meter68"] and agg["beats"] == 2 and agg["failed"] == []
+    assert agg["scenarios"]["v1"]["plan"]["levels.kit.drums_db"] == 0.0
     assert len(agg["options"]) == 1 and len(agg["refdissect"]) == 1 and agg["refdissect"][0]["version"]
     for part in ("analysis", "plan"):
         assert 0 <= agg["scenarios"]["v1"][part]["strict_f1_20"] <= 1

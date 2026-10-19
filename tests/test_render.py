@@ -152,6 +152,33 @@ def test_levels_from_the_render(kit, tmp_path):
     assert halved["levels"]["sounds"]["snare"]["level_db"] == pytest.approx(level["level_db"], abs=0.01)
 
 
+def test_a_kit_at_the_truths_levels_reads_where_the_faders_put_it(kit, tmp_path):
+    """The plan's faders match each track to a separated stem, here at half
+    the truth's level (Demucs separates the clipped mix): a perfect kit then
+    reads -6.02 dB on every sound (kit_db), so the snare played at velocity
+    64 is -5.94 dB re the truth and +0.08 dB re a perfect kit (vs_kit_db)."""
+    times = [0.5, 1.5, 2.5, 3.5]
+    stem = np.zeros(4 * SR, np.float32)
+    for t in times:
+        stem[int(t * SR):int(t * SR) + len(kit["snare"])] += kit["snare"]
+    (tmp_path / "truth").mkdir()
+    wav(tmp_path / "truth", "snare.wav", stem)
+    wav(tmp_path / "truth", "drums.wav", stem)  # the drums group: the snare alone
+    lead = attack_time(kit["snare"], "snare")
+    truth = {"schema": SCHEMA, "kind": "truth", "scenario": "t", "seed": 0, "sounds": {"snare": {"role": "snare"}},
+             "audio": {"sr": SR, "n_samples": len(stem), "stems": {"snare": "snare.wav", "drums": "drums.wav"}},
+             "drums": [{"sound": "snare", "role": "snare", "t": t, "t_attack": t + lead, "gain": 1.0} for t in times]}
+    p = plan({"38": {"path": wav(tmp_path, "s.wav", kit["snare"]), "transpose": 0, "role": "snare"}},
+             [note(38, 2 * t, 64) for t in times])
+    render_plan(p, tmp_path / "r", n_samples=len(stem))
+    reference = {"drums": wav(tmp_path, "separated drums.wav", 0.5 * stem), "bass": None}
+    lv = score(truth, estimate_from_plan(p), tmp_path / "r", tmp_path / "truth", reference=reference)["levels"]
+    assert list(lv["kit"]) == ["drums"] and lv["kit"]["drums"]["kit_db"] == pytest.approx(-6.02, abs=0.01)
+    snare = lv["sounds"]["snare"]
+    assert snare["level_db"] == pytest.approx(-5.94, abs=0.01)
+    assert snare["vs_kit_db"] == pytest.approx(0.08, abs=0.01)
+
+
 def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
     """fit_808 writes its one-shot at the 808's own tuning (synth808.json
     pitch_hz), here 33.58 Hz, 45.8 cents over root_midi 24; this one starts

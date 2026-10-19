@@ -45,6 +45,7 @@ from .separate import DEFAULT_MODEL, separate_many
 
 SEP_SEED, SEP_SHIFTS = 0, 1  # every suite separation: one seeded shift, Demucs' own default count
 ORDER = [*S.SCENARIOS, "v1orig"]
+REFERENCE = {"drums": "drums", "bass": "bass"}  # truth group -> the plan's stem its track fader is matched to
 
 
 # ── Beats ──
@@ -212,8 +213,8 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
 def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, lap) -> tuple[dict, list]:
     """The plan scored as Live would play it. With render, render_plan's
     tracks give the level scores, at the gain that undoes the plan's headroom
-    (every track sits headroom_db under the stems it replaces), and are
-    deleted after."""
+    (every track sits headroom_db under the stems it replaces), against the
+    stems its faders were matched to (the kit levels), and are deleted after."""
     est = evaluate.estimate_from_plan(plan, root=work, scenario=truth["scenario"])
     missing = est["generator"]["switches"]["missing"]
     if not render:
@@ -222,8 +223,9 @@ def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, l
     render_plan(plan, out, root=work)
     lap("render")
     gain = 10 ** ((plan.get("levels") or {}).get("headroom_db", 0.0) / 20)
+    reference = {group: (plan.get("stems") or {}).get(stem, {}).get("path") for group, stem in REFERENCE.items()}
     try:
-        return evaluate.score(truth, est, out, beat, gain), missing
+        return evaluate.score(truth, est, out, beat, gain, reference), missing
     finally:
         shutil.rmtree(out, ignore_errors=True)
 
@@ -373,13 +375,16 @@ def _rhythm(r: dict) -> dict:
 
 
 def _levels(lv: dict) -> dict:
-    out = {}
+    out = {f"levels.kit.{group}_db": g["kit_db"] for group, g in (lv.get("kit") or {}).items()}
     measured = [s for s in lv["sounds"].values() if s and "level_db" in s]
     for role, sounds in _by_role(measured).items():
-        for key in ("level_db", "balance_db", "spread_p90_db"):
-            out[f"levels.{role}.{key}"] = round(float(np.median([s[key] for s in sounds])), 2)
+        for key in ("level_db", "vs_kit_db", "balance_db", "spread_p90_db"):
+            if all(key in s for s in sounds):
+                out[f"levels.{role}.{key}"] = round(float(np.median([s[key] for s in sounds])), 2)
     if measured:
         out["levels.balance_abs_db"] = round(float(np.median([abs(s["balance_db"]) for s in measured])), 2)
+    if measured and all("vs_kit_db" in s for s in measured):
+        out["levels.vs_kit_abs_db"] = round(float(np.median([abs(s["vs_kit_db"]) for s in measured])), 2)
     return out
 
 
@@ -388,7 +393,10 @@ def headline(score: dict) -> dict[str, float]:
     flat keys; a part the truth (or the render) does not have is left out.
     Per drum role, the mean over the truth's sounds of that role (pitched
     copies and layers are sounds of their own); error_p90_ms is the mean of
-    their p90 |error|."""
+    their p90 |error|. Levels per role are medians over its sounds:
+    vs_kit_db against a perfect kit under the same faders (level_scores),
+    level_db against the truth stem, and levels.kit.<group>_db is where the
+    faders put a perfect kit."""
     s = score["summary"]
     out = {"strict_f1_20": s["strict_f1_20"], "v1_f1": s["v1_f1"]}
     if score.get("drums"):
@@ -473,6 +481,8 @@ TABLES = (  # (part, key, title, digits)
     ("analysis", "rhythm.beat_f", "Beat F (70 ms)", 3),
     ("analysis", "melodic.note_f1", "Melodic note F1 (where the truth has notes)", 3),
     ("analysis", "chords.majmin", "Chord accuracy, majmin (where the truth has chords)", 3),
+    ("plan", "levels.kit.drums_db", "Levels: a perfect kit's drums under the plan's faders, re the truth (dB)", 2),
+    ("plan", "levels.vs_kit_abs_db", "Levels: median |level against a perfect kit| over sounds, plan render (dB)", 2),
     ("plan", "levels.balance_abs_db", "Levels: median |balance| over sounds, plan render (dB)", 2),
     ("seconds", "total", "Seconds per beat after separation", 0),
 )
