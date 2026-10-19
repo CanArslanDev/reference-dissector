@@ -134,6 +134,28 @@ def test_vote_keeps_a_same_pitch_roll_apart():
     assert len(voted) == 8 and report[0]["restored"] == 0
 
 
+def test_no_note_before_the_audio_starts(tmp_path):
+    """The first beat 4 ms in, downbeats played 8 ms early and the first one
+    missed: restored, it would sit at -4 ms; snapped, a note at 3 ms would go
+    to the 16th line at -20 ms. Both stay at or after 0 and the MIDI file is
+    written (a negative time made mido raise)."""
+    from refdissect.live import write_midi
+    g = Grid(120.0, 0.004)
+    raw = [{"start_s": g.phase + 2.0 * b + o, "end_s": g.phase + 2.0 * b + o + 0.3, "midi": p, "amplitude": 0.5,
+            "onset": 0.8, "bend": []} for b in range(4) for o, p in ((-0.008, 60), (0.5, 64), (1.0, 67))
+           if not (b == 0 and p == 60)]
+    notes, report = M.stem_notes(raw, np.zeros(9 * SR, np.float32), g,
+                                 sections=[{"name": "A", "start_bar": 1, "end_bar": 4}])
+    assert report[0]["restored"] == 1 and notes[0]["t"] == 0.0 and notes[0]["start_time"] == 0.0
+    late = Grid(120.0, 0.105)  # 16th lines at -0.02, 0.105, 0.23 ...
+    assert M.to_beats(0.003, late, snap_ms=25) == (pytest.approx(0.006), 0.0)
+    plan = {"tempo": 120.0, "tracks": {"drums": {"notes": []}, "808": {"notes": []},
+                                       "melodic": {"other": {"notes": [{k: n[k] for k in ("pitch", "start_time",
+                                                                                          "duration", "velocity")}
+                                                                       for n in notes]}}}}
+    assert (tmp_path / "other.mid") in write_midi(plan, tmp_path)
+
+
 # ── Chords ───────────────────────────────────────────────────────────────────
 
 def posteriorgram(spans: list[tuple[float, float, tuple[int, ...]]], seconds: float) -> np.ndarray:
