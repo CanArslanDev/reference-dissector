@@ -154,16 +154,20 @@ def _numbered(beats: np.ndarray, period: float) -> tuple[np.ndarray, np.ndarray]
     return np.round(k[~half]).astype(int), beats[~half]
 
 
-def tracker_line(beats) -> tuple[float, np.ndarray, np.ndarray] | None:
-    """(BPM, beat numbers, beats) of a line through a tracker's beats, with
-    every beat that falls on a whole number (_numbered). beat_this's beats
-    come on 20 ms frames, so their median interval is a whole number of
-    frames: 0.88 s (68.18 BPM) on PIRAMIT, where the line gives 68.498. Beats
-    more than a quarter period off the line are left out of the fit."""
-    b = np.asarray(beats, dtype=float)
-    if len(b) < 4:
-        return None
-    period = float(np.median(np.diff(b)))
+def _periods(beats: np.ndarray, min_share: float = 0.2) -> list[float]:
+    """Where the tracker's intervals cluster (sorted neighbours less than 15 %
+    apart), most populated first: the centre of each cluster holding min_share
+    of them, else their median. On a sparse trap beat at 72 BPM beat_this
+    tapped 8ths for half of it and quarters for the rest (50 and 49 % of the
+    intervals); their median, 0.63 s, lies on neither level."""
+    iv = np.sort(np.diff(beats))
+    iv = iv[iv > 0]
+    groups = np.split(iv, np.where(iv[1:] > 1.15 * iv[:-1])[0] + 1)
+    big = sorted((g for g in groups if len(g) >= min_share * len(iv)), key=len, reverse=True)
+    return [float(np.median(g)) for g in big] or [float(np.median(iv))]
+
+
+def _line(b: np.ndarray, period: float) -> tuple[float, np.ndarray, np.ndarray] | None:
     for _ in range(3):
         k, kb = _numbered(b, period)
         for _ in range(4):
@@ -175,6 +179,25 @@ def tracker_line(beats) -> tuple[float, np.ndarray, np.ndarray] | None:
                 break
             k, kb = k[good], kb[good]
     return (60.0 / float(period), *_numbered(b, float(period)))
+
+
+def tracker_line(beats) -> tuple[float, np.ndarray, np.ndarray] | None:
+    """(BPM, beat numbers, beats) of a line through a tracker's beats, with
+    every beat that falls on a whole number (_numbered), or None. beat_this's
+    beats come on 20 ms frames, so their median interval is a whole number of
+    frames: 0.88 s (68.18 BPM) on PIRAMIT, where the line gives 68.498. The
+    fit starts from the level the tracker tapped most (_periods), the next one
+    if that fails. Starting from the median read the 72 BPM beat that switched
+    between 8ths and quarters as 96.95 BPM (4/3 of 72). Beats more than a
+    quarter period off the line are left out of the fit."""
+    b = np.asarray(beats, dtype=float)
+    if len(b) < 4:
+        return None
+    for period in _periods(b):
+        line = _line(b, period)
+        if line is not None:
+            return line
+    return None
 
 
 def _on_16ths(t: np.ndarray, bpm: float, phase: float, tol: float = 0.012) -> float:
@@ -414,7 +437,10 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
     n, unit = parse_meter(meter) if meter else (4, 4)
     line = tracker_line(tracker["beats"]) if tracker else None
     if line is None:
-        return _without_tracker(x, bpm_range, bpm, meter, n, unit)
+        grid, info = _without_tracker(x, bpm_range, bpm, meter, n, unit)
+        if tracker:
+            info["level"]["why"] = f"no line through the tracker's {len(tracker['beats'])} beats"
+        return grid, info
     tempo, numbers, beats = line
     env, fps = _envelope(x)
     t, s = strength_peaks(x, "full")

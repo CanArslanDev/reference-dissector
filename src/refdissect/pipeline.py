@@ -54,6 +54,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     grid, fit_info = estimate(drums, beats, bpm_range, bpm, meter)
     what = "first beat" if fit_info["tracker"] is None else f"{grid.beats_per_bar}/{grid.beat_unit}, first bar line"
     log(f"grid: {grid.bpm} BPM, {what} at {grid.phase} s")
+    if beats is not None and fit_info["tracker"] is None:
+        log(f"  {fit_info['level']['why']}: the grid is fit_grid's")
     if fit_info["tracker"] is not None:
         level, swing = fit_info["level"], fit_info["swing"]
         log(f"  {level['level']} of the tracker's {level['tracker_bpm']} BPM ({level['why']}); phase "
