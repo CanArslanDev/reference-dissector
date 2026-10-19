@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from conftest import drum_beat, tracked
+from conftest import drum_beat, six_eight, tracked
 
 from refdissect.grid import Grid, estimate, fit_grid, parse_meter, tracker_line
 
@@ -101,6 +101,36 @@ def test_three_four_from_the_downbeats(kit):
     assert abs(bar_error_ms(grid, truth)) < 2
     forced, info = estimate(truth["audio"], tracked(truth), (100, 180), meter="4/4")
     assert forced.beats_per_bar == 4 and info["meter"] == {"source": "--meter"}
+
+
+@pytest.mark.parametrize("bpm, rng", [(95, (100.0, 180.0)), (136, (100.0, 180.0)), (95, None)])
+def test_six_eight_on_dotted_quarters(kit, bpm, rng):
+    """beat_this taps 6/8 in dotted quarters, two to a bar. Its levels x1, x2
+    and x1/2 read 95 as 63.3 or 126.7 (2/3 or 4/3 of it) and 136 as 90.7."""
+    truth = six_eight(kit, bpm, 16)
+    grid, info = estimate(truth["audio"], tracked(truth), rng)
+    assert abs(grid.bpm - bpm) < 0.05 and (grid.beats_per_bar, grid.beat_unit) == (6, 8)
+    assert info["level"]["level"] == "x3/2" and info["level"]["why"].startswith("dotted quarters")
+    assert abs(bar_error_ms(grid, truth)) < 3 and not info["warnings"]
+
+
+def test_six_eight_tapped_as_twelve_eight_needs_the_meter(kit):
+    """Four dotted quarters to a bar (12/8), as beat_this read 6/8 at 136: the
+    tracker's level stays, with a warning, unless --meter says x/8."""
+    truth = six_eight(kit, 136, 16)
+    tracker = tracked(truth, every=4)
+    grid, info = estimate(truth["audio"], tracker, (100.0, 180.0))
+    assert abs(grid.bpm - 136 * 2 / 3) < 0.05 and "--meter 6/8" in info["warnings"][0]
+    grid, info = estimate(truth["audio"], tracker, (100.0, 180.0), meter="6/8")
+    assert abs(grid.bpm - 136) < 0.05 and grid.steps_per_bar == 12 and abs(bar_error_ms(grid, truth)) < 3
+
+
+def test_swing_with_two_beat_bars_stays_binary(kit):
+    """66 % swing fits x3/2's 16ths best (on_16ths 1.00), but its onsets sit
+    at 1/3 and 5/6 of the beat, never at 2/3: no dotted quarters."""
+    truth = drum_beat(kit, 95, 12, swing=0.66)
+    grid, info = estimate(truth["audio"], tracked(truth, every=2), (100.0, 180.0))
+    assert abs(grid.bpm - 95) < 0.05 and info["level"]["level"] == "x1" and info["meter"]["two"]
 
 
 def test_unsure_meter_is_four_four(kit):

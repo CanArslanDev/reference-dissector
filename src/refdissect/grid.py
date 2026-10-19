@@ -44,6 +44,8 @@ from .hits import HOP, strength_peaks
 # The tracker's tempo times these: its own level, the octaves, and the
 # ternary relatives (reported; see _choose)
 LEVELS = (("x1", 1.0), ("x2", 2.0), ("x1/2", 0.5), ("x3/2", 1.5), ("x2/3", 2 / 3))
+# the octaves of x3/2, when the tracker's beats are dotted quarters (compound meter)
+COMPOUND = (("x3", 3.0), ("x3/4", 0.75))
 WINDOW = 0.03  # each level is refined by the comb within +-3 %
 # bpm_range's edges give this much: 90 BPM's x2 was refined to 180.001-180.004
 # and left the range, so 90 BPM stayed at 90 where fit_grid had read 180.002
@@ -215,11 +217,11 @@ def _on_16ths(t: np.ndarray, bpm: float, phase: float, tol: float = 0.012) -> fl
 
 
 def octave_candidates(env: np.ndarray, fps: float, onsets: np.ndarray, tracker_bpm: float,
-                      bpm_range: tuple[float, float] | None) -> list[dict]:
+                      bpm_range: tuple[float, float] | None, levels=LEVELS) -> list[dict]:
     """Each level of the tracker's tempo, refined by the comb within +-3 %:
     its tempo, comb phase and score, and how well the onsets sit on its 16ths."""
     rows = []
-    for level, ratio in LEVELS:
+    for level, ratio in levels:
         c = tracker_bpm * ratio
         score, bpm, phase = _fit(env, fps, (c * (1 - WINDOW), c * (1 + WINDOW)))
         rows.append({"level": level, "bpm": round(float(bpm), 3), "phase": float(phase),
@@ -233,18 +235,43 @@ def _in_range(bpm: float, bpm_range: tuple[float, float] | None) -> bool:
                 bpm_range[0] * (1 - RANGE_SLACK) <= bpm <= bpm_range[1] * (1 + RANGE_SLACK))
 
 
-def _choose(rows: list[dict], bpm_range: tuple[float, float] | None) -> tuple[dict, str]:
+def subdivision(t: np.ndarray, s: np.ndarray, bpm: float, phase: float, width: float = 0.04) -> dict:
+    """Shares of the onset strength within `width` of a beat from 1/3, 2/3
+    and 1/2 of each beat at bpm: a dotted quarter holds three 8ths, a quarter
+    two. Against the comb at the tracker's tempo, the 6/8 test beats (beat_this
+    on dotted quarters) held 0.15-0.28 at 1/3, 0.26-0.29 at 2/3 and none at
+    1/2; 4/4 beats at 66 % swing up to 0.27 at one of 1/3 and 2/3 and none at
+    the other (swung 16ths sit at 1/3 and 5/6 of the beat)."""
+    u = ((np.asarray(t) - phase) * bpm / 60.0) % 1.0
+    total = float(np.sum(s)) or 1.0
+
+    def share(c: float) -> float:
+        return round(float(np.sum(s[np.abs((u - c + 0.5) % 1.0 - 0.5) < width])) / total, 2)
+    return {"1/3": share(1 / 3), "2/3": share(2 / 3), "1/2": share(0.5)}
+
+
+def _compound(sub: dict) -> bool:
+    """The beat holds three 8ths: onsets at 1/3 and at 2/3, each at least 0.1
+    of the strength and twice the share at 1/2. Of 90 test beats only the four
+    in 6/8 passed."""
+    least = min(sub["1/3"], sub["2/3"])
+    return least >= 0.1 and least >= 2 * sub["1/2"]
+
+
+def _choose(rows: list[dict], bpm_range: tuple[float, float] | None, compound: bool = False) -> tuple[dict, str]:
     """The tracker's level unless bpm_range holds an octave of it instead.
-    x3/2 and x2/3 are reported but never chosen here (--bpm can): a straight
-    beat's 16ths miss their lines, and a swung one fits x3/2's better than its
-    own (test beats at 66 % swing: on_16ths 1.00 against 0.52)."""
+    compound (the tracker's beats are dotted quarters): x3/2, the quarter
+    note, or an octave of it. x3/2 and x2/3 are otherwise reported but never
+    chosen (--bpm can): a straight beat's 16ths miss their lines, and a swung
+    one fits x3/2's better than its own (66 % swing: on_16ths 1.00 against 0.52)."""
     by = {r["level"]: r for r in rows}
+    family, pre = (("x3/2", "x3", "x3/4"), "dotted quarters, ") if compound else (("x1", "x2", "x1/2"), "")
     if bpm_range is None:
-        return by["x1"], "the tracker's level"
-    for level in ("x1", "x2", "x1/2"):
+        return by[family[0]], pre + "the tracker's level"
+    for level in family:
         if by[level]["in_range"]:
-            return by[level], f"bpm_range {bpm_range[0]:g}-{bpm_range[1]:g}"
-    return by["x1"], f"no octave of the tracker's tempo in bpm_range {bpm_range[0]:g}-{bpm_range[1]:g}"
+            return by[level], pre + f"bpm_range {bpm_range[0]:g}-{bpm_range[1]:g}"
+    return by[family[0]], pre + f"no octave of the tracker's tempo in bpm_range {bpm_range[0]:g}-{bpm_range[1]:g}"
 
 
 def _level(ratio: float) -> Fraction:
@@ -314,7 +341,9 @@ def tracker_meter(beats, downbeats, ratio: float = 1.0, min_share: float = 0.6,
     3/4 test beats beat_this agreed on 3 at 72 BPM (in 76 and 88 % of the
     bars), not at 136 (38 and 59 %: 4/4); it never read a 4/4 beat as 3. A
     3/4 read at twice the tracker's tempo keeps the tracker's bar (6/4); a
-    4/4 is split in two, trap's half-time convention."""
+    4/4 is split in two, trap's half-time convention. evidence["two"]: the
+    bars hold 2 beats as consistently, as in 6/8 tapped in dotted quarters
+    (or a 4/4 tapped in half notes: three of the six calibration beats)."""
     b, d = np.asarray(beats, dtype=float), np.asarray(downbeats, dtype=float)
     counts = [int(np.sum((b >= d[i] - 1e-3) & (b < d[i + 1] - 1e-3))) for i in range(len(d) - 1)]
     hist = Counter(counts)
@@ -323,7 +352,8 @@ def tracker_meter(beats, downbeats, ratio: float = 1.0, min_share: float = 0.6,
     n, agree = hist.most_common(1)[0] if counts else (4, 0)
     share = agree / len(counts) if counts else 0.0
     accepted = n in (3, 4) and share >= min_share and len(counts) >= min_bars
-    evidence.update(share=round(share, 2), accepted=accepted)
+    evidence.update(top=n, share=round(share, 2), accepted=accepted,
+                    two=n == 2 and share >= min_share and len(counts) >= min_bars)
     if not accepted:
         return 4, evidence
     return (n * 2 if n % 2 and round(ratio) == 2 else n), evidence
@@ -434,7 +464,10 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
     bpm; the meter is --meter or 4/4 and phase the first grid beat. With one:
     1. the octave: the tracker's tempo (a line through its beats) and its
        levels x2, x1/2, x3/2, x2/3, each refined by the comb within +-3 %
-       (alternatives); bpm_range picks the octave (_choose), bpm forces one;
+       (alternatives); bpm_range picks the octave (_choose), bpm forces one.
+       When the meter is x/8 or the tracker's bars hold 2 beats, and the
+       onsets split its beat in three (subdivision), its beats are dotted
+       quarters: x3/2 or an octave of it, in 6/8 (12/8 at x3);
     2. the phase: the comb's, within 30 ms of the tracker's beats (phase_near),
        moved onto the attacks (phase_correction_ms), then to the 16th of the
        bar the tracker's downbeats vote for, so phase is the first bar line;
@@ -454,15 +487,30 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
     t, s = strength_peaks(x, "full")
     strong = t[s >= np.median(s)] if len(s) else t
     rows = octave_candidates(env, fps, strong, tempo, bpm_range)
-    chosen, why = ({"level": "forced", "bpm": round(float(bpm), 3)}, "--bpm") if bpm else _choose(rows, bpm_range)
     downbeats = tracker.get("downbeats") or []
+    _, bars = tracker_meter(beats, downbeats)
+    sub = subdivision(t, s, rows[0]["bpm"], rows[0]["phase"])
+    # dotted quarters are looked for only when the meter is x/8 or the tracker's bars hold 2 beats
+    asked = unit == 8 if meter else bars["two"]
+    compound = asked and _compound(sub)
+    if compound:
+        rows += octave_candidates(env, fps, strong, tempo, bpm_range, COMPOUND)
+    chosen, why = (({"level": "forced", "bpm": round(float(bpm), 3)}, "--bpm") if bpm
+                   else _choose(rows, bpm_range, compound))
     ratio = chosen["bpm"] / tempo
     comb_phase, score, near = phase_near(env, fps, chosen["bpm"], beats, ratio)
     correction, attacks = attack_offset(x, chosen["bpm"], comb_phase)
+    eighths = bars["top"] * 2 * ratio  # 8ths in the tracker's bar
     if meter:
         meter_info = {"source": "--meter"}
+    elif compound and abs(eighths - round(eighths)) < 0.1:
+        n, unit, meter_info = int(round(eighths)), 8, {**bars, "source": "tracker, dotted quarters"}
     else:
         n, meter_info = tracker_meter(beats, downbeats, ratio)
+    warnings = []
+    if not meter and not compound and _compound(sub):
+        warnings.append(f"the beat splits in three ({sub['1/3']} and {sub['2/3']} of the onset strength at 1/3 "
+                        f"and 2/3 of it, {sub['1/2']} at 1/2): a compound meter needs --meter 6/8 or 12/8")
     grid = Grid(chosen["bpm"], 0.0, n, unit)
     phase, down = bar_line(comb_phase + correction, grid, downbeats)
     grid = replace(grid, phase=round(float(phase), 4))
@@ -471,7 +519,7 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
             "level": {"level": chosen["level"], "why": why, "tracker_bpm": round(tempo, 3)},
             "alternatives": [{k: v for k, v in r.items() if k != "phase"} | {"chosen": r is chosen} for r in rows],
             "phase_correction_ms": round(1000 * correction, 1), "attacks": attacks, "comb": near,
-            "downbeat": down, "meter": meter_info,
+            "downbeat": down, "meter": meter_info, "subdivision": sub, "warnings": warnings,
             "swing": swing(x, grid), "drift_ms": drift_ms, "tempo_map": tempo_map,
             "tracker": {k: tracker.get(k) for k in ("name", "version", "checkpoint", "device")}
             | {"beats": len(tracker["beats"]), "on_its_line": len(beats), "downbeats": len(downbeats)}}
@@ -491,7 +539,8 @@ def _without_tracker(x, bpm_range, bpm, meter, n, unit) -> tuple[Grid, dict]:
     level = "forced" if bpm else f"bpm_range {bpm_range[0]:g}-{bpm_range[1]:g}"
     return grid, {**info, "level": {"level": level, "why": "no tracker"}, "alternatives": [],
                   "phase_correction_ms": 0.0, "meter": {"source": "--meter" if meter else "default"},
-                  "downbeat": None, "swing": swing(x, grid), "drift_ms": None, "tempo_map": None, "tracker": None}
+                  "downbeat": None, "subdivision": None, "warnings": [], "swing": swing(x, grid), "drift_ms": None,
+                  "tempo_map": None, "tracker": None}
 
 
 def offsets(x: np.ndarray, grid: Grid, role: str = "snare", tolerance: float = 0.05) -> dict:
