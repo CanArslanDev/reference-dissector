@@ -240,6 +240,24 @@ def test_chords_with_inversions_and_changes_inside_the_bar():
     assert out["segments"][3]["start_time"] == 8.0  # beats
 
 
+@pytest.mark.parametrize("tones, n808, label", [
+    ((57, 60, 64, 67), None, "A:min7"),     # A3 C4 E4 G4: the same tones as C:maj6
+    ((59, 62, 65, 69), None, "B:hdim7"),    # B3 D4 F4 A4: as D:min6
+    ((57, 59, 64), None, "A:sus2"),         # A3 B3 E4: as E:sus4; the lowest tone decides
+    ((64, 67, 70, 73), None, "E:dim7"),     # every dim7 has four roots
+    ((57, 60, 64, 67), 31, "A:min7/b7"),    # the 808 on G, a tone of both A:min7 and C:maj6
+    ((60, 64, 67, 69), 36, "C:maj6"),       # the 808 on C: the bass outweighs the prior
+])
+def test_chords_whose_tones_tie(tones, n808, label):
+    """Same pitch-class set, different chord: the bass decides (the 808, or
+    without it the lowest melodic tone), and left tied min7 and hdim7 win
+    over maj6 and min6. These read C:maj6/6, D:min6/6, E:sus4/4, C#:dim7/b3
+    and C:maj6/5 when the lower root index (C first) broke the tie."""
+    pg = posteriorgram([(0.0, 2.0, tones)], 2.0)
+    bass = [{"t": 0.0, "end": 2.0, "pitch": n808}] if n808 else []
+    assert M.chords([pg], Grid(120.0, 0.0), 2.0, bass, lowest_midi=40)["segments"][0]["label"] == label
+
+
 def test_viterbi_change_penalty_smooths_a_one_span_blip():
     scores = np.zeros((9, 3))
     scores[:, 0] = 1.0
