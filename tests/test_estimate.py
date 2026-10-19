@@ -7,7 +7,7 @@ import pytest
 from conftest import drum_beat, six_eight, tracked
 
 from refdissect.audio import SR
-from refdissect.grid import Grid, _attack, drift, estimate, fit_grid, parse_meter, tracker_line
+from refdissect.grid import Grid, _attack, bar_line, drift, estimate, fit_grid, parse_meter, tracker_line
 from refdissect.hits import strength_peaks
 
 
@@ -94,6 +94,27 @@ def test_bar_line_after_a_mid_bar_start(kit):
     grid, info = estimate(truth["audio"], tracked(truth), (100, 180))
     assert abs(old.phase - truth["beats"][0]) < 0.012  # beat 2, taken for beat 1
     assert abs(grid.phase - truth["downbeats"][0]) < 0.002
+    assert not info["downbeat"]["ambiguous"]
+
+
+def test_bar_line_votes_against_all_the_others():
+    grid = Grid(120.0, 0.0)
+    downbeats = [8 * grid.step + k * grid.bar for k in range(14)] + [k * grid.bar for k in range(14, 23)]
+    _, down = bar_line(0.0, grid, downbeats)
+    assert down["votes_16th_of_bar"] == {"8": 14, "0": 9} and down["ambiguous"]
+
+
+def test_bar_line_is_unsure_when_the_tracker_bars_disagree(kit):
+    """A third of the tracker's downbeats on beat 2 of a 3/4 beat: its bars
+    hold 2, 3 or 4 beats, so it gives no meter to vote the bar line in."""
+    truth = drum_beat(kit, 136, 16, beats_per_bar=3)
+    tracker = tracked(truth)
+    downbeats = np.array(tracker["downbeats"])
+    downbeats[1::3] += 0.44
+    tracker["downbeats"] = downbeats.tolist()
+    grid, info = estimate(truth["audio"], tracker, (100, 180))
+    assert info["downbeat"]["ambiguous"] and "disagree" in info["downbeat"]["why"]
+    _, info = estimate(truth["audio"], tracked(truth), (100, 180))
     assert not info["downbeat"]["ambiguous"]
 
 

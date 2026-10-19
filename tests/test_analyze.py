@@ -53,6 +53,16 @@ def test_tracker_beats_without_a_line_fall_back_to_before(stems, tmp_path, monke
     assert "  no line through the tracker's 2 beats: the grid is fit_grid's" in logs
 
 
+def test_an_unsure_bar_line_is_logged(stems, tmp_path, monkeypatch):
+    tracker = tracked(stems["truth"])
+    tracker["downbeats"] = [d + 0.44 * (i % 3 == 1) for i, d in enumerate(tracker["downbeats"])]
+    monkeypatch.setattr(beats, "track", lambda paths, **kw: tracker)
+    logs = []
+    a = pipeline.analyze(stems["dir"], tmp_path, log=logs.append)
+    assert a["grid"]["downbeat"]["ambiguous"]
+    assert any(line.startswith("  the first bar line is unsure (the tracker's bars disagree") for line in logs)
+
+
 def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypatch):
     truth = stems["truth"]
     monkeypatch.setattr(beats, "track", lambda paths, **kw: tracked(truth))
