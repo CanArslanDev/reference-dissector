@@ -119,6 +119,8 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         song = Path(stems_dir).resolve().parent.name
         plan["tracks"]["808"].update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"],
                                      transpose=int(60 - root), root_midi=root)
+        if synth.get("pitch_hz"):  # the one-shot sits at the 808's own tuning, not on root_midi (-14..+46 cents)
+            plan["tracks"]["808"]["cents"] = round(1200 * math.log2(synth["pitch_hz"] / 440) + 6900 - 100 * root, 1)
     stems_dir = Path(stems_dir)
     for stem in ("drums", "bass", "other", "piano", "guitar", "vocals"):
         path = stems_dir / f"{stem}.wav"

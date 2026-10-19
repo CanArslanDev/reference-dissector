@@ -10,8 +10,9 @@ into its folder:
   the four groups Demucs separates (drums, bass, other, vocals);
 - events.json (schema refdissect.events/1, kind "truth"): the grid, every drum
   hit with its gain, velocity and layer, every 808 note with the pitch it
-  settles to (cents included), its cut and its glide, the melodic notes and
-  chords (voices.py), and each sound's file, hash and attack offset.
+  sounds at and the pitch it settles to (cents included), its cut and its
+  glide, the melodic notes and chords (voices.py), and each sound's file,
+  hash and attack offset.
 
 A seed's kit is drawn as calibrate.build_beat draws it, so scenario v1 is
 build_beat's beat and the other scenarios change one thing against it with
@@ -36,11 +37,13 @@ import random
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.interpolate import PchipInterpolator
 from scipy.signal import butter, sosfiltfilt
 
 from . import __version__
@@ -109,6 +112,9 @@ LOW_DETUNE = (11.0, -20.0)  # cents on odd and even seeds: the six v1 808s settl
 GLIDE_SEMIS, GLIDE_MS = (1, 12), (50.0, 300.0)  # a semitone to an octave, over 50-300 ms
 GLIDE_TOL_CENTS = 10.0  # an exponential start glide is within 10 cents of its note after `ms`
 SHORT_808_S = 0.14  # an 808 note under 140 ms is "short" (a 16th at 107 BPM)
+# where an 808 note's pitch is read (s): from 60 ms after it starts, over at most 450 ms, to 20 ms before it
+# ends (detect.notes_808 reads the same stretch, to 20 ms before the next onset)
+SOUNDING = (0.060, 0.450, 0.020)
 DRUM_PITCH = {"kick": (2, 0), "snare": (-1, 30), "hat": (0, 25), "open_hat": (-2, 0)}  # semitones, cents
 LEAD_IN_MS, LEAD_IN_DB = (5.0, 30.0), -60.0  # quiet noise in front of the attack, as untrimmed files have
 RARE_HITS = (1, 12)
@@ -262,20 +268,98 @@ def zero_cross_hz(x: np.ndarray, near_hz: float, start: int = 0, end: int | None
     return float(SR / np.median(np.diff(kept))) if len(kept) >= 3 else None
 
 
-def pitch_curve(x: np.ndarray, f0: float, upto_s: float = 1.0) -> list[list[float]]:
-    """[seconds, cents re f0] every 50 ms (100 ms windows, the first centred at
-    0.1 s: the attack makes the one before it unreadable) over the first
-    upto_s of a tonal one-shot: how far a note sits above its settled pitch
-    t seconds into the sample (at rate r, t / r seconds into the note). The
-    six v1 808s sit 4-148 cents above it at 0.1 s and within 5 cents after
-    0.1-0.65 s."""
-    lo = band(x, "808")
-    out = []
-    for a in np.arange(0.05, min(upto_s, len(x) / SR - 0.1) + 1e-9, 0.05):
-        f = zero_cross_hz(lo, f0, int(a * SR), int((a + 0.1) * SR))
-        if f:
-            out.append([round(float(a) + 0.05, 2), round(1200 * math.log2(f / f0), 1)])
-    return out
+def crossings(x: np.ndarray, near_hz: float) -> np.ndarray:
+    """Seconds of the upward zero crossings of a tone near near_hz (linearly
+    interpolated) after a zero-phase low-pass at twice near_hz, one per
+    period: a crossing counts when it comes at least 0.6 of the last period
+    after the one before (0.3 of near_hz's before there is one), so a strong
+    2nd harmonic adds none and the short periods of an 808's pitch drop are
+    kept. zero_cross_hz's fixed rule (0.6 of near_hz's period) merges those:
+    on four of the suite's eight 808s it reads their first one or two periods
+    3.0-5.2 semitones flat where they sit 2.7-12.1 semitones sharp."""
+    y = sosfiltfilt(butter(4, 2 * near_hz, btype="low", fs=SR, output="sos"), np.asarray(x, dtype=np.float64))
+    neg = y < 0
+    up = np.flatnonzero(neg[:-1] & ~neg[1:])
+    kept: list[float] = []
+    for z in up + y[up] / (y[up] - y[up + 1]):
+        gap = 0.6 * (kept[-1] - kept[-2]) if len(kept) >= 2 else 0.3 * SR / near_hz
+        if not kept or z - kept[-1] >= gap:
+            kept.append(float(z))
+    return np.array(kept) / SR
+
+
+def pitch_track(x: np.ndarray, near_hz: float) -> tuple[Callable, tuple[float, float]] | None:
+    """(f, span): f(t) is the frequency (Hz) of a tone near near_hz t seconds
+    into x, the slope of a monotone cubic (PCHIP) through its periods counted
+    at each crossing() from the second on (the first holds the attack: on
+    one v1 808 its period reads 244 cents where the next reads 757), held
+    outside span, the first and last of those crossings; None without three.
+    Each period's mean frequency at its middle, joined by straight lines,
+    puts a steep drop's points too far apart: two readings of the same 110 ms
+    bass_low notes (the sample's curve at the note's rate, the note in the
+    stem) then differ by up to 54 cents, 11 cents with the cubic."""
+    z = crossings(x, near_hz)[1:]
+    if len(z) < 3:
+        return None
+    slope = PchipInterpolator(z, np.arange(len(z), dtype=float)).derivative()
+    return (lambda t: slope(np.clip(t, z[0], z[-1]))), (float(z[0]), float(z[-1]))
+
+
+def pitch_curve(x: np.ndarray, f0: float, upto_s: float = 1.0, step_s: float = 0.005) -> list[list[float]]:
+    """[seconds, cents re f0] every step_s over the first upto_s of a tonal
+    one-shot (pitch_track, from its second period on): how far a note sits
+    above its settled pitch t seconds into the sample (at rate r, t / r
+    seconds into the note); before the second crossing (17-65 ms into the
+    suite's eight 808s) it holds the first slope. Those 808s start 0-10
+    semitones above it there and stay within 5 cents of it after 0.14-0.98 s
+    (the 100 ms windows this curve replaced began at 0.1 s, past most of the
+    drop)."""
+    track = pitch_track(x, f0)
+    if track is None:
+        return []
+    t = np.arange(0.0, min(upto_s, len(x) / SR) + 1e-9, step_s)
+    return [[round(float(a), 4), round(float(c), 1)] for a, c in zip(t, 1200 * np.log2(track[0](t) / f0))]
+
+
+def drop(curve: list, s) -> np.ndarray:
+    """A pitch_curve read at sample times s (seconds): cents above the
+    settled pitch, linear between its points, held before the first and
+    after the last."""
+    s = np.asarray(s, dtype=float)
+    if not curve:
+        return np.zeros_like(s)
+    c = np.asarray(curve, dtype=float)
+    return np.interp(s, c[:, 0], c[:, 1])
+
+
+def tuning(x: np.ndarray) -> tuple[float, list]:
+    """A tonal one-shot's settled pitch (Hz: native_f0, or with no settled
+    stretch the strongest peak between 16 and 300 Hz of the whole file) and
+    its pitch_curve."""
+    f0 = native_f0(x)
+    if f0 is None:
+        spec = np.abs(np.fft.rfft(x, 1 << 18))
+        f = np.fft.rfftfreq(1 << 18, 1 / SR)
+        f0 = float(f[np.argmax(np.where((f >= 16) & (f <= 300), spec, 0))])
+    return f0, pitch_curve(x, f0)
+
+
+def read_window(dur: float) -> tuple[float, float]:
+    """Seconds into a note of dur seconds over which its pitch is read
+    (SOUNDING); a note under 80 ms, which has no such stretch, is read at
+    its middle."""
+    a, b = SOUNDING[0], min(SOUNDING[1], dur - SOUNDING[2])
+    return (a, b) if b > a else (dur / 2, dur / 2)
+
+
+def sounding(pitch_at, dur: float) -> float:
+    """A note's sounding pitch: the median of pitch_at(seconds into the note)
+    over its read_window, every millisecond. An 808 note sits above the
+    pitch its sample settles to for as long as the sample's drop lasts, and
+    a short note never gets there: a 110 ms bass_low note reads 0.7-2.4
+    semitones above it."""
+    a, b = read_window(dur)
+    return float(np.median(pitch_at(np.arange(a, b + 5e-4, 0.001))))
 
 
 def hz_to_midi(f: float) -> float:
@@ -818,7 +902,10 @@ def _end(y: np.ndarray, length: int) -> int:
 
 def play_808(beat: Beat, bass: list[dict]) -> None:
     """Each attacked note (with the legato notes after it) is one voice, cut
-    at the next attacked note or its own end, whichever comes first."""
+    at the next attacked note or its own end, whichever comes first. A
+    voice's pitch, per sample, is its transposition (the glide curve when it
+    has one) plus the sample's own drop where the voice is reading the
+    sample (f0_curve)."""
     s = beat.sounds["808"]
     chains: list[list[dict]] = []
     for b in sorted(bass, key=lambda b: b["p"]):
@@ -833,25 +920,38 @@ def play_808(beat: Beat, bass: list[dict]) -> None:
         length = (min(own, starts[i + 1]) if i + 1 < len(chains) else own) - a
         if len(chain) == 1 and not chain[0]["glide"]:
             full = transpose(s.audio, chain[0]["semis"])
+            semis = np.full(length, float(chain[0]["semis"]))
+            read_at = np.arange(length) * 2 ** (chain[0]["semis"] / 12)  # where transpose reads the sample
         else:
-            full = varispeed(s.audio, _curve(beat, chain, a, length))
+            semis = _curve(beat, chain, a, length)
+            full = varispeed(s.audio, semis)
+            read_at = np.r_[0.0, np.cumsum(2 ** (semis[:-1] / 12))]
+        pitch = beat.native_midi + semis + drop(s.f0_curve, read_at / SR) / 100
         y = _cut(full, length)
         beat.add("808", y, a, chain[0]["gain"])
         attack = a + round(attack_time(y, "808") * SR)
         bounds = [beat.clock.sample(b["p"], b["dt"]) for b in chain[1:]] + [a + _end(full, length)]
         for k, (b, stop) in enumerate(zip(chain, bounds)):
             start = beat.clock.sample(b["p"], b["dt"]) if k else a
+            heard = sounding(functools.partial(_at, pitch, start - a), (stop - start) / SR)
             beat.bass808.append(_bass_event(beat, b, start, None if k else attack, stop, s.level * b["gain"],
-                                            chain[k - 1]["semis"] if k else None))
+                                            heard, chain[k - 1]["semis"] if k else None))
 
 
-def _bass_event(beat: Beat, b: dict, a: int, attack: int | None, stop: int, gain: float,
+def _at(pitch: np.ndarray, offset: int, t: np.ndarray) -> np.ndarray:
+    """A per-sample pitch read t seconds after sample `offset` (held at its ends)."""
+    return pitch[np.clip(offset + np.round(t * SR).astype(int), 0, len(pitch) - 1)]
+
+
+def _bass_event(beat: Beat, b: dict, a: int, attack: int | None, stop: int, gain: float, heard: float,
                 prev_semis: float | None = None) -> dict:
-    """An 808 note's truth. midi is the pitch it settles to: the sample's
-    settled pitch (its sound's f0_hz) plus the transposition; the sound's
-    f0_curve says how far above it a note starts. A glide goes from from_midi
-    to to_midi, starting at t, over ms; a legato note has no attack of its
-    own (t_attack = t)."""
+    """An 808 note's truth. midi is its sounding pitch, `heard` (sounding()
+    over the voice's pitch: transposition, glide and the sample's own drop);
+    midi_settled is the pitch it settles to (the sample's settled pitch, its
+    sound's f0_hz, plus the transposition): what a producer wrote, the
+    sample's tuning included. A glide goes from from_midi to to_midi (settled
+    pitches), starting at t, over ms; a legato note has no attack of its own
+    (t_attack = t)."""
     midi = beat.native_midi + b["semis"]
     g, glide, flags = b["glide"], None, set(b["flags"])
     if g and g["kind"] == "start":
@@ -867,8 +967,8 @@ def _bass_event(beat: Beat, b: dict, a: int, attack: int | None, stop: int, gain
                  "t": _t(stop - samples(g["ms"])), "ms": g["ms"], "shape": "lin"}
         flags.add("end_glide")
     return {"sound": "808", "t": _t(a), "t_attack": _t(attack if attack is not None else a), "end": _t(stop),
-            "midi": round(midi, 4), "glide": glide, "with_kick": bool(b["with_kick"]), "gain": round(gain, 6),
-            "flags": sorted(flags)}
+            "midi": round(heard, 4), "midi_settled": round(midi, 4), "glide": glide, "with_kick": bool(b["with_kick"]),
+            "gain": round(gain, 6), "flags": sorted(flags)}
 
 
 # ── build ────────────────────────────────────────────────────────────────────
@@ -911,15 +1011,9 @@ def _sounds(beat: Beat, rows: list[dict], kit: dict, sw: dict, rng: random.Rando
 
 
 def _tune(beat: Beat) -> None:
-    """The 808's settled pitch (native_f0; with no settled stretch, the
-    strongest low peak of the whole file) and its pitch curve."""
+    """The 808's settled pitch and its pitch curve (tuning())."""
     s808 = beat.sounds["808"]
-    s808.f0_hz = native_f0(s808.audio)
-    if s808.f0_hz is None:
-        spec = np.abs(np.fft.rfft(s808.audio, 1 << 18))
-        f = np.fft.rfftfreq(1 << 18, 1 / SR)
-        s808.f0_hz = float(f[np.argmax(np.where((f >= 16) & (f <= 300), spec, 0))])
-    s808.f0_curve = pitch_curve(s808.audio, s808.f0_hz)
+    s808.f0_hz, s808.f0_curve = tuning(s808.audio)
     beat.native_midi = hz_to_midi(s808.f0_hz)
 
 
@@ -1179,20 +1273,37 @@ def attack_errors(events: dict, stems: dict[str, np.ndarray]) -> list[dict]:
 
 
 def pitch_errors(events: dict, stem: np.ndarray, settle_s: float = 0.3, min_s: float = 0.15) -> list[float]:
-    """Cents between each 808 note's truth pitch (the sample's settled pitch,
-    transposed) and its pitch in the truth stem (zero_cross_hz from settle_s
-    after it starts to 20 ms before it ends: library 808s drop up to ~150
-    cents over their first 0.2-0.7 s), for notes without a glide that hold
-    at least min_s after settling."""
+    """Cents between each 808 note's settled truth pitch (midi_settled: the
+    sample's settled pitch, transposed) and its pitch in the truth stem
+    (zero_cross_hz from settle_s after it starts to 20 ms before it ends:
+    library 808s drop up to ~150 cents over their first 0.2-0.7 s), for
+    notes without a glide that hold at least min_s after settling."""
     out = []
     for e in events["bass808"]:
         a, b = int(round(e["t"] * SR)), int(round(e["end"] * SR))
         if e["glide"] or (b - a) / SR < settle_s + min_s + 0.02:
             continue
-        hz = 440 * 2 ** ((e["midi"] - 69) / 12)
+        hz = 440 * 2 ** ((e.get("midi_settled", e["midi"]) - 69) / 12)
         f = zero_cross_hz(band(stem[a:b], "808"), hz, samples(settle_s * 1000), b - a - samples(20))
         if f:
             out.append(round(1200 * math.log2(f / hz), 3))
+    return out
+
+
+def sounding_errors(events: dict, stem: np.ndarray) -> list[float]:
+    """Cents between each 808 note's truth pitch (midi, from the sample's
+    pitch curve) and the same reading of the truth stem: pitch_track over
+    the note's own stretch, near its settled pitch, through sounding(); for
+    the notes whose read_window lies within the crossings the stretch has
+    (the shortest, lowest notes have two or three)."""
+    out = []
+    for e in events["bass808"]:
+        a, b = int(round(e["t"] * SR)), int(round(e["end"] * SR))
+        track = pitch_track(stem[a:b], 440 * 2 ** ((e.get("midi_settled", e["midi"]) - 69) / 12))
+        lo, hi = read_window((b - a) / SR)
+        if track is not None and track[1][0] <= lo and hi <= track[1][1]:
+            heard = sounding(lambda t, f=track[0]: 69 + 12 * np.log2(f(t) / 440), (b - a) / SR)
+            out.append(round(100 * (heard - e["midi"]), 2))
     return out
 
 
@@ -1236,8 +1347,9 @@ def drum_residuals(events: dict, stems: dict[str, np.ndarray]) -> dict[str, floa
 def verify(beat_dir: str | Path) -> dict:
     """A built folder against its own truth: every drum hit and attacked 808
     note found in its truth stem (attack_errors), every drum stem played again
-    from the truth (drum_residuals, the worst in dB), the 808 notes' pitch in
-    their stem (pitch_errors), the stems' sum against the mix without the
+    from the truth (drum_residuals, the worst in dB), the 808 notes' settled
+    and sounding pitch in their stem (pitch_errors, sounding_errors: p90 and
+    worst |cents|), the stems' sum against the mix without the
     clipper (dB, the clipper undone with arctanh), the groups against their
     members, the mix's RMS and the mp3's alignment and length."""
     d = Path(beat_dir)
@@ -1258,6 +1370,7 @@ def verify(beat_dir: str | Path) -> dict:
                  for g, r in GROUPS.items())
     dec = read(d / audio["mix"])
     cents = pitch_errors(ev, stems["808"]) if "808" in stems else []
+    heard = np.abs(sounding_errors(ev, stems["808"])) if "808" in stems else np.zeros(0)
     return {"hits": len(errors), "attack_err_max_ms": round(float(err.max()), 3),
             "attack_err_median_ms": round(float(np.median(err)), 3),
             "within_2ms": round(float(np.mean(err <= 2.0)), 4),
@@ -1267,6 +1380,9 @@ def verify(beat_dir: str | Path) -> dict:
             "groups_max_abs": float(groups), "mix_rms_db": round(rms_db(mix), 2),
             "pitch_notes": len(cents), "pitch_err_max_cents": round(float(np.max(np.abs(cents))), 2) if cents else None,
             "pitch_err_median_cents": round(float(np.median(cents)), 2) if cents else None,
+            "sounding_notes": len(heard),
+            "sounding_err_p90_cents": round(float(np.percentile(heard, 90)), 2) if len(heard) else None,
+            "sounding_err_max_cents": round(float(heard.max()), 2) if len(heard) else None,
             "mp3_lag_samples": mp3_lag(mix, dec), "mp3_samples": len(dec), "mix_samples": len(mix)}
 
 
@@ -1369,8 +1485,10 @@ def convert_beat(src: Path, out: Path, seed: int, rows: list[dict] | None = None
         a, length = int(round(pos * SR)), int((steps[i + 1] - steps[i]) * clock.step_s * SR)
         full = transpose(s808.audio, semis)
         y = _cut(full, length)
-        beat.bass808.append(_bass_event(beat, b, a, a + round(attack_time(y, "808") * SR), a + _end(full, length),
-                                        s808.level))
+        stop = a + _end(full, length)
+        pitch = beat.native_midi + semis + drop(s808.f0_curve, np.arange(length) * 2 ** (semis / 12) / SR) / 100
+        beat.bass808.append(_bass_event(beat, b, a, a + round(attack_time(y, "808") * SR), stop, s808.level,
+                                        sounding(functools.partial(_at, pitch, 0), (stop - a) / SR)))
     for key, sid in (("melodic", "loop"), ("vocal", "vocal")):
         beat.sounds[sid] = Sound("melodic" if sid == "loop" else "vocal", t[key], np.zeros(0, np.float32),
                                  LEVELS[key])

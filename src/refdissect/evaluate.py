@@ -27,6 +27,7 @@ import mir_eval
 import numpy as np
 
 from . import __version__
+from . import scenarios as S
 from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, samples
 from .calibrate import _f1
 from .render import as_played, fader_db, pad_settings, pitch_808, resolve, settings_808, velocity_gain
@@ -248,26 +249,31 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
         return []  # no one-shot: the build makes no 808 track, nothing plays
     s, path = settings_808(t808), resolve(t808["sample_path"], root)
     try:
-        shot = read(path)
+        shot = read(path)[int(round(s["start_s"] * SR)):]
     except (OSError, RuntimeError):
         missing.append(str(t808["sample_path"]))
         return []
+    f0, curve = S.tuning(shot)
+    cents = s["cents"] if t808.get("cents") is not None else round(100 * (S.hz_to_midi(f0) - s["root_midi"]), 1)
     bps, gain = plan["tempo"] / 60, 10 ** ((fader_db(plan, "808") + s["volume_db"]) / 20)
     leads: dict[float, float] = {}
     bass = []
     for n in t808["notes"]:
-        shift, midi = pitch_808(s, n["pitch"])
+        shift = pitch_808(s, n["pitch"])[0]
+        settled, rate = s["root_midi"] + cents / 100 + shift, 2 ** (shift / 12)
         if shift not in leads:
-            leads[shift] = attack_time(as_played(shot, s["start_s"], shift), "808")
-        t = n["start_time"] / bps
+            leads[shift] = attack_time(as_played(shot, 0.0, shift), "808")
+        t, dur = n["start_time"] / bps, min(n["duration"] / bps, len(shot) / SR / rate)
+        heard = settled + S.sounding(lambda x, r=rate: S.drop(curve, x * r) / 100, dur)
         bass.append({"sound": "808", "t": round(t, 5), "t_attack": round(t + leads[shift], 5),
-                     "end": round(t + n["duration"] / bps, 5), "midi": round(midi, 4), "glide": None,
-                     "with_kick": False,
+                     "end": round(t + n["duration"] / bps, 5), "midi": round(heard, 4),
+                     "midi_settled": round(settled, 4), "glide": None, "with_kick": False,
                      "gain": round(gain * velocity_gain(n["velocity"], s["velocity_curve"] or velocity_curve), 5),
                      "flags": []})
     own = pitch_808(s, s["root_midi"])[0]
     sounds["808"] = {"role": "808", "path": str(path), "sha256": _sha256(path), "semitones": s["transpose"],
-                     "cents": s["cents"], "attack_s": round(attack_time(as_played(shot, s["start_s"], own), "808"), 5)}
+                     "cents": cents, "attack_s": round(attack_time(as_played(shot, 0.0, own), "808"), 5),
+                     "f0_hz": round(f0, 3)}
     return bass
 
 
@@ -280,9 +286,13 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     transpose + detune_cents/100 semitones) in the pad role's band; sound id
     = the pad's note, role = the pad's. 808 note: the one-shot transposed by
     (pitch - 60) + transpose + detune_cents/100 semitones, attack read in the
-    808 band, sounding at root_midi + cents/100 + that shift
-    (render.pitch_808: pitch + cents/100 with the build's Transpose), ending
-    at the note end. gain = track fader x volume_db x the velocity law.
+    808 band, ending at the note end. It settles at root_midi + cents/100 +
+    that shift (midi_settled; render.pitch_808: pitch + cents/100 with the
+    build's Transpose; a plan without cents gets the one-shot's own,
+    scenarios.tuning), and sounds (midi) as a truth's note does: the one-shot's
+    own pitch drop (its pitch curve, read at the note's rate) through
+    scenarios.sounding over the note's length. gain = track fader x volume_db
+    x the velocity law.
     Notes on a pad without a readable sample, and 808 notes without a
     one-shot, play nothing and are left out (their files under "missing").
     Rhythm: Live's own grid, bar 1 at 0 s at the plan's tempo; the plan puts
