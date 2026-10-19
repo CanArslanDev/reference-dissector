@@ -94,6 +94,22 @@ def drum_beat(kit: dict, bpm: float, bars: int, beats_per_bar: int = 4, swing: f
             "downbeats": downbeats[downbeats >= crop] - crop, "bar": beats_per_bar * 60.0 / bpm}
 
 
+def six_eight(kit: dict, bpm: float, bars: int, lead: float = 0.03) -> dict:
+    """6/8 at bpm quarter notes a minute: a hat on every 8th, accented on the
+    dotted quarters, kick on 1, snare on 4. Its beats are the dotted quarters."""
+    eighth = 30.0 / bpm
+    n = int((lead + bars * 6 * eighth + 1.0) * SR)
+    x = np.random.default_rng(9).standard_normal(n).astype(np.float32) * 0.003
+    for k in range(bars * 6):
+        plays = [("hat", 0.4 if k % 3 == 0 else 0.3)] + [("kick", 0.9)] * (k % 6 == 0) + [("snare", 0.8)] * (k % 6 == 3)
+        for name, gain in plays:
+            a = int(round((lead + k * eighth) * SR))
+            y = kit[name]
+            x[a:a + len(y)] += gain * y[: max(0, min(len(y), n - a))]
+    beats = lead + np.arange(0, bars * 6, 3) * eighth
+    return {"audio": x, "bpm": bpm, "beats": beats, "downbeats": beats[::2], "bar": 6 * eighth}
+
+
 def tracked(truth: dict, half: bool = False, delay: float = 0.005, every: int | None = None) -> dict:
     """What beat_this gives for a beat: its beats (every other one at half
     tempo, as it read PIRAMIT), `delay` late on 20 ms frames, and a downbeat

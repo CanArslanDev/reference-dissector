@@ -64,6 +64,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     if fit_info["tempo_map"]:
         log(f"  the beats drift up to {fit_info['drift_ms']} ms from a constant tempo: tempo_map kept "
             f"({len(fit_info['tempo_map'])} beats); the grid stays constant")
+    for warning in fit_info["warnings"]:
+        log(f"  warning: {warning}")
     # discover() and offsets() read onset-strength peaks, which come a few ms after the attacks
     peaks_grid = onset_grid(grid, fit_info)
     tunings = {s: tuning(read(stems_dir / f"{s}.wav")) for s in TONAL_STEMS
