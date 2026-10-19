@@ -13,18 +13,21 @@ for the genre (trap: 100-180 counts the hats' grid, not the half-time feel).
 
 estimate() takes from a beat tracker's beats and downbeats (beats.py) what
 the comb cannot know, and moves the comb's phase where it is slightly off.
-On 26 constant-tempo test beats (72-160 BPM, 4/4 and 3/4, swing up to 66 %,
-two kits; the comb on the drum bus, beat_this on the mp3 mix):
-- the octave: fit_grid in 100-180 read 9 at x4/3, x3/2 or x2/3 (no octave
-  of 95 BPM lies in it); refined around the tracker's tempo, none;
-- beat 1: fit_grid's first grid beat was a downbeat in 16 of 22 beats that
-  start on one and in none of 4 that start mid-bar; with the tracker's
-  downbeats the first bar line was beat 1 in all 26;
-- the phase: the comb's lines sat 8.0 ms (median) after the sample starts,
-  and on 4 drum buses half a beat or a swung 16th off; moved onto the
-  attacks, 0.1 ms after them (largest 3.2 ms off);
-- the meter, the swing of the off-beat 16ths and 8ths, and how far the
-  beats drift from a constant tempo.
+On 86 test beats (72-160 BPM; 4/4, 3/4 and 6/8; swing up to 66 %; library
+kits, 10 starting mid-bar, 2 on a 3 % ramp; the six calibration beats on
+Demucs stems; the comb on the drum bus, beat_this on the mix):
+- the octave: fit_grid in 100-180 read 24 of the 80 constant-tempo beats
+  outside 6/8 at x4/3, x3/2 or x2/3 (no octave of 95 BPM lies in it); with
+  the tracker, none. 6/8 at 95 came out right; at 136, read by the tracker
+  as 12/8, it needs --meter;
+- beat 1: fit_grid's first grid beat was a downbeat in 40 of the 58 beats
+  it read at an octave (in none of 8 mid-bar starts); the first bar line
+  from the tracker's downbeats in 81 of 84, the 3 wrong ones flagged;
+- the phase: the comb's lines sat 7.7 ms (median) after the sample starts,
+  and 6 of 58 a swung 16th or half a beat off; moved onto the attacks,
+  0.3 ms after them (largest 4.8 ms off, 82 beats);
+- the meter, the swing of the off-beat 16ths and 8ths, how far the beats
+  drift from a constant tempo, and where it changes (a beat switch).
 Without a tracker it is fit_grid in bpm_range, exactly as before.
 """
 
@@ -281,7 +284,7 @@ def _in_range(bpm: float, bpm_range: tuple[float, float] | None) -> bool:
 
 
 def subdivision(t: np.ndarray, s: np.ndarray, bpm: float, phase: float, width: float = 0.04) -> dict:
-    """Shares of the onset strength within `width` of a beat from 1/3, 2/3
+    """Shares of the onset strength within `width` (of a beat) of 1/3, 2/3
     and 1/2 of each beat at bpm: a dotted quarter holds three 8ths, a quarter
     two. Against the comb at the tracker's tempo, the 6/8 test beats (beat_this
     on dotted quarters) held 0.15-0.28 at 1/3, 0.26-0.29 at 2/3 and none at
@@ -331,7 +334,7 @@ def phase_near(env: np.ndarray, fps: float, bpm: float, beats: np.ndarray, ratio
     grid's lines every beat at x1 and x2, every half beat at x1/2 and x3/2,
     every third at x2/3; where they agree on no place (resultant < 0.5, a
     tempo forced far from the tracker's) the whole beat is searched. Alone,
-    the comb sat half a beat or a swung 16th off on 4 of 26 test drum buses:
+    the comb sat half a beat or a swung 16th off on 6 of 58 test drum buses:
     hats and kicks fill the off-beats too."""
     beat = 60.0 / bpm
     fold = beat / _level(ratio).denominator
@@ -374,7 +377,7 @@ def attack_offset(x: np.ndarray, bpm: float, phase: float, near: float = 0.035) 
     """Median seconds from the beat lines to the attacks of the stronger half
     of the kick- and snare-band onsets within `near` of them; negative when
     the attacks come first. The comb's lines (onset-strength peaks) came
-    5.5-12.7 ms after them on the test beats, 7.1 ms on PIRAMIT's drums."""
+    4.8-13.2 ms after them on 82 test beats, 7.1 ms on PIRAMIT's drums."""
     beat = 60.0 / bpm
     d = []
     for role in ("kick", "snare"):
@@ -393,13 +396,14 @@ def attack_offset(x: np.ndarray, bpm: float, phase: float, near: float = 0.035) 
 def tracker_meter(beats, downbeats, ratio: float = 1.0, min_share: float = 0.6,
                   min_bars: int = 4) -> tuple[int, dict]:
     """Beats per bar from the tracker beats between its downbeats: 3 or 4 when
-    at least min_share of min_bars or more bars agree, else 4 (unsure). On the
-    3/4 test beats beat_this agreed on 3 at 72 BPM (in 76 and 88 % of the
-    bars), not at 136 (38 and 59 %: 4/4); it never read a 4/4 beat as 3. A
-    3/4 read at twice the tracker's tempo keeps the tracker's bar (6/4); a
-    4/4 is split in two, trap's half-time convention. evidence["two"]: the
-    bars hold 2 beats as consistently, as in 6/8 tapped in dotted quarters
-    (or a 4/4 tapped in half notes: three of the six calibration beats)."""
+    at least min_share of min_bars or more bars agree, else 4 (unsure). Of 12
+    test beats in 3/4, beat_this agreed on 3 in 4, at 72 and 95 BPM (76-100 %
+    of the bars), not in the other 8 (32-59 %: 4/4); it read none of 56 4/4
+    beats as 3. A 3/4 read at twice the tracker's tempo keeps the tracker's
+    bar (6/4); a 4/4 is split in two, trap's half-time convention.
+    evidence["two_beat_bars"]: the bars hold 2 beats as consistently, as in
+    6/8 tapped in dotted quarters (or 4/4 in half notes: three calibration
+    beats)."""
     b, d = np.asarray(beats, dtype=float), np.asarray(downbeats, dtype=float)
     counts = [int(np.sum((b >= d[i] - 1e-3) & (b < d[i + 1] - 1e-3))) for i in range(len(d) - 1)]
     hist = Counter(counts)
@@ -409,7 +413,7 @@ def tracker_meter(beats, downbeats, ratio: float = 1.0, min_share: float = 0.6,
     share = agree / len(counts) if counts else 0.0
     accepted = n in (3, 4) and share >= min_share and len(counts) >= min_bars
     evidence.update(top=n, share=round(share, 2), accepted=accepted,
-                    two=n == 2 and share >= min_share and len(counts) >= min_bars)
+                    two_beat_bars=n == 2 and share >= min_share and len(counts) >= min_bars)
     if not accepted:
         return 4, evidence
     return (n * 2 if n % 2 and round(ratio) == 2 else n), evidence
@@ -481,13 +485,13 @@ def swing(x: np.ndarray, grid: Grid, role: str = "hat") -> dict:
     part of the beat (_ratio), and ratio_16 when the 8ths themselves swing.
 
     Onset-strength peaks read 66 % as 62.4-66.4 %: the peaks of the hats on
-    the 8th lines, the delay taken off, came 0.01-0.04 of an 8th later than
-    those of the swung 16ths. Attacks read 66 and 58 % within 0.1 points and
-    straight 16ths at 49.8-50.1 %. Without the guards, straight beats read
-    up to 69.2 %: a kick sample's own second transient 158 ms in (strength
-    0.11 of the hats'), 32nd rolls (0.20), triplet fills (two clusters, an
-    interquartile range of 13-32 points against 2.8 at most for a swing).
-    Onsets at one lag after each kick are left out (_echoes)."""
+    the 8th lines, their delay taken off, came up to 0.04 of an 8th later
+    than those of the swung 16ths. Attacks read 66 and 58 % within 0.1 point
+    (16 beats) and straight 16ths at 49.8-51.7 %. Unguarded, straight beats
+    read up to 69.2 %: a kick sample's own second transient 158 ms in
+    (strength 0.11 of the hats'), 32nd rolls (0.20), triplet fills (two
+    clusters, an interquartile range of 13-32 points against 2.8 at most for
+    a swing). Onsets at one lag after each kick are left out (_echoes)."""
     t, s = strength_peaks(x, role)
     a = np.array([np.nan if (at := _attack(x, ti, role)) is None else at for ti in t])
     t, s = a[~np.isnan(a)], s[~np.isnan(a)]
@@ -550,9 +554,9 @@ def drift(x: np.ndarray, grid: Grid, numbers: np.ndarray, beats: np.ndarray, rat
     14 ms after the kick- and snare-band ones the phase follows, and a map
     was kept for it, as for false attacks and swung 16ths clustered over a
     few beats (up to 77.6 ms). Now 82 constant-tempo test beats read at most
-    2.8 ms (median 0.4), no map. A tempo rising 3 % over 16 bars: 68.8 and
-    105.0 ms, the map 0.9 and 1.4 ms from the beats (median) where the
-    constant grid is 25.5 and 17.1 ms off."""
+    2.8 ms (median 0.4), no map. A tempo rising 3 % over 16 bars: 112.8 and
+    105.0 ms, the map 2.5 and 1.3 ms from the beats (median) where the
+    constant grid is 22.9 and 16.0 ms off."""
     b, numbers = np.asarray(beats, dtype=float), np.asarray(numbers)
     if len(b) < 2:
         return 0.0, None
@@ -626,7 +630,7 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
     _, bars = tracker_meter(beats, downbeats)
     sub = subdivision(t, s, rows[0]["bpm"], rows[0]["phase"])
     # dotted quarters are looked for only when the meter is x/8 or the tracker's bars hold 2 beats
-    asked = unit == 8 if meter else bars["two"]
+    asked = unit == 8 if meter else bars["two_beat_bars"]
     compound = asked and _compound(sub)
     if compound:
         rows += octave_candidates(env, fps, strong, tempo, bpm_range, COMPOUND)
