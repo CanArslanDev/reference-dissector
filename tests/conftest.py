@@ -53,3 +53,56 @@ def beat(kit):
                 x[a:a + len(y)] += gain * y[: max(0, min(len(y), n - a))]
                 truth[name].append(t)
     return {"audio": x, "bpm": bpm, "phase": phase, "truth": truth}
+
+
+def drum_beat(kit: dict, bpm: float, bars: int, beats_per_bar: int = 4, swing: float = 0.5, lead: float = 0.03,
+              crop: float = 0.0, ramp: float = 0.0, hats: int = 1) -> dict:
+    """A beat whose grid is known: kick on beat 1 and two 16ths before the
+    last beat, snare on the middle beat, a hat on every 16th (every 2nd with
+    hats=2), accented on the beats; the odd 16ths at `swing` of their 8th.
+    ramp: the tempo rises by that share over the beat. crop: seconds cut from
+    the start (the truth moves with it)."""
+    steps = 4 * beats_per_bar
+    total = bars * steps
+
+    def at(s):  # seconds of 16th step s
+        q = s / 4
+        if ramp:
+            return lead + 60.0 / bpm * (bars * beats_per_bar / ramp) * np.log1p(ramp * q / (bars * beats_per_bar))
+        return lead + q * 60.0 / bpm
+
+    def placed(s):
+        return at(s - 1) + swing * (at(s + 1) - at(s - 1)) if s % 2 else at(s)
+
+    n = int((at(total) + 1.0) * SR)
+    x = np.random.default_rng(9).standard_normal(n).astype(np.float32) * 0.003
+    for s in range(total):
+        k = s % steps
+        plays = [("hat", 0.4 if k % 4 == 0 else 0.3 if k % 2 == 0 else 0.22)] if s % hats == 0 else []
+        if k in (0, steps - 6):
+            plays.append(("kick", 0.9))
+        if k == 4 * (beats_per_bar // 2):
+            plays.append(("snare", 0.8))
+        for name, gain in plays:
+            a = int(round(placed(s) * SR))
+            y = kit[name]
+            x[a:a + len(y)] += gain * y[: max(0, min(len(y), n - a))]
+    beats = np.array([at(s) for s in range(0, total, 4)])
+    downbeats = beats[::beats_per_bar]
+    a = int(round(crop * SR))
+    return {"audio": x[a:], "bpm": bpm, "beats": beats[beats >= crop] - crop,
+            "downbeats": downbeats[downbeats >= crop] - crop, "bar": beats_per_bar * 60.0 / bpm}
+
+
+def tracked(truth: dict, half: bool = False, delay: float = 0.005, every: int | None = None) -> dict:
+    """What beat_this gives for a beat: its beats (every other one at half
+    tempo, as it read PIRAMIT), `delay` late on 20 ms frames, and a downbeat
+    every `every` of its beats (default: on the true downbeats)."""
+    beats = truth["beats"][::2] if half else truth["beats"]
+    beats = np.round((beats + delay) / 0.02) * 0.02
+    if every:
+        downbeats = beats[::every]
+    else:
+        downbeats = np.round((truth["downbeats"] + delay) / 0.02) * 0.02
+    return {"beats": beats.tolist(), "downbeats": downbeats.tolist(), "name": "beat_this", "version": "1.1.0",
+            "checkpoint": "final0", "device": "cpu", "seconds": 0.5}
