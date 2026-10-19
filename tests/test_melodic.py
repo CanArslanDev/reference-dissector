@@ -113,6 +113,19 @@ def test_vote_restores_the_majority_and_drops_only_on_request():
     assert any(n["pitch"] == 70 for n in strict)  # the clearly attacked variation stays
 
 
+def test_stem_notes_vote_and_drop_on_request():
+    g, notes, sections = toy_loop()
+    raw = [{"start_s": n["t"], "end_s": n["end"], "midi": n["pitch"], "amplitude": 0.5, "onset": n["onset"],
+            "bend": []} for n in notes]
+    x = np.zeros(9 * SR, np.float32)
+    kept, report = M.stem_notes(raw, x, g, sections=sections)
+    assert report[0]["restored"] == 1 and report[0]["dropped"] == 0 and len(kept) == len(raw) + 1
+    assert next(n for n in kept if n.get("voted") == "restored")["start_time"] == 10.0  # beat 10, bar 3
+    dropped, report = M.stem_notes(raw, x, g, sections=sections, drop_below=0.7)
+    assert report[0]["dropped"] == 1 and len(dropped) == len(raw)
+    assert M.stem_notes(raw, x, g, sections=sections, voting=False)[1] == []
+
+
 def test_vote_keeps_a_same_pitch_roll_apart():
     g = Grid(120.0, 0.0)
     notes = [note(2.0 * b + o, 60) for b in range(4) for o in (0.0, 0.0625)]  # two 32nds at 120 BPM

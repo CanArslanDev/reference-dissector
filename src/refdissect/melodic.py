@@ -406,7 +406,8 @@ def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: l
 # ── Per stem ─────────────────────────────────────────────────────────────────
 
 def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, sections: list[dict] | None = None,
-               snap_ms: float | None = None, voting: bool = True) -> tuple[list[dict], list[dict]]:
+               snap_ms: float | None = None, voting: bool = True,
+               drop_below: float | None = None) -> tuple[list[dict], list[dict]]:
     """One stem's notes from the worker's melodic preset (start_s, end_s, midi,
     amplitude, onset, bend): voted across loop repeats, levels and velocities
     measured in the stem x after voting (restored notes get their own), then
@@ -417,7 +418,7 @@ def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, 
     if voting and sections and notes:
         by_bar = bar_notes(notes, grid)
         groups = loop_groups(sections, lambda a, b: note_similarity(by_bar.get(a, []), by_bar.get(b, []), a, b, grid))
-        notes, report = vote(notes, grid, groups)
+        notes, report = vote(notes, grid, groups, drop_below=drop_below)
     levels = note_levels(x, notes, tuning) if notes else np.array([])
     fill = float(np.nanmedian(levels)) if np.isfinite(levels).any() else -60.0
     levels = np.where(np.isfinite(levels), levels, fill)
@@ -441,7 +442,8 @@ def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, 
 
 
 def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndarray],
-          note_pgs: dict[str, np.ndarray], snap_ms: float | None = None, voting: bool = True) -> dict:
+          note_pgs: dict[str, np.ndarray], snap_ms: float | None = None, voting: bool = True,
+          drop_below: float | None = None) -> dict:
     """melodic.json from the worker's output per stem (transcribed: its JSON,
     notes per preset), the stems' audio and the posteriorgrams of the chord
     stems."""
@@ -453,7 +455,8 @@ def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndar
     out: dict = {"grid": {"bpm": grid.bpm, "phase": grid.phase}, "stems": {}}
     for stem, t in transcribed.items():
         st = float(tuning.get("per_stem", {}).get(stem, tuning.get("consensus", 0.0)))
-        notes, report = stem_notes(t["notes"]["melodic"], audio[stem], grid, st, sections, snap_ms, voting)
+        notes, report = stem_notes(t["notes"]["melodic"], audio[stem], grid, st, sections, snap_ms, voting,
+                                   drop_below)
         out["stems"][stem] = {"tuning_cents": int(round(100 * st)), "notes": notes, "voting": report,
                               "chord_preset": [{"t": n["start_s"], "end": n["end_s"], "pitch": n["midi"],
                                                 "amplitude": n["amplitude"]} for n in t["notes"].get("chord", [])]}

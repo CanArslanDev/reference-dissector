@@ -61,7 +61,7 @@ def _analyze(a):
 
 def _melodic(a):
     from .pipeline import melodic
-    melodic(a.work, a.stems, a.min_hz, a.snap_ms, not a.no_vote)
+    melodic(a.work, a.stems, a.min_hz, a.snap_ms, not a.no_vote, a.drop_below)
 
 
 def _match(a):
@@ -208,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="lowest note frequency (default: just above the 808's highest note)")
     s.add_argument("--snap-ms", type=float, default=None, help="snap onsets to the 16th grid within this many ms")
     s.add_argument("--no-vote", action="store_true", help="no voting across loop repeats")
+    s.add_argument("--drop-below", type=float, default=None,
+                   help="drop notes heard in fewer than half of a loop's repeats when their onset posterior is "
+                        "under this (off by default: it cost F1 on synthetic loops)")
     s.set_defaults(run=_melodic)
     s = sub.add_parser("match", help="the library's closest sound for each template")
     s.add_argument("work")
