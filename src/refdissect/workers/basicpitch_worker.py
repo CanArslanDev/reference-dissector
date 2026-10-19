@@ -3,10 +3,11 @@ Core ML model on macOS; no TensorFlow in this package's). Standalone on
 purpose: imports nothing from refdissect.
 
 usage: basicpitch_worker.py OUT_DIR SETTINGS AUDIO [AUDIO ...]
-SETTINGS is JSON: {preset name: {onset, frame, min_ms, melodia, min_hz, max_hz}}.
-Per audio file the model runs once; its posteriorgrams go to OUT_DIR/<name>.npz
-(float16) and every preset is decoded from them into OUT_DIR/<name>.json.
-Prints one JSON line with the result.
+SETTINGS is JSON: {"presets": {name: {onset, frame, min_ms, melodia, min_hz,
+max_hz}}, "files": {audio file stem: {min_hz}}}; a file's entry overrides the
+presets for that file. Per audio file the model runs once; its posteriorgrams
+go to OUT_DIR/<name>.npz (float16) and every preset is decoded from them into
+OUT_DIR/<name>.json. Prints one JSON line with the result.
 
 Three things differ from basic_pitch.inference.predict, each measured:
 - 0.4.0 keeps 86 frames per second of the 86.58 it makes (142 frames per
@@ -71,6 +72,12 @@ def infer(model, audio: np.ndarray) -> dict:
     return {k: v[:keep] for k, v in frames.items()}
 
 
+def presets_for(settings: dict, name: str) -> dict:
+    """The presets with this file's own settings (settings["files"][name]) on top."""
+    own = settings.get("files", {}).get(name, {})
+    return {preset: {**s, **own} for preset, s in settings["presets"].items()}
+
+
 def decode(output: dict, s: dict) -> list[dict]:
     """One preset's notes: model_output_to_notes's two steps (notes, then
     bends) on copies, since constrain_frequency zeroes bins in place."""
@@ -112,7 +119,7 @@ def main() -> int:
         output = infer(model, audio)
         infer_s = time.time() - t
         np.savez_compressed(out_dir / f"{name}.npz", **{k: v.astype(np.float16) for k, v in output.items()})
-        notes = {preset: decode(output, s) for preset, s in settings.items()}
+        notes = {preset: decode(output, s) for preset, s in presets_for(settings, name).items()}
         target = out_dir / f"{name}.json"
         target.write_text(json.dumps({"stem": name, "audio": str(path), "seconds": round(len(audio) / SR, 3),
                                       "frames": len(output["note"]), "notes": notes}), encoding="utf-8")

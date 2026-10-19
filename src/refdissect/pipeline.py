@@ -216,8 +216,9 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
             snap_ms: float | None = None, voting: bool = True, drop_below: float | None = None, log=print) -> dict:
     """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
     stem in its own environment, its notes and posteriorgrams go to
-    basicpitch/. The minimum frequency is just above the 808's highest note
-    unless min_hz is given."""
+    basicpitch/. The minimum frequency is just above the 808's usual range
+    for the stems it bleeds into (melodic.FLOOR_STEMS), or min_hz for every
+    stem when given."""
     from . import melodic as mel
     from .basicpitch import PRESETS, transcribe
     work = Path(work)
@@ -227,10 +228,12 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     if not stems:
         raise ValueError(f"No tonal stem ({', '.join(mel.MELODIC_STEMS)}) in {stems_dir}")
     floor_hz, top = (min_hz, None) if min_hz else mel.floor_above_808(analysis["notes_808"])
-    log(f"melodic: {', '.join(stems)}; minimum frequency {floor_hz or 'none'}"
-        + (f" Hz (above the 808's MIDI {top})" if top is not None else ""))
-    settings = {name: {**preset, "min_hz": floor_hz} for name, preset in PRESETS.items()}
-    run = transcribe([stems_dir / f"{s}.wav" for s in stems], work / "basicpitch", settings)
+    files = {s: {"min_hz": floor_hz if min_hz or s in mel.FLOOR_STEMS else None} for s in stems}
+    floored = [s for s in stems if files[s]["min_hz"]]
+    log(f"melodic: {', '.join(stems)}; minimum frequency "
+        + (f"{floor_hz} Hz for {', '.join(floored)}" if floored else "none")
+        + (f" (above the 808's MIDI {top})" if top is not None and floored else ""))
+    run = transcribe([stems_dir / f"{s}.wav" for s in stems], work / "basicpitch", PRESETS, files)
     transcribed = {s: _load(Path(run["stems"][s]["notes"])) for s in stems}
     pgs = {}
     for s in stems:
@@ -241,7 +244,8 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
                     drop_below)
     floor_from = "808" if top is not None else ("parameter" if min_hz else None)
     out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
-                     "python": run["python"], "settings": settings, "min_hz_from": floor_from}
+                     "python": run["python"], "settings": {"presets": PRESETS, "files": files},
+                     "min_hz_from": floor_from}
     for s, info in out["stems"].items():
         changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored "
                             f"({r['too_quiet']} too quiet), {r['dropped']} dropped"

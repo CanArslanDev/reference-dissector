@@ -205,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("work")
     s.add_argument("--stems", default=None, help="stems folder (default: the one analyze used)")
     s.add_argument("--min-hz", type=float, default=None,
-                   help="lowest note frequency (default: just above the 808's highest note)")
+                   help="lowest note frequency for every stem (default: just above the 808's usual range, "
+                        "for other, piano and guitar)")
     s.add_argument("--snap-ms", type=float, default=None, help="snap onsets to the 16th grid within this many ms")
     s.add_argument("--no-vote", action="store_true", help="no voting across loop repeats")
     s.add_argument("--drop-below", type=float, default=None,

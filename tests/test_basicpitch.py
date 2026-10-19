@@ -70,9 +70,15 @@ def test_worker_decode_corrects_bends_and_uses_copies(monkeypatch):
 
 
 def test_transcribe_runs_the_worker_in_its_own_environment(monkeypatch, tmp_path):
-    cmd = basicpitch.command([tmp_path / "other.wav"], tmp_path / "bp", {"melodic": {"onset": 0.6}})
+    cmd = basicpitch.command([tmp_path / "other.wav"], tmp_path / "bp", {"melodic": {"onset": 0.6}},
+                             {"other": {"min_hz": 50.0}})
     assert cmd[cmd.index("--python") + 1] == "3.11" and "basic-pitch==0.4.0" in cmd and "setuptools<81" in cmd
-    assert cmd[-1].endswith("other.wav") and json.loads(cmd[-2]) == {"melodic": {"onset": 0.6}}
+    settings = json.loads(cmd[-2])
+    assert cmd[-1].endswith("other.wav") and settings == {"presets": {"melodic": {"onset": 0.6}},
+                                                          "files": {"other": {"min_hz": 50.0}}}
+    w = worker()  # a file's own settings go on top of every preset
+    assert w.presets_for(settings, "other") == {"melodic": {"onset": 0.6, "min_hz": 50.0}}
+    assert w.presets_for(settings, "vocals") == {"melodic": {"onset": 0.6}}
 
     class Done:
         returncode, stdout, stderr = 0, 'Core ML says hello\n{"stems": {"other": {}}}\n', ""
