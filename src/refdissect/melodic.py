@@ -19,16 +19,23 @@ the notes that go to Live, `chord` (melodia on) kept for the pads. Per stem:
 
 Chords (`chords`): Basic Pitch's note posteriorgram of the melodic stems
 summed into pitch classes per 8th note, matched against 14 chord qualities,
-smoothed by Viterbi with a change penalty and averaged across loop repeats.
-The 808 stays out of those pitch classes (only pitches above its highest note
-count) but names the bass: the 808 note sounding in a span gives the slash
-bass, and so the inversion; without one, the lowest chord tone of the melodic
-stems does. On 36 synthetic renders (pads with 7ths, sus, dim and slash
-chords changing on beat 3, beat 4 and the "and" of 2; full mixes; 4-bar loops
-played four times) mir_eval gives majmin 0.882, majmin_inv 0.746, sevenths
-0.821, sevenths_inv 0.717, against 0.732 / 0.512 / 0.201 / 0.017 for one
-major or minor triad per bar from chroma. Without the 808 as bass
-majmin_inv falls to 0.587; per half bar it is 0.716, and sevenths 0.755.
+smoothed by Viterbi with a change penalty, and averaged across the repeats
+of the loops that the same stems' notes show (`note_loops`). The 808 stays
+out of those pitch classes (only pitches above its highest note count) but
+names the bass: the 808 note sounding in a span gives the slash bass, and so
+the inversion; without one, the lowest chord tone of the melodic stems does.
+
+On 36 synthetic renders (pads with 7ths, sus, dim and slash chords changing
+on beat 3, beat 4 and the "and" of 2; full mixes; 4-bar loops played four
+times), each one section as analyze gives a steady beat, with the truth's
+grid and 808 notes, mir_eval gives majmin 0.880, majmin_inv 0.744, sevenths
+0.824, sevenths_inv 0.720, against 0.732 / 0.512 / 0.201 / 0.017 for one
+major or minor triad per bar from chroma. The vote acted on 11 of the 12
+loops (sevenths_inv there 0.898 -> 0.952) and on none of the 24 others. A
+vote on the cosine of the bars' pitch classes found a loop in all 36:
+same-key bars scored 0.37-0.61 whether they repeat or not, and majmin fell
+to 0.515. Without the 808 as bass majmin_inv is 0.584; per half bar 0.712,
+and sevenths 0.768.
 """
 
 from __future__ import annotations
@@ -412,10 +419,10 @@ def vote_spans(W: np.ndarray, bass: list[int | None], starts: np.ndarray, grid: 
 
 def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: list[dict],
            lowest_midi: int = MIDI_OFFSET, step_beats: float = 0.5, penalty: float = 0.15,
-           sections: list[dict] | None = None, tone_floor: float = 0.2) -> dict:
+           groups: list[dict] | None = None, tone_floor: float = 0.2) -> dict:
     """Chord segments from the note posteriorgrams of the melodic stems (summed)
-    and the 808 as bass; with sections, weights are averaged across loop
-    repeats first (`loop_groups` on bar-synchronous pitch classes).
+    and the 808 as bass; with loop groups (note_loops on the same stems'
+    notes), weights are averaged across the repeats first.
 
     Only the melodic stems and pitches above lowest_midi (the 808's highest
     note + 1) count, so neither the bass stem nor the 808's own range enters
@@ -428,20 +435,8 @@ def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: l
     S = sum(salience(pg, starts, step, lowest_midi) for pg in note_pgs)
     W = pitch_class_weights(S)
     bass = bass_per_span(notes_808, starts, step)
-    groups = []
-    if sections:
-        per_bar = int(round(grid.beats_per_bar / step_beats))
-        k0 = int(np.searchsorted(starts, grid.phase - 1e-6))
-
-        def bar_weights(b):
-            return W[k0 + b * per_bar:k0 + (b + 1) * per_bar].ravel()
-
-        def similar(b1, b2):
-            x, y = bar_weights(b1), bar_weights(b2)
-            if len(x) != len(y) or not x.any() or not y.any():
-                return 0.0
-            return float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y)))
-        groups = loop_groups(sections, similar)
+    groups = groups or []
+    if groups:
         W, bass = vote_spans(W, bass, starts, grid, groups)
     path = viterbi(chord_scores(W, bass), penalty)
     segments: list[dict] = []
@@ -536,8 +531,10 @@ def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndar
                                                 "amplitude": n["amplitude"]} for n in t["notes"].get("chord", [])]}
     pgs = [note_pgs[s] for s in CHORD_STEMS if s in note_pgs]
     if pgs:
+        played = [{"t": n["start_s"], "end": n["end_s"], "pitch": n["midi"]}
+                  for s in CHORD_STEMS if s in transcribed for n in transcribed[s]["notes"]["melodic"]]
+        groups = note_loops(played, grid, sections) if voting and sections and played else []
         out["chords"] = chords(pgs, grid, analysis["source"]["duration_s"], analysis["notes_808"],
-                               lowest_midi=top + 1 if top is not None else MIDI_OFFSET,
-                               sections=sections if voting else None)
+                               lowest_midi=top + 1 if top is not None else MIDI_OFFSET, groups=groups)
     return out
 

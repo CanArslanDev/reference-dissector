@@ -250,15 +250,35 @@ def test_viterbi_change_penalty_smooths_a_one_span_blip():
 
 def test_chord_vote_across_loop_repeats():
     """One repeat of a 1-bar loop played eight times has its C buried under an
-    F (bleed): averaged with the other seven, it reads A minor like them."""
+    F (bleed): averaged with the other seven, it reads A minor like them. The
+    repeats are found from the notes (note_loops)."""
     spans = [(2.0 * b, 2.0 * b + 2.0, (57, 60, 64) if b != 5 else (57, 64, 65)) for b in range(8)]
     pg = posteriorgram(spans, 16.0)
     n808 = [{"t": 2.0 * b, "end": 2.0 * b + 2.0, "pitch": 33} for b in range(8)]
-    sections = [{"name": "A", "start_bar": 1, "end_bar": 8}]
-    alone = M.chords([pg], Grid(120.0, 0.0), 16.0, n808, lowest_midi=36)
-    voted = M.chords([pg], Grid(120.0, 0.0), 16.0, n808, lowest_midi=36, sections=sections)
+    g = Grid(120.0, 0.0)
+    played = [note(a + 0.5 * k, p) for a, _, tones in spans for k, p in enumerate(tones)]
+    groups = M.note_loops(played, g, [{"name": "A", "start_bar": 1, "end_bar": 8}])
+    alone = M.chords([pg], g, 16.0, n808, lowest_midi=36)
+    voted = M.chords([pg], g, 16.0, n808, lowest_midi=36, groups=groups)
     assert [s["label"] for s in alone["segments"]] == ["A:min", "F:maj7/3", "A:min"]
     assert [s["label"] for s in voted["segments"]] == ["A:min"] and voted["loops"][0]["period_bars"] == 1
+
+
+def test_a_progression_that_never_repeats_keeps_its_chords():
+    """Eight bars in one section, a different chord in each. All are in A
+    minor, so their pitch classes are alike: the old vote's cosine (0.43 at
+    a period of 2 bars) took that for a loop and read F:maj7 and C:maj7 in
+    turn. Their notes do not repeat, so nothing is voted now and every bar
+    keeps its chord."""
+    prog = [(57, 60, 64), (53, 57, 60), (48, 52, 55), (55, 59, 62), (50, 53, 57), (52, 55, 59), (53, 57, 60, 64),
+            (52, 56, 59)]
+    labels = ["A:min", "F:maj", "C:maj", "G:maj", "D:min", "E:min", "F:maj7", "E:maj"]
+    pg = posteriorgram([(2.0 * b, 2.0 * b + 2.0, tones) for b, tones in enumerate(prog)], 16.0)
+    played = [note(2.0 * b + 0.5 * k, p) for b, tones in enumerate(prog) for k, p in enumerate(tones)]
+    g = Grid(120.0, 0.0)
+    groups = M.note_loops(played, g, [{"name": "A", "start_bar": 1, "end_bar": 8}])
+    out = M.chords([pg], g, 16.0, [], lowest_midi=36, groups=groups)
+    assert groups == [] and [s["label"] for s in out["segments"]] == labels
 
 
 def test_harte_labels():
