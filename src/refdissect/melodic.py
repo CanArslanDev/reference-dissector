@@ -28,14 +28,16 @@ the inversion; without one, the lowest chord tone of the melodic stems does.
 On 36 synthetic renders (pads with 7ths, sus, dim and slash chords changing
 on beat 3, beat 4 and the "and" of 2; full mixes; 4-bar loops played four
 times), each one section as analyze gives a steady beat, with the truth's
-grid and 808 notes, mir_eval gives majmin 0.880, majmin_inv 0.744, sevenths
-0.824, sevenths_inv 0.720, against 0.732 / 0.512 / 0.201 / 0.017 for one
-major or minor triad per bar from chroma. The vote acted on 11 of the 12
-loops (sevenths_inv there 0.898 -> 0.952) and on none of the 24 others. A
-vote on the cosine of the bars' pitch classes found a loop in all 36:
-same-key bars scored 0.37-0.61 whether they repeat or not, and majmin fell
-to 0.515. Without the 808 as bass majmin_inv is 0.584; per half bar 0.712,
-and sevenths 0.768.
+grid and 808 notes, mir_eval gives majmin 0.955, majmin_inv 0.810, sevenths
+0.904, sevenths_inv 0.788 (root 0.837), against 0.732 / 0.512 / 0.201 /
+0.017 for one major or minor triad per bar from chroma. When the lower root
+index broke ties between chords with the same tones (A:min7 read C:maj6),
+it was 0.880 / 0.744 / 0.824 / 0.720. The vote acted on 11 of the 12 loops
+(sevenths_inv there 0.903 -> 0.952) and on none of the 24 others. A vote on
+the cosine of the bars' pitch classes found a loop in all 36 (same-key bars
+scored 0.37-0.61 whether they repeat or not) and gave majmin 0.515 where it
+was 0.880 (before the tie-break). Without the 808 as bass majmin_inv is
+0.725; per half bar 0.780, and sevenths 0.848.
 """
 
 from __future__ import annotations
@@ -62,6 +64,17 @@ QUALITIES = {"maj": (0, 4, 7), "min": (0, 3, 7), "7": (0, 4, 7, 10), "maj7": (0,
 PITCH_CLASSES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 DEGREES = ("1", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7")
 STATES = [(r, q) for r in range(12) for q in QUALITIES]  # and N (no chord) after them
+# Chords with the same tones (A:min7 = C:maj6, B:hdim7 = D:min6, A:sus2 =
+# E:sus4, the dim7s) are told apart by the bass: the 808's note, or without
+# one the lowest melodic tone (LOW_BONUS for the chord rooted there). Left
+# tied, maj6 and min6 lose to min7 and hdim7 (QUALITY_PRIOR) instead of to
+# the lower root index (C first). On the 36 synthetic chord renders, each
+# transposed to all 12 keys so that no key's root order decides by luck:
+# majmin 0.912 -> 0.955, sevenths_inv 0.749 -> 0.788, root 0.779 -> 0.835.
+# Chosen on seeds 1-2 among values where the bass outweighs the prior; seed 3
+# (mean of the four scores) 0.828 -> 0.865.
+LOW_BONUS = 0.02
+QUALITY_PRIOR = {"maj6": -0.01, "min6": -0.01}
 
 
 def floor_above_808(notes_808: list[dict], at_least: int = 2) -> tuple[float | None, int | None]:
@@ -348,23 +361,38 @@ def bass_per_span(notes_808: list[dict], starts: np.ndarray, step_s: float, cove
     return out
 
 
-def chord_scores(W: np.ndarray, bass: list[int | None], min_total: float = 0.2) -> np.ndarray:
+def lowest_tone(S: np.ndarray, floor: float = 0.2) -> list[int | None]:
+    """Pitch class of the lowest pitch reaching `floor` in each span of S (spans, 88)."""
+    out: list[int | None] = []
+    for row in S:
+        idx = np.flatnonzero(row >= floor)
+        out.append(int((idx[0] + MIDI_OFFSET) % 12) if len(idx) else None)
+    return out
+
+
+def chord_scores(W: np.ndarray, bass: list[int | None], min_total: float = 0.2,
+                 low: list[int | None] | None = None) -> np.ndarray:
     """(spans, states + N). A chord scores the share of the span's pitch-class
     weight on its tones, less 0.3 x the share of its tones that are nearly
-    absent (< 4 %) and 0.01 per tone over three; the 808 adds 0.08 when it
-    plays the root and takes 0.05 when it plays no chord tone. A span with
-    less total weight than min_total is N (no chord)."""
+    absent (< 4 %) and 0.01 per tone over three, plus QUALITY_PRIOR; the 808
+    adds 0.08 when it plays the root and takes 0.05 when it plays no chord
+    tone; in a span without it, the lowest melodic tone (low) adds LOW_BONUS
+    to the chords rooted on it. A span with less total weight than min_total
+    is N (no chord)."""
     T = np.zeros((len(STATES), 12))
     for j, (r, q) in enumerate(STATES):
         T[j, [(r + i) % 12 for i in QUALITIES[q]]] = 1.0
     n = T.sum(axis=1)
     roots = np.array([r for r, _ in STATES])
+    prior = np.array([QUALITY_PRIOR.get(q, 0.0) for _, q in STATES])
     total = W.sum(axis=1, keepdims=True)
     share = W / np.where(total > 0, total, 1.0)
-    chord = share @ T.T - 0.3 * ((share < 0.04) @ T.T) / n - 0.01 * (n - 3)
+    chord = share @ T.T - 0.3 * ((share < 0.04) @ T.T) / n - 0.01 * (n - 3) + prior
     for k, b in enumerate(bass):
         if b is not None:
             chord[k] += np.where(roots == b, 0.08, np.where(T[:, b] == 0, -0.05, 0.0))
+        elif low is not None and low[k] is not None:
+            chord[k] += np.where(roots == low[k], LOW_BONUS, 0.0)
     silent = total[:, 0] < min_total
     chord[silent] = -np.inf
     return np.c_[chord, np.where(silent, 0.0, -np.inf)]
@@ -438,7 +466,7 @@ def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: l
     groups = groups or []
     if groups:
         W, bass = vote_spans(W, bass, starts, grid, groups)
-    path = viterbi(chord_scores(W, bass), penalty)
+    path = viterbi(chord_scores(W, bass, low=lowest_tone(S, tone_floor)), penalty)
     segments: list[dict] = []
     for k, j in enumerate(path):
         if segments and segments[-1]["state"] == j and segments[-1]["bass_808"] == bass[k]:
