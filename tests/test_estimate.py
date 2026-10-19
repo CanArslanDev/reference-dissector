@@ -1,10 +1,14 @@
 """grid.estimate on beats whose grid is known, with beat_this mocked (tracked)."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from conftest import drum_beat, six_eight, tracked
 
-from refdissect.grid import Grid, estimate, fit_grid, parse_meter, tracker_line
+from refdissect.audio import SR
+from refdissect.grid import Grid, _attack, drift, estimate, fit_grid, parse_meter, tracker_line
+from refdissect.hits import strength_peaks
 
 
 def bar_error_ms(grid: Grid, truth: dict) -> float:
@@ -163,6 +167,36 @@ def test_drift_keeps_a_tempo_map_for_a_ramp(kit):
     # the map follows the beats where the constant grid cannot
     near = [np.min(np.abs(tempo_map - b)) for b in ramp["beats"][2:-2]]
     assert np.median(near) < 0.01
+
+
+def test_no_attack_on_a_ringing_tail(kit):
+    """A 55 Hz tail swings through 30 % of the window's peak a few ms into it:
+    that 'attack' came 33 ms before the snare that follows the tail."""
+    t = np.arange(SR) / SR
+    tail = (0.5 * np.sin(2 * np.pi * 55 * t) * np.exp(-t / 0.4)).astype(np.float32)
+    snare = np.zeros(SR, np.float32)
+    a = int(0.08 * SR)
+    snare[a:a + len(kit["snare"])] = 0.8 * kit["snare"]
+    for x, want in ((tail + snare, None), (snare, 0.08)):
+        peaks, _ = strength_peaks(x, "full")
+        attack = _attack(x, peaks[np.argmin(np.abs(peaks - 0.088))], "full")
+        assert attack is None if want is None else abs(attack - want) < 0.002
+
+
+def test_drift_ignores_an_offset_and_stray_beats(kit):
+    """A constant offset is no drift (it kept a map on calibration beat 5),
+    nor are three tracker beats that sit nearer a swung 16th than their own
+    onset (91 ms of 'drift' before)."""
+    truth = drum_beat(kit, 136, 16, swing=0.66)
+    tracker = tracked(truth)
+    grid, _ = estimate(truth["audio"], tracker, (100, 180))
+    bpm, numbers, beats = tracker_line(tracker["beats"])
+    onsets, _ = strength_peaks(truth["audio"], "full")
+    early = beats.copy()
+    early[-4:-1] -= 0.04
+    for g, b in ((replace(grid, phase=grid.phase - 0.014), beats), (grid, early)):
+        drift_ms, tempo_map = drift(truth["audio"], g, numbers, b, grid.bpm / bpm, onsets)
+        assert drift_ms < 5 and tempo_map is None
 
 
 def test_bpm_forces_the_tempo(kit):

@@ -305,13 +305,16 @@ def phase_near(env: np.ndarray, fps: float, bpm: float, beats: np.ndarray, ratio
 
 def _attack(x: np.ndarray, t: float, role: str) -> float | None:
     """The attack (audio.attack_time in the role's band) of an onset-strength
-    peak at t: searched from 40 ms before it over 60 ms. None for a hit still
-    ringing from the sound before (no rise in the window)."""
+    peak at t: searched from 40 ms before it over 60 ms. None when it lands
+    more than 20 ms before the peak: the window opened on the sound before,
+    still ringing. A low tail swings through 30 % of the window's peak a few
+    ms in; on the test beats such 'attacks' came 25-39 ms before peaks that
+    sat 0-20 ms from the beat, where nothing played."""
     a = int((t - 0.04) * SR)
     if a < 0:
         return None
     at = attack_time(x[a:a + int(0.1 * SR)], role, search_s=0.06)
-    return a / SR + at if at > 0.001 else None
+    return a / SR + at if at >= 0.02 else None
 
 
 def attack_offset(x: np.ndarray, bpm: float, phase: float, near: float = 0.035) -> tuple[float, dict]:
@@ -408,30 +411,49 @@ def _running(r: np.ndarray, size: int, how) -> np.ndarray:
     return how(np.lib.stride_tricks.sliding_window_view(np.pad(r, h, constant_values=np.nan), 2 * h + 1), axis=1)
 
 
+def _snapped(x: np.ndarray, numbers: np.ndarray, b: np.ndarray, onsets: np.ndarray | None, near: float,
+             stray: float) -> list[tuple[int, float]]:
+    """(beat number, attack) of the onset nearest each tracker beat, within
+    `near` of it and within `stray` of the lag most beats have to theirs:
+    nearer the beat than its own onset, a swung 16th was taken for it (75 ms
+    early at 66 % swing and 136 BPM)."""
+    if onsets is None or len(onsets) < 2:
+        return []
+    j = np.clip(np.searchsorted(onsets, b), 1, len(onsets) - 1)
+    nearest = np.where(b - onsets[j - 1] < onsets[j] - b, onsets[j - 1], onsets[j])
+    lag = nearest - b
+    close = np.abs(lag) < near
+    if not close.any():
+        return []
+    ok = close & (np.abs(lag - np.median(lag[close])) < stray)
+    return [(k, a) for k, t in zip(numbers[ok], nearest[ok]) if (a := _attack(x, t, "full")) is not None]
+
+
 def drift(x: np.ndarray, grid: Grid, numbers: np.ndarray, beats: np.ndarray, ratio: float,
-          onsets: np.ndarray | None = None, near: float = 0.04) -> tuple[float, list[float] | None]:
-    """How far the beats move from the constant grid (ms). Each numbered
-    tracker beat is replaced by the attack of the onset nearest it (within
-    `near`): beat_this's beats come on 20 ms frames and run a few ms late. Its
-    place against the grid line it should fall on is smoothed: a running
-    median over 5 beats (a stray one), then a quadratic Savitzky-Golay fit
-    over 9 (17 for the tracker's own beats, used less their median offset
+          onsets: np.ndarray | None = None, near: float = 0.04, stray: float = 0.015,
+          run: int = 8) -> tuple[float, list[float] | None]:
+    """How far the beats move from the constant grid (ms): from their median
+    place, held over `run` beats in a row. Each numbered tracker beat is
+    replaced by the attack of its onset (_snapped): beat_this's beats come on
+    20 ms frames and run a few ms late. Its place against the grid line it
+    should fall on is smoothed: a running median over 5 beats, then a
+    quadratic Savitzky-Golay fit over 9 (17 for the tracker's own beats,
     where fewer than 8 beats have an onset), which follows a ramp to its ends
-    where a running mean lags. Beyond DRIFT_MS, the grid's beats moved by
-    that curve are kept: a tempo map. Constant-tempo test beats: at most
-    5.3 ms (from the tracker's own beats: up to 15.3). A tempo rising 3 % over
-    16 bars: 198-220 ms, and the map within 1.4-2.6 ms of the beats (median)
-    where the constant grid is 17-24 ms off."""
+    where a running mean lags. Beyond DRIFT_MS the grid's beats moved by that
+    curve, offset included, are kept: a tempo map.
+
+    An offset is no drift: on calibration beat 5 the full-band attacks sat
+    14 ms after the kick- and snare-band ones the phase follows, and a map
+    was kept for it, as for false attacks and swung 16ths clustered over a
+    few beats (up to 77.6 ms). Now 82 constant-tempo test beats read at most
+    2.8 ms (median 0.4), no map. A tempo rising 3 % over 16 bars: 68.8 and
+    105.0 ms, the map 0.9 and 1.4 ms from the beats (median) where the
+    constant grid is 25.5 and 17.1 ms off."""
     b, numbers = np.asarray(beats, dtype=float), np.asarray(numbers)
     if len(b) < 2:
         return 0.0, None
     den = _level(ratio).denominator
-    attacks = []
-    if onsets is not None and len(onsets) >= 2:
-        j = np.clip(np.searchsorted(onsets, b), 1, len(onsets) - 1)
-        nearest = np.where(b - onsets[j - 1] < onsets[j] - b, onsets[j - 1], onsets[j])
-        attacks = [(k, a) for k, t, bt in zip(numbers, nearest, b)
-                   if abs(t - bt) < near and (a := _attack(x, t, "full")) is not None]
+    attacks = _snapped(x, numbers, b, onsets, near, stray)
     if len(attacks) >= 8:
         numbers, b = (np.array(v) for v in zip(*attacks))
     r = (b - grid.phase) / grid.beat - float(_level(ratio)) * numbers
@@ -441,7 +463,10 @@ def drift(x: np.ndarray, grid: Grid, numbers: np.ndarray, beats: np.ndarray, rat
     if len(curve) >= window:
         curve = savgol_filter(curve, window, 2, mode="interp")
     curve = curve * grid.beat
-    drift_ms = round(1000 * float(np.max(np.abs(curve))), 1)
+    held = np.abs(curve - np.median(curve))
+    if len(held) >= run:
+        held = np.min(np.lib.stride_tricks.sliding_window_view(held, run), axis=1)
+    drift_ms = round(1000 * float(np.max(held)), 1)
     if drift_ms <= DRIFT_MS:
         return drift_ms, None
     k = np.arange(np.ceil((b[0] - grid.phase) / grid.beat), np.floor((b[-1] - grid.phase) / grid.beat) + 1)
