@@ -213,7 +213,7 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
 
 
 def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float | None = None,
-            snap_ms: float | None = None, voting: bool = True, log=print) -> dict:
+            snap_ms: float | None = None, voting: bool = True, drop_below: float | None = None, log=print) -> dict:
     """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
     stem in its own environment, its notes and posteriorgrams go to
     basicpitch/. The minimum frequency is just above the 808's highest note
@@ -237,13 +237,14 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
         if s in mel.CHORD_STEMS:
             with np.load(run["stems"][s]["posteriorgram"]) as z:
                 pgs[s] = z["note"].astype(np.float32)
-    out = mel.build(analysis, transcribed, {s: read(stems_dir / f"{s}.wav") for s in stems}, pgs, snap_ms, voting)
+    out = mel.build(analysis, transcribed, {s: read(stems_dir / f"{s}.wav") for s in stems}, pgs, snap_ms, voting,
+                    drop_below)
     floor_from = "808" if top is not None else ("parameter" if min_hz else None)
     out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
                      "python": run["python"], "settings": settings, "min_hz_from": floor_from}
     for s, info in out["stems"].items():
-        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored"
-                            for r in info["voting"]) or "no loop"
+        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored, "
+                            f"{r['dropped']} dropped" for r in info["voting"]) or "no loop"
         log(f"  {s:7s} {len(info['notes']):4d} notes ({changed})")
     if "chords" in out:
         log(f"  chords: {len(out['chords']['segments'])} segments")
