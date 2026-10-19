@@ -140,6 +140,18 @@ def test_rhythm_double_time_and_a_downbeat_one_bar_and_10_ms_late():
     assert swung["swing"]["ratio_error"] == -0.05 and swung["swing"]["level_equal"]
 
 
+def test_a_6_8_bar_is_six_eighths_at_a_quarter_note_tempo():
+    """bpm counts quarter notes in 6/8 too (beat_unit 8, beats in eighths), as
+    the scenarios write it: a downbeat one bar (1.32 s at 136 BPM) and 10 ms
+    late is 10 ms late. Six beats of 60/bpm would make the bar 2.65 s and
+    read -1313.5 ms."""
+    t = events("truth", time={**grid(272.0, 0.1, 8, 6), "bpm": 136.0, "beat_unit": 8})
+    late = {**grid(272.0, 0.1 + 6 * 30 / 136 + 0.010, 8, 6), "bpm": 136.0, "beat_unit": 8}
+    r = evaluate.rhythm_scores(t, events("estimate", time=late))
+    assert r["downbeat"]["first_error_ms"] == pytest.approx(10.0, abs=0.01)
+    assert r["meter"] == {"truth": [6, 8], "est": [6, 8], "equal": True} and r["tempo"]["octave"] == "x1"
+
+
 def test_validate_names_the_problems():
     assert validate(truth()) is not None
     bad = truth() | {"schema": "other"}

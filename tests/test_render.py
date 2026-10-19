@@ -145,6 +145,11 @@ def test_levels_from_the_render(kit, tmp_path):
     assert level["level_db"] == pytest.approx(20 * np.log10(64 / 127), abs=0.01) and level["spread_p90_db"] < 0.01
     assert s["drums"]["sounds"]["snare"]["f1_20"] == 1.0 and level["n"] == 4
     json.dumps(s)
+    # a stem written halved, as a scenario writes one that would clip, reads the same (+6.02 dB without stems_gain)
+    wav(tmp_path / "truth", "snare.wav", 0.5 * stem)
+    truth["audio"]["master"] = {"stems_gain": {"snare": 0.5}}
+    halved = score(truth, estimate_from_plan(p), tmp_path / "r", truth_dir=tmp_path / "truth")
+    assert halved["levels"]["sounds"]["snare"]["level_db"] == pytest.approx(level["level_db"], abs=0.01)
 
 
 def test_missing_files_play_nothing(tmp_path):
