@@ -86,6 +86,8 @@ def test_every_scenario_is_valid_and_matches_its_stems(built):
         assert v["groups_max_abs"] < 1e-5, name
         assert v["mp3_lag_samples"] == 0 and v["mp3_samples"] == v["mix_samples"], name
         assert abs(v["mix_rms_db"] + 8.6) < 1.5, name
+        # the 808's sounding truth read again in its stem: glides move fastest (full: 15.5 cents at most)
+        assert v["sounding_notes"] >= 3 and v["sounding_err_max_cents"] < 25, name
 
 
 def test_the_scorer_reads_every_truth(built):
@@ -129,18 +131,48 @@ def test_v1_is_build_beats_beat(rows, tmp_path):
 
 
 def test_808_truth_pitch(built):
-    """Each 808 note's truth (the sample's measured pitch plus its
-    transposition, cents included) against a measurement in its stem."""
+    """Each 808 note's truth against a measurement in its stem: the pitch it
+    settles to (the sample's measured pitch plus its transposition, cents
+    included) where it has settled, and the pitch it sounds at (midi) over
+    its read window. The fixture's 808 starts 191 cents up and has settled
+    by 60 ms, so a note sounds at most a few cents over its settled pitch."""
     for name in ("v1", "bass_low", "melodic", "kick808"):
         ev, folder = built[name]
+        stem = read(folder / "stems_truth" / "808.flac")
         assert abs(ev["sounds"]["808"]["f0_hz"] - F808) < 0.05
-        cents = S.pitch_errors(ev, read(folder / "stems_truth" / "808.flac"), settle_s=0.12, min_s=0.06)
+        cents = S.pitch_errors(ev, stem, settle_s=0.12, min_s=0.06)
         assert len(cents) >= 3 and max(abs(c) for c in cents) < 5, (name, cents)
+        heard = S.sounding_errors(ev, stem)
+        assert len(heard) >= 3 and max(abs(c) for c in heard) < 5, (name, heard)
+        over = [100 * (e["midi"] - e["midi_settled"]) for e in ev["bass808"]]
+        assert 0 <= min(over) and max(over) < 30, (name, over)
     low = built["bass_low"][0]["bass808"]
-    held = [440 * 2 ** ((e["midi"] - 69) / 12) for e in low]
+    held = [440 * 2 ** ((e["midi_settled"] - 69) / 12) for e in low]
     assert 20 <= min(held) and min(held) <= 30
-    assert all(abs((e["midi"] - round(e["midi"])) * 100 - 11) < 0.01 for e in low)  # odd seed: +11 cents
+    assert all(abs((e["midi_settled"] - round(e["midi_settled"])) * 100 - 11) < 0.01 for e in low)  # odd seed
     assert any("retrigger" in e["flags"] for e in low) and any("short" in e["flags"] for e in low)
+
+
+def test_the_pitch_curve_and_the_sounding_pitch_follow_a_known_drop():
+    """A synth 808 at 41.2 Hz that starts an octave up and falls with a 60 ms
+    time constant, so its pitch is known at every sample: the curve is
+    within 10 cents of it from the second period on (8.3 cents at most
+    here), and a note's sounding pitch read through the curve is within 5
+    cents of the same reading of the true pitch, from a 60 ms note 7
+    semitones up (6.7 semitones over its settled pitch) to a 300 ms one."""
+    glide = 0.060
+    x = voice(Params(F808, 2 * F808, 1000 * glide, 1.2, 2, 1.5, 0.05, 0.3), 1.6)
+    f0, curve = S.tuning(x)
+    assert abs(1200 * math.log2(f0 / F808)) < 1
+    t, cents = np.array(curve).T
+    later = t >= S.crossings(x, f0)[1]
+    assert np.abs(cents - 1200 * np.log2(1 + np.exp(-t / glide)))[later].max() < 10
+    for semis, dur in ((5, 0.110), (-5, 0.110), (0, 0.300), (7, 0.060)):
+        r = 2 ** (semis / 12)
+        heard = S.sounding(lambda s, r=r: S.drop(curve, s * r) / 100, dur)
+        true = S.sounding(lambda s, r=r: 12 * np.log2(1 + np.exp(-s * r / glide)), dur)
+        assert abs(heard - true) < 0.08, (semis, dur, heard, true)
+    assert S.read_window(0.110) == pytest.approx((0.060, 0.090)) and S.read_window(0.060) == (0.030, 0.030)
 
 
 def test_swing_positions(built):

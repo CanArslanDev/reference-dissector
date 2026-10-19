@@ -152,6 +152,41 @@ def test_levels_from_the_render(kit, tmp_path):
     assert halved["levels"]["sounds"]["snare"]["level_db"] == pytest.approx(level["level_db"], abs=0.01)
 
 
+def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
+    """fit_808 writes its one-shot at the 808's own tuning (synth808.json
+    pitch_hz), here 33.58 Hz, 45.8 cents over root_midi 24; this one starts
+    an octave up and falls with a 60 ms time constant. make_plan carries the
+    tuning as cents (before, a plan claimed root_midi: 45.8 cents flat), and
+    estimate_from_plan's notes settle where the render settles (native_f0,
+    the truth's rule) and sound where the render sounds (pitch_track through
+    sounding): a 125 ms note 5 semitones up sits 2-3 semitones over its
+    settled pitch. A plan without cents is read at the one-shot's measured
+    tuning."""
+    from refdissect import scenarios as S
+    from refdissect.live import make_plan
+    from refdissect.synth808 import Params, one_shot
+    hz = 33.58
+    shot = wav(tmp_path, "808 (synth).wav", one_shot(Params(41.2, 82.4, 60, 1.2, 2, 1.5, 0.05, 0.3), hz))
+    for stem in ("drums", "bass"):
+        wav(tmp_path, f"{stem}.wav", noise(4.0) * 0.1)
+    analysis = {"grid": {"bpm": 120.0}, "source": {"duration_s": 4.0}, "templates": {}, "events": {},
+                "notes_808": [{"t": 0.0, "end": 1.5, "pitch": 24, "peak": 1.0},
+                              {"t": 2.0, "end": 2.11, "pitch": 29, "peak": 1.0}], "sections": []}
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": shot, "file_name": "808 (synth).wav"}
+    p = make_plan(analysis, {}, synth, tmp_path)
+    assert p["tracks"]["808"]["cents"] == pytest.approx(45.8, abs=0.05)
+    x = rendered(tmp_path / "r", render_plan(p, tmp_path / "r"), "808")
+    long, short = estimate_from_plan(p)["bass808"]
+    assert long["midi_settled"] == pytest.approx(24.458, abs=0.001)
+    assert S.hz_to_midi(S.native_f0(x[:int(1.5 * SR)])) == pytest.approx(long["midi_settled"], abs=0.01)
+    a, b = int(2.0 * SR), int((2.0 + short["end"] - short["t"]) * SR)
+    track = S.pitch_track(x[a:b], hz * 2 ** (5 / 12))
+    heard = S.sounding(lambda t: S.hz_to_midi(1.0) + 12 * np.log2(track[0](t)), (b - a) / SR)
+    assert short["midi"] == pytest.approx(heard, abs=0.1) and 2 < short["midi"] - short["midi_settled"] < 3
+    del p["tracks"]["808"]["cents"]
+    assert estimate_from_plan(p)["bass808"][0]["midi_settled"] == pytest.approx(24.458, abs=0.01)
+
+
 def test_missing_files_play_nothing(tmp_path):
     p = plan({"36": {"path": str(tmp_path / "gone.wav"), "transpose": 0, "role": "kick"}}, [note(36, 0.0)],
              {"sample_path": "gone 808.wav", "root_midi": 24, "transpose": 36, "notes": [note(24, 0.0)]})

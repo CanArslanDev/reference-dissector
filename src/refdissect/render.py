@@ -69,8 +69,10 @@ def pad_settings(pad: dict) -> dict:
 
 def settings_808(track: dict) -> dict:
     """The 808 track with every optional field filled in. cents is the
-    one-shot's own pitch over root_midi: fit_808 renders it at the 808's
-    measured tuning, which plans do not carry yet (they play it as root_midi)."""
+    one-shot's own pitch over root_midi, as metadata: fit_808 renders the
+    one-shot at the 808's measured tuning (synth808.json pitch_hz) and
+    make_plan writes that offset here; Simpler plays the file as it is, so
+    the transposition does not depend on it."""
     root = int(track.get("root_midi", 60))
     return {**TRACK_808, **{k: v for k, v in track.items() if v is not None}, "root_midi": root,
             "transpose": float(track.get("transpose", 60 - root))}
