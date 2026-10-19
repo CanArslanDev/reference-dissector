@@ -391,24 +391,42 @@ def v1_scores(ref, groups: list) -> dict:
     return {**_f1(found, ref), "offsets_ms": offsets}
 
 
+def moments(times: np.ndarray, window: float = WINDOWS["50"]) -> np.ndarray:
+    """Sorted times with every time within `window` after the last one kept
+    dropped: a sound's hits as distinct moments, a doubled hit once."""
+    kept: list[float] = []
+    for t in np.sort(np.asarray(times, dtype=float)):
+        if not kept or t - kept[-1] > window:
+            kept.append(float(t))
+    return np.array(kept)
+
+
 def assign(truth: dict[str, np.ndarray], est: dict[str, np.ndarray], share: float = 0.5,
            roles: tuple[dict, dict] = ({}, {})) -> tuple[dict, list]:
-    """Which truth sound each estimated sound plays: the one most of its hits
-    match within 50 ms (ties: the higher F1 at 50, then at 20 ms, then the same
-    role, from roles = (truth roles, estimated roles)). Several may play one
-    truth sound. One whose best match covers less than `share` of its hits is
-    extra: listed with its hit count, scored nowhere."""
+    """Which truth sound each estimated sound plays: the one it scores the
+    best F1 at 50 ms on (ties: the more hits matched within 50 ms, then F1 at
+    20 ms, then the same role, from roles = (truth roles, estimated roles)).
+    Matched hits first would give a snare pad with one stray hit on a hat
+    position to the hat, since every snare of these beats sits on a hat too
+    (17 matches against 16). Several may play one truth sound. One whose
+    distinct moments (moments(): a doubled hit counts once) match that sound
+    less than `share` of the time is extra: listed with its hit count, scored
+    nowhere. Counted over hits, a pad that plays every snare twice and one
+    stray hit (16 of 33) was extra, while the same hits on two pads scored."""
     out, extra = {}, []
     for e, et in est.items():
-        best, key = None, (0, 0.0, 0.0, False)
+        best, key = None, (0.0, 0, 0.0, False)
         for s, tt in truth.items():
             n = len(_pairs(tt, et, WINDOWS["50"]))
-            k = (n, _prf(n, len(tt), len(et))[0], _prf(len(_pairs(tt, et, WINDOWS["20"])), len(tt), len(et))[0],
+            k = (_prf(n, len(tt), len(et))[0], n, _prf(len(_pairs(tt, et, WINDOWS["20"])), len(tt), len(et))[0],
                  roles[0].get(s) is not None and roles[0].get(s) == roles[1].get(e))
             if k > key:
                 best, key = s, k
-        row = {"hits": len(et), "matched_50": key[0], "share": round(key[0] / len(et), 3) if len(et) else 0.0}
-        if best is not None and key[0] >= share * len(et):
+        m = moments(et)
+        on = len(_pairs(truth[best], m, WINDOWS["50"])) if best is not None else 0
+        row = {"hits": len(et), "matched_50": key[1], "moments": len(m),
+               "share": round(on / len(m), 3) if len(m) else 0.0}
+        if best is not None and on >= share * len(m):
             out[e] = {"to": best, **row}
         else:
             extra.append({"sound": e, "closest": best, **row})
@@ -433,8 +451,9 @@ def _drum_assignment(truth: dict, est: dict) -> tuple[dict, dict, dict, list]:
 def drum_scores(truth: dict, est: dict) -> dict | None:
     """Per truth drum sound (a layer, layer_of, is a sound of its own): the
     onset scores of the estimated sounds assigned to it, their hits pooled (a
-    hit played twice is a false positive), v1's rule beside them; then the
-    assignment, the extra sounds, and the macro means over truth sounds."""
+    hit played twice is a false positive, on one pad or on two), v1's rule
+    beside them; then the assignment, the extra sounds, and the macro means
+    over truth sounds."""
     events = truth.get("drums") or []
     if not events:
         return None
