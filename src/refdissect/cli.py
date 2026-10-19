@@ -55,7 +55,7 @@ def _separate(a):
 
 def _analyze(a):
     from .pipeline import analyze
-    analyze(a.stems, a.work, tuple(a.bpm_range))
+    analyze(a.stems, a.work, tuple(a.bpm_range), bpm=a.bpm, meter=a.meter, tracker=not a.no_tracker)
 
 
 def _match(a):
@@ -193,7 +193,12 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("analyze", help="grid, tuning, drum templates and hits, 808 notes, sections")
     s.add_argument("stems")
     s.add_argument("--work", required=True)
-    s.add_argument("--bpm-range", nargs=2, type=float, default=[100.0, 180.0])
+    s.add_argument("--bpm-range", nargs=2, type=float, default=[100.0, 180.0],
+                   help="the octave to count the tempo in (trap: 100-180, the hats' grid); a wide range keeps the "
+                        "beat tracker's")
+    s.add_argument("--bpm", type=float, default=None, help="force the tempo (quarter notes per minute)")
+    s.add_argument("--meter", default=None, help="N/D, e.g. 3/4 or 6/8 (default: the tracker's, 4/4 when unsure)")
+    s.add_argument("--no-tracker", action="store_true", help="fit the grid without beat_this, as before")
     s.set_defaults(run=_analyze)
     s = sub.add_parser("match", help="the library's closest sound for each template")
     s.add_argument("work")
