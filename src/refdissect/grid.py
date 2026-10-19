@@ -371,20 +371,31 @@ def tracker_meter(beats, downbeats, ratio: float = 1.0, min_share: float = 0.6,
     return (n * 2 if n % 2 and round(ratio) == 2 else n), evidence
 
 
-def bar_line(phase: float, grid: Grid, downbeats) -> tuple[float, dict]:
-    """phase moved to the 16th of the bar that most of the tracker's downbeats
-    fall on (ties: the earliest downbeat's), then to the first bar line."""
+def bar_line(phase: float, grid: Grid, downbeats, span: int | None = None) -> tuple[float, dict]:
+    """phase moved to the 16th of the bar (or of `span` 16ths) that most of
+    the tracker's downbeats fall on (ties: the earliest downbeat's), then to
+    the first bar line. ambiguous: the winner holds less than 2/3 of the
+    votes (all the others together, not the runner-up: 14 against 9 on a
+    3/4 beat read in 4/4 was taken as sure, and was a beat off)."""
     d = np.asarray(downbeats, dtype=float)
+    span = span or grid.steps_per_bar
     if not len(d):
-        return phase, {"downbeats": 0}
-    residues = np.round((d - phase) / grid.step).astype(int) % grid.steps_per_bar
+        return phase, {"downbeats": 0, "ambiguous": True}
+    residues = np.round((d - phase) / grid.step).astype(int) % span
     votes = Counter(residues.tolist())
     top = max(votes.values())
     winner = next(int(r) for r in residues if votes[r] == top)
-    second = max([v for r, v in votes.items() if r != winner], default=0)
-    phase = (phase + winner * grid.step + BAR_SLACK) % grid.bar - BAR_SLACK
-    return phase, {"downbeats": len(d), "votes_16th_of_bar": {str(r): v for r, v in votes.most_common(4)},
-                   "ambiguous": second >= 0.8 * top}
+    phase = (phase + winner * grid.step + BAR_SLACK) % (span * grid.step) - BAR_SLACK
+    return phase, {"downbeats": len(d), "span_16ths": span,
+                   "votes_16th_of_bar": {str(r): v for r, v in votes.most_common(4)},
+                   "share": round(top / len(d), 2), "ambiguous": top < 2 / 3 * len(d)}
+
+
+def _spacing(downbeats, step: float) -> int | None:
+    """The tracker's most common downbeat spacing in 16ths (a beat or more)."""
+    gaps = np.round(np.diff(np.asarray(downbeats, dtype=float)) / step).astype(int)
+    gaps = gaps[gaps >= 4]
+    return Counter(gaps.tolist()).most_common(1)[0][0] if len(gaps) else None
 
 
 def _ratio(pos: np.ndarray, wrap: np.ndarray, s: np.ndarray, on: np.ndarray, off: np.ndarray,
@@ -586,7 +597,12 @@ def estimate(x: np.ndarray, tracker: dict | None = None, bpm_range: tuple[float,
         warnings.append(f"the beat splits in three ({sub['1/3']} and {sub['2/3']} of the onset strength at 1/3 "
                         f"and 2/3 of it, {sub['1/2']} at 1/2): a compound meter needs --meter 6/8 or 12/8")
     grid = Grid(chosen["bpm"], 0.0, n, unit)
-    phase, down = bar_line(comb_phase + correction, grid, downbeats)
+    # bars the tracker does not agree on (no --meter) give no meter to vote in: its own spacing, and unsure
+    steady = bool(meter) or compound or (bars["share"] >= 0.6 and bars["bars"] >= 4)
+    span = None if steady else _spacing(downbeats, grid.step)
+    phase, down = bar_line(comb_phase + correction, grid, downbeats, span)
+    if not steady:
+        down.update(ambiguous=True, why=f"the tracker's bars disagree: {bars['share']:.0%} hold {bars['top']} beats")
     grid = replace(grid, phase=round(float(phase), 4))
     drift_ms, tempo_map = drift(x, grid, numbers, beats, ratio, strong)
     info = {"score": round(score, 3), "mean_onset_strength": round(float(env.mean()), 3),
