@@ -342,7 +342,14 @@ def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: l
            sections: list[dict] | None = None, tone_floor: float = 0.2) -> dict:
     """Chord segments from the note posteriorgrams of the melodic stems (summed)
     and the 808 as bass; with sections, weights are averaged across loop
-    repeats first (`loop_groups` on bar-synchronous pitch classes)."""
+    repeats first (`loop_groups` on bar-synchronous pitch classes).
+
+    Only the melodic stems and pitches above lowest_midi (the 808's highest
+    note + 1) count, so neither the bass stem nor the 808's own range enters
+    the pitch classes. Zeroing the 808's harmonics as well (its note + 12, 19,
+    24 in each span) cost majmin 0.882 -> 0.871 and sevenths_inv 0.717 ->
+    0.706 on the 36 renders (+ 28 too: 0.832 / 0.671): the root an octave or
+    two above the 808 is usually a chord tone."""
     starts = span_starts(grid, duration, step_beats)
     step = step_beats * grid.beat
     S = sum(salience(pg, starts, step, lowest_midi) for pg in note_pgs)
