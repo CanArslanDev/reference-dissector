@@ -243,8 +243,9 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
                      "python": run["python"], "settings": settings, "min_hz_from": floor_from}
     for s, info in out["stems"].items():
-        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored, "
-                            f"{r['dropped']} dropped" for r in info["voting"]) or "no loop"
+        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored "
+                            f"({r['too_quiet']} too quiet), {r['dropped']} dropped"
+                            for r in info["voting"]) or "no loop"
         log(f"  {s:7s} {len(info['notes']):4d} notes ({changed})")
     if "chords" in out:
         log(f"  chords: {len(out['chords']['segments'])} segments")

@@ -69,22 +69,30 @@ def floor_above_808(notes_808: list[dict], at_least: int = 2) -> tuple[float | N
     return round(float(librosa.midi_to_hz(top + 1)), 2), top
 
 
-def note_levels(x: np.ndarray, notes: list[dict], tuning: float = 0.0, window_s: float = 0.06,
-                sr: int = SR) -> np.ndarray:
-    """Level (dB) of each note: the CQT magnitude in its own semitone bin
-    (centred on the stem's tuning), the most over the first window_s after its
-    start. NaN outside MIDI 24-107."""
+def level_meter(x: np.ndarray, tuning: float = 0.0, window_s: float = 0.06, sr: int = SR):
+    """A function notes -> level (dB) of each in the stem x: the CQT magnitude
+    in its own semitone bin (centred on the stem's tuning), the most over the
+    first window_s after its start. NaN outside MIDI 24-107."""
     y = soxr.resample(np.asarray(x, dtype=np.float32), sr, 22050)
     C = np.abs(librosa.cqt(y, sr=22050, hop_length=128, fmin=librosa.midi_to_hz(24 + tuning), n_bins=84,
                            bins_per_octave=12))
     t = librosa.times_like(C, sr=22050, hop_length=128)
-    out = np.full(len(notes), np.nan)
-    for i, n in enumerate(notes):
-        b = n["pitch"] - 24
-        a, e = np.searchsorted(t, n["t"]), np.searchsorted(t, n["t"] + window_s)
-        if 0 <= b < C.shape[0] and e > a:
-            out[i] = 20 * np.log10(C[b, a:e].max() + 1e-9)
-    return out
+
+    def levels(notes: list[dict]) -> np.ndarray:
+        out = np.full(len(notes), np.nan)
+        for i, n in enumerate(notes):
+            b = n["pitch"] - 24
+            a, e = np.searchsorted(t, n["t"]), np.searchsorted(t, n["t"] + window_s)
+            if 0 <= b < C.shape[0] and e > a:
+                out[i] = 20 * np.log10(C[b, a:e].max() + 1e-9)
+        return out
+    return levels
+
+
+def note_levels(x: np.ndarray, notes: list[dict], tuning: float = 0.0, window_s: float = 0.06,
+                sr: int = SR) -> np.ndarray:
+    """Level (dB) of each note (level_meter)."""
+    return level_meter(x, tuning, window_s, sr)(notes)
 
 
 def to_beats(t: float, grid: Grid, snap_ms: float | None = None, per_beat: int = 4) -> tuple[float, float]:
@@ -208,18 +216,31 @@ def note_loops(notes: list[dict], grid: Grid, sections: list[dict]) -> list[dict
 
 
 def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
-         drop_below: float | None = None) -> tuple[list[dict], list[dict]]:
+         drop_below: float | None = None, level=None, gate_db: float = 12.0) -> tuple[list[dict], list[dict]]:
     """Across the repeats of each loop position, a note is the same pitch at
     the same place in the bar (within tol_s). Heard in more than half of the
     repeats, it is put back where it is missing (the median place, length and
-    amplitude of the others). Heard in fewer than half, it stays unless
-    drop_below is given: then it goes when its onset posterior is under it.
-    Returns the notes and what changed per group.
+    amplitude of the others), but with `level` (level_meter of the stem) only
+    where the stem sounds at its pitch: at most gate_db under the median
+    level of the notes it is copied from (else counted as too_quiet). Heard
+    in fewer than half, it stays unless drop_below is given: then it goes
+    when its onset posterior is under it. Returns the notes and what changed
+    per group.
 
-    Measured on 12 synthetic 4-bar loops played four times (a different vocal
-    under each repeat, bar 16 a variation; seeds 1-2 chose, seed 3 checked):
-    putting notes back raised onset F1 0.533 -> 0.540 (8 renders better, 3
-    worse; seed 3 +0.013), precision 0.817 -> 0.792, recall 0.404 -> 0.419.
+    Measured on synthetic 4-bar loops played four times (a different vocal
+    under each repeat; seeds 1-2 chose, seed 3 checked), 12 with bar 16 a
+    variation (its notes move pitch) and 12 with bar 16's pluck and lead
+    silent (a drop-out). Putting notes back without the level check raised
+    onset F1 0.533 -> 0.540 on the variations but filled the odd bar: of 105
+    notes put into it, 93 were false (drop-outs: 113, 98 false). True
+    restorations sat 0.6 dB under their cluster's level (median), false ones
+    11.7 dB (drop-outs: 0.8 and 15.8 dB). With gate_db 12, F1 0.540 -> 0.544
+    and precision 0.792 -> 0.807 on the variations, F1 0.533 -> 0.538 on the
+    drop-outs (no vote: 0.533 and 0.528); gates of 6 to 15 dB scored within
+    0.002 of each other. The odd bars still get 54 and 35 notes (11 and 12
+    true): every false one sits where a pad holds its pitch class, which a
+    level cannot tell from a new note.
+
     Dropping every note heard in fewer than half lost 0.032 (all 12 worse) and
     the variation (its recall 0.60 -> 0.04): most transcription errors repeat
     in every repeat, and true notes missed in some repeats went with the
@@ -227,12 +248,13 @@ def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
     posterior had a median of 0.80, false ones 0.64) lost 0.010 under ordinary
     bleed and gained 0.003 under loud vocals."""
     by_bar = bar_notes(notes, grid)
+    heard_db = dict(zip(map(id, notes), level(notes))) if level is not None and notes else {}
     out = [n for b, ns in by_bar.items() for n in ns if not any(b in pos for g in groups for pos in g["positions"])]
     report = []
     for g in groups:
         row = {"section": g["section"], "runs": g.get("runs"), "period_bars": g["period_bars"],
                "similarity": g["similarity"], "repeats": max(len(p) for p in g["positions"]), "notes": 0,
-               "restored": 0, "dropped": 0}
+               "restored": 0, "too_quiet": 0, "dropped": 0}
         for bars in g["positions"]:
             entries = sorted(((n["pitch"], _offset(n, grid, b), b, n) for b in bars for n in by_bar.get(b, [])),
                              key=lambda e: (e[0], e[1]))
@@ -248,10 +270,15 @@ def vote(notes: list[dict], grid: Grid, groups: list[dict], tol_s: float = 0.03,
                 heard = {e[2] for e in c}
                 row["notes"] += len(c)
                 if 2 * len(heard) > len(bars):
+                    floor = np.median([heard_db[id(e[3])] for e in c]) - gate_db if heard_db else None
                     for b in bars:
                         if b not in heard:
-                            out.append(_restored(c, b, grid))
-                            row["restored"] += 1
+                            new = _restored(c, b, grid)
+                            if floor is None or level([new])[0] >= floor:
+                                out.append(new)
+                                row["restored"] += 1
+                            else:
+                                row["too_quiet"] += 1
                 for e in c:
                     if 2 * len(heard) < len(bars) and drop_below is not None and e[3].get("onset", 0.0) < drop_below:
                         row["dropped"] += 1
@@ -460,10 +487,13 @@ def stem_notes(raw: list[dict], x: np.ndarray, grid: Grid, tuning: float = 0.0, 
     placed in beats. Returns the notes and the voting report."""
     notes = [{"t": n["start_s"], "end": n["end_s"], "pitch": n["midi"], "amplitude": n["amplitude"],
               "onset": n.get("onset", 0.0), "bend": n.get("bend", [])} for n in raw]
+    if not notes:
+        return [], []
+    meter = level_meter(x, tuning)
     report: list[dict] = []
-    if voting and sections and notes:
-        notes, report = vote(notes, grid, note_loops(notes, grid, sections), drop_below=drop_below)
-    levels = note_levels(x, notes, tuning) if notes else np.array([])
+    if voting and sections:
+        notes, report = vote(notes, grid, note_loops(notes, grid, sections), drop_below=drop_below, level=meter)
+    levels = meter(notes)
     fill = float(np.nanmedian(levels)) if np.isfinite(levels).any() else -60.0
     levels = np.where(np.isfinite(levels), levels, fill)
     cents = int(round(100 * tuning))
