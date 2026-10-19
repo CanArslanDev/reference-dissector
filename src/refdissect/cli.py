@@ -26,6 +26,8 @@ import json
 import sys
 from pathlib import Path
 
+from .separate import DEFAULT_MODEL
+
 
 def _inventory(a):
     from .library import inventory, summarize
@@ -50,7 +52,7 @@ def _index(a):
 
 def _separate(a):
     from .separate import separate
-    print(json.dumps(separate(a.audio, a.out, a.model, a.device), indent=1))
+    print(json.dumps(separate(a.audio, a.out, a.model, a.device, a.seed, a.shifts), indent=1))
 
 
 def _analyze(a):
@@ -187,8 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("separate", help="stems with Demucs (in its own uv environment)")
     s.add_argument("audio")
     s.add_argument("--out", required=True)
-    s.add_argument("--model", default="htdemucs")
+    s.add_argument("--model", default=DEFAULT_MODEL)
     s.add_argument("--device", default=None)
+    s.add_argument("--seed", type=int, default=0, help="seeds Demucs' random shift: the same seed, the same stems")
+    s.add_argument("--shifts", type=int, default=1)
     s.set_defaults(run=_separate)
     s = sub.add_parser("analyze", help="grid, tuning, drum templates and hits, 808 notes, sections")
     s.add_argument("stems")
