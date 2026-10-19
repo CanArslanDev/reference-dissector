@@ -82,6 +82,12 @@ LOW_BONUS = 0.02
 QUALITY_PRIOR = {"maj6": -0.01, "min6": -0.01}
 
 
+def stem_tuning(analysis: dict, stem: str) -> float:
+    """The stem's tuning in semitones from A440 (analysis.json), else the track's."""
+    tuning = analysis["tuning"]
+    return float(tuning.get("per_stem", {}).get(stem, tuning.get("consensus", 0.0)))
+
+
 def floor_above_808(notes_808: list[dict], share: float = 0.95) -> tuple[float | None, int | None]:
     """The minimum frequency for the stems the 808 bleeds into: the semitone
     above the top of its usual range, and that top, the lowest pitch at or
@@ -347,10 +353,11 @@ def span_starts(grid: Grid, duration: float, step_beats: float) -> np.ndarray:
 
 
 def salience(note_pg: np.ndarray, starts: np.ndarray, step_s: float, lowest_midi: int = MIDI_OFFSET,
-             floor: float = 0.15) -> np.ndarray:
+             floor: float = 0.15, time_scale: float = 1.0) -> np.ndarray:
     """(spans, 88): each span's mean note posterior per pitch (frames timed by
-    block_times), below `floor` set to 0; pitches under lowest_midi are 0."""
-    t = block_times(len(note_pg))
+    block_times x time_scale, the worker's), below `floor` set to 0; pitches
+    under lowest_midi are 0."""
+    t = block_times(len(note_pg)) * time_scale
     edges = np.searchsorted(t, np.r_[starts, starts[-1] + step_s])
     S = np.zeros((len(starts), note_pg.shape[1]))
     for k in range(len(starts)):
@@ -465,10 +472,12 @@ def vote_spans(W: np.ndarray, bass: list[int | None], starts: np.ndarray, grid: 
 
 def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: list[dict],
            lowest_midi: int = MIDI_OFFSET, step_beats: float = 0.5, penalty: float = 0.15,
-           groups: list[dict] | None = None, tone_floor: float = 0.2) -> dict:
-    """Chord segments from the note posteriorgrams of the melodic stems (summed)
-    and the 808 as bass; with loop groups (note_loops on the same stems'
-    notes), weights are averaged across the repeats first.
+           groups: list[dict] | None = None, tone_floor: float = 0.2,
+           time_scales: list[float] | None = None) -> dict:
+    """Chord segments from the note posteriorgrams of the melodic stems (summed;
+    each stem's frames at its worker time_scale) and the 808 as bass; with
+    loop groups (note_loops on the same stems' notes), weights are averaged
+    across the repeats first.
 
     Only the melodic stems and pitches above lowest_midi (the 808's highest
     note + 1) count, so neither the bass stem nor the 808's own range enters
@@ -478,7 +487,8 @@ def chords(note_pgs: list[np.ndarray], grid: Grid, duration: float, notes_808: l
     two above the 808 is usually a chord tone."""
     starts = span_starts(grid, duration, step_beats)
     step = step_beats * grid.beat
-    S = sum(salience(pg, starts, step, lowest_midi) for pg in note_pgs)
+    scales = time_scales or [1.0] * len(note_pgs)
+    S = sum(salience(pg, starts, step, lowest_midi, time_scale=sc) for pg, sc in zip(note_pgs, scales))
     W = pitch_class_weights(S)
     bass = bass_per_span(notes_808, starts, step)
     groups = groups or []
@@ -560,27 +570,28 @@ def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndar
           note_pgs: dict[str, np.ndarray], snap_ms: float | None = None, voting: bool = True,
           drop_below: float | None = None) -> dict:
     """melodic.json from the worker's output per stem (transcribed: its JSON,
-    notes per preset), the stems' audio and the posteriorgrams of the chord
-    stems."""
+    notes per preset, on A440 when the worker took the stem's tuning out),
+    the stems' audio and the posteriorgrams of the chord stems."""
     g = analysis["grid"]
     grid = Grid(g["bpm"], g["phase"], g.get("beats_per_bar", 4))
-    tuning = analysis["tuning"]
     sections = analysis.get("sections") or []
     _, top = floor_above_808(analysis["notes_808"])
     out: dict = {"grid": {"bpm": grid.bpm, "phase": grid.phase}, "stems": {}}
     for stem, t in transcribed.items():
-        st = float(tuning.get("per_stem", {}).get(stem, tuning.get("consensus", 0.0)))
+        st = stem_tuning(analysis, stem)
         notes, report = stem_notes(t["notes"]["melodic"], audio[stem], grid, st, sections, snap_ms, voting,
                                    drop_below)
         out["stems"][stem] = {"tuning_cents": int(round(100 * st)), "notes": notes, "voting": report,
                               "chord_preset": [{"t": n["start_s"], "end": n["end_s"], "pitch": n["midi"],
                                                 "amplitude": n["amplitude"]} for n in t["notes"].get("chord", [])]}
-    pgs = [note_pgs[s] for s in CHORD_STEMS if s in note_pgs]
-    if pgs:
+    used = [s for s in CHORD_STEMS if s in note_pgs]
+    if used:
         played = [{"t": n["start_s"], "end": n["end_s"], "pitch": n["midi"]}
-                  for s in CHORD_STEMS if s in transcribed for n in transcribed[s]["notes"]["melodic"]]
+                  for s in used if s in transcribed for n in transcribed[s]["notes"]["melodic"]]
         groups = note_loops(played, grid, sections) if voting and sections and played else []
-        out["chords"] = chords(pgs, grid, analysis["source"]["duration_s"], analysis["notes_808"],
-                               lowest_midi=top + 1 if top is not None else MIDI_OFFSET, groups=groups)
+        out["chords"] = chords([note_pgs[s] for s in used], grid, analysis["source"]["duration_s"],
+                               analysis["notes_808"], lowest_midi=top + 1 if top is not None else MIDI_OFFSET,
+                               groups=groups, time_scales=[transcribed.get(s, {}).get("time_scale", 1.0)
+                                                           for s in used])
     return out
 

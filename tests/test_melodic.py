@@ -264,6 +264,18 @@ def test_chords_whose_tones_tie(tones, n808, label):
     assert M.chords([pg], Grid(120.0, 0.0), 2.0, bass, lowest_midi=40)["segments"][0]["label"] == label
 
 
+def test_chords_follow_the_workers_time_scale():
+    """A stem taken off +45 cents ran 2.6 % slower in the model: its frames
+    are put back by the time scale, so the change sits at 8.0 s, not at the
+    8th after it (the model's 8.21 s)."""
+    scale = 2 ** (-0.45 / 12)
+    pg = posteriorgram([(0.0, 8.0 / scale, (57, 60, 64)), (8.0 / scale, 10.5 / scale, (53, 57, 60))], 10.5 / scale)
+    out = M.chords([pg], Grid(120.0, 0.0), 10.0, [], lowest_midi=36, time_scales=[scale])
+    assert [(s["start"], s["label"]) for s in out["segments"]] == [(0.0, "A:min"), (8.0, "F:maj")]
+    late = M.chords([pg], Grid(120.0, 0.0), 10.0, [], lowest_midi=36)
+    assert [s["start"] for s in late["segments"]] == [0.0, 8.25]
+
+
 def test_viterbi_change_penalty_smooths_a_one_span_blip():
     scores = np.zeros((9, 3))
     scores[:, 0] = 1.0
@@ -348,6 +360,7 @@ def test_melodic_step_and_the_plan(monkeypatch, tmp_path):
     files = out["source"]["settings"]["files"]
     assert files["other"]["min_hz"] == pytest.approx(69.3, abs=0.01)  # above the 808's C2
     assert files["vocals"]["min_hz"] is None  # no 808 floor on a vocal
+    assert files["other"]["tuning"] == -0.03 and files["piano"]["tuning"] == 0.0  # taken out by the worker
     assert set(out["stems"]) == {"other", "piano", "vocals"} and out["stems"]["other"]["tuning_cents"] == -3
     assert [n["start_time"] for n in out["stems"]["other"]["notes"]] == [1.0, 2.0, 3.0]
     assert [c["label"] for c in out["chords"]["segments"]] == ["C:maj"]  # the 808 (C2) is the bass

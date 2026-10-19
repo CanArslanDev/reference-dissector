@@ -4,12 +4,15 @@ purpose: imports nothing from refdissect.
 
 usage: basicpitch_worker.py OUT_DIR SETTINGS AUDIO [AUDIO ...]
 SETTINGS is JSON: {"presets": {name: {onset, frame, min_ms, melodia, min_hz,
-max_hz}}, "files": {audio file stem: {min_hz}}}; a file's entry overrides the
-presets for that file. Per audio file the model runs once; its posteriorgrams
-go to OUT_DIR/<name>.npz (float16) and every preset is decoded from them into
-OUT_DIR/<name>.json. Prints one JSON line with the result.
+max_hz}}, "files": {audio file stem: {tuning, min_hz}}}; a file's entry
+overrides the presets for that file, and its tuning (semitones from A440) is
+taken out before inference (load), so its min_hz is on A440 too. Per audio
+file the model runs once; its posteriorgrams go to OUT_DIR/<name>.npz
+(float16, frames at block_times x time_scale in the file) and every preset is
+decoded from them into OUT_DIR/<name>.json (with tuning and time_scale).
+Prints one JSON line with the result.
 
-Three things differ from basic_pitch.inference.predict, each measured:
+Four things differ from basic_pitch.inference.predict, each measured:
 - 0.4.0 keeps 86 frames per second of the 86.58 it makes (142 frames per
   36,164-sample hop), so a song loses its last 0.67 %: 1.6 s of a 4-minute
   file. The audio is padded by 0.007 x duration + 0.5 s and the frames past
@@ -20,6 +23,16 @@ Three things differ from basic_pitch.inference.predict, each measured:
 - Bends are one contour bin (a third of a semitone) sharp: get_pitch_bends
   centres a note on bin 3 * (pitch - 21), the model on the bin above. They
   are returned corrected (bend - 1), in thirds of a semitone per frame.
+- The model hears each file moved onto A440 (load): a stem 45 cents off
+  sits between two semitones, and Basic Pitch misses many of its notes. The
+  63 synthetic renders played 45 cents sharp scored macro onset F1 0.442,
+  45 cents flat 0.157; with their measured tuning taken out 0.705 and 0.704,
+  as in tune (0.705, or 0.706 with its -6..+3 cents taken out).
+
+Not changed: get_infered_onsets scales the frame-difference onsets to the
+file's highest onset, so the strongest note's two onset estimates can tie on
+adjacent frames; argrelmax then finds no peak and the note is lost (seen on
+a short synthetic file: 1 of 4 tones).
 """
 
 import contextlib
@@ -78,9 +91,22 @@ def presets_for(settings: dict, name: str) -> dict:
     return {preset: {**s, **own} for preset, s in settings["presets"].items()}
 
 
-def decode(output: dict, s: dict) -> list[dict]:
+def load(path: str, tuning: float = 0.0) -> tuple[np.ndarray, float]:
+    """The file as the model hears it, moved onto A440: read at 22050 x
+    2^(tuning / 12) Hz and handed over as 22050 Hz, it sounds `tuning`
+    semitones lower (and that much slower). Returns the audio and the time
+    scale back to the file (model seconds x scale = file seconds)."""
+    import librosa
+
+    sr = int(round(SR * 2 ** (tuning / 12)))
+    audio, _ = librosa.load(path, sr=sr, mono=True)
+    return audio, SR / sr
+
+
+def decode(output: dict, s: dict, scale: float = 1.0) -> list[dict]:
     """One preset's notes: model_output_to_notes's two steps (notes, then
-    bends) on copies, since constrain_frequency zeroes bins in place."""
+    bends) on copies, since constrain_frequency zeroes bins in place. Times
+    in the file's seconds (frame times x scale, see load)."""
     from basic_pitch import note_creation as nc
 
     min_hz = max(float(s.get("min_hz") or LOWEST_HZ), LOWEST_HZ)
@@ -89,7 +115,7 @@ def decode(output: dict, s: dict) -> list[dict]:
                                            min_note_len=min_note_frames(s["min_ms"]), infer_onsets=True,
                                            max_freq=s.get("max_hz"), min_freq=min_hz,
                                            melodia_trick=bool(s["melodia"]))
-    times = block_times(len(output["note"]) + 1)
+    times = block_times(len(output["note"]) + 1) * scale
     notes = []
     for a, b, pitch, amp, bends in nc.get_pitch_bends(output["contour"], events):
         col = int(pitch) - 21
@@ -102,7 +128,6 @@ def decode(output: dict, s: dict) -> list[dict]:
 
 
 def main() -> int:
-    import librosa
     from basic_pitch import ICASSP_2022_MODEL_PATH
     from basic_pitch.inference import Model
 
@@ -114,17 +139,20 @@ def main() -> int:
               "python": platform.python_version(), "settings": settings}
     for path in sys.argv[3:]:
         name = Path(path).stem
+        tuning = float(settings.get("files", {}).get(name, {}).get("tuning", 0.0))
         t = time.time()
-        audio, _ = librosa.load(path, sr=SR, mono=True)
+        audio, scale = load(path, tuning)
         output = infer(model, audio)
         infer_s = time.time() - t
         np.savez_compressed(out_dir / f"{name}.npz", **{k: v.astype(np.float16) for k, v in output.items()})
-        notes = {preset: decode(output, s) for preset, s in presets_for(settings, name).items()}
+        notes = {preset: decode(output, s, scale) for preset, s in presets_for(settings, name).items()}
+        seconds = round(len(audio) / SR * scale, 3)
         target = out_dir / f"{name}.json"
-        target.write_text(json.dumps({"stem": name, "audio": str(path), "seconds": round(len(audio) / SR, 3),
-                                      "frames": len(output["note"]), "notes": notes}), encoding="utf-8")
+        target.write_text(json.dumps({"stem": name, "audio": str(path), "seconds": seconds, "tuning": tuning,
+                                      "time_scale": scale, "frames": len(output["note"]), "notes": notes}),
+                          encoding="utf-8")
         result["stems"][name] = {"notes": str(target), "posteriorgram": str(out_dir / f"{name}.npz"),
-                                 "seconds": round(len(audio) / SR, 3), "infer_s": round(infer_s, 2),
+                                 "seconds": seconds, "infer_s": round(infer_s, 2),
                                  "notes_per_preset": {k: len(v) for k, v in notes.items()}}
     print(json.dumps(result))
     return 0
