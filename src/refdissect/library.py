@@ -455,10 +455,13 @@ class Library:
         (the fine search finds them: an open hat's copy 0.22 semitones down
         tied the original at NCC 0.84 and left the verdict no margin)."""
         out: list[dict] = []
+        laid: list[np.ndarray] = []  # each kept entry as played, laid out once (same() would redo it per pair)
         for r in ranked:
-            if any(self.same(r["i"], o["i"], length, semitones=(r["semitones"], o["semitones"])) for o in out):
+            c = self.candidate(r["i"], length, r["semitones"])
+            if any(r["i"] == o["i"] or abs(ncc(c, x, samples(2))[0]) > 0.95 for o, x in zip(out, laid)):
                 continue
             out.append(r)
+            laid.append(c)
             if len(out) == keep:
                 break
         return out
