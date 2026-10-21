@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.signal import butter, sosfilt
 
-from refdissect.audio import SR
+from refdissect.audio import PRE, SR, fit, samples, transpose, trim_onset
 
 
 def burst(seed: int, ms: float, lo: float, hi: float, decay_ms: float, tone_hz: float = 0.0) -> np.ndarray:
@@ -18,6 +18,39 @@ def burst(seed: int, ms: float, lo: float, hi: float, decay_ms: float, tone_hz: 
         x = x * 0.3 + np.sin(2 * np.pi * tone_hz * t) * np.max(np.abs(x))
     x *= np.exp(-t / (decay_ms / 1000))
     return (x / np.max(np.abs(x))).astype(np.float32)
+
+
+@pytest.fixture(scope="session")
+def noisy():
+    """A library of 120 noise one-shots (snares, claps or percs, hats) and
+    three kicks, cached as Library.build caches files, with its speckle
+    index: (Library, the one-shots)."""
+    from refdissect.library import Library
+    sounds, roles = [], []
+    for k in range(40):
+        sounds += [burst(100 + k, 300, 200, 9000, 40 + k % 30), burst(200 + k, 200, 900, 12000, 25 + k % 20),
+                   burst(300 + k, 120, 6000, 16000, 10 + k % 15)]
+        roles += ["snare", "clap" if k % 2 else "perc", "hat"]
+    for k, hz in enumerate((50.0, 55.0, 60.0)):
+        sounds.append(burst(400 + k, 400, 30, 2000, 150, tone_hz=hz))
+        roles.append("kick")
+    n = int(0.6 * SR)
+    cached = [fit(trim_onset(x), n) / np.max(np.abs(x)) for x in sounds]
+    lib = Library([f"/lib/{r} {k}.wav" for k, r in enumerate(roles)], roles,
+                  np.stack(cached).astype(np.float16), 0.6)
+    lib.build_speckle()
+    return lib, sounds
+
+
+def placed(x: np.ndarray, semitones: float, ms: float, others=()) -> np.ndarray:
+    """x played `semitones` higher with its attack PRE into a window of ms
+    (as a template holds it), plus other sounds (signal, gain, delay in
+    samples) in the same window."""
+    n = samples(ms)
+    t = fit(np.r_[np.zeros(PRE, np.float32), transpose(x, semitones)], n)
+    for y, gain, delay in others:
+        t = t + gain * fit(np.r_[np.zeros(PRE + delay, np.float32), y], n)
+    return t.astype(np.float32)
 
 
 @pytest.fixture(scope="session")
