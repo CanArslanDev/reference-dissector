@@ -268,16 +268,21 @@ def test_hats_under_the_snare_when_kicks_land_on_hats(sounds, kick_gain):
     assert heard[hat][2].all()  # every hit of the hat template on a hat
 
 
-def test_one_hit_per_strike_of_a_ringing_sound(sounds):
+@pytest.mark.parametrize("found_in", ["low", "snare"])
+def test_one_hit_per_strike_of_a_ringing_sound(sounds, found_in):
     """A tom ringing 400 ms (110 Hz) on every beat, a snare on 2 and 4: one
-    hit per strike, none on the decay."""
+    hit per strike, none on the decay, whichever band discover() found the
+    tom in. Found in the snare band, its candidates were 8 ms apart and its
+    ringing counted only in the low band: one extra hit per strike."""
     hits = []
     for b in range(12):
         o = 0.05 + b * 16 * STEP
         hits += [("tom", o + s * STEP, 0.8) for s in (0, 4, 8, 12)]
         hits += [("snare", o + s * STEP + 2 * STEP, 0.6) for s in (4, 12)]
     x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
-    templates = [oracle(x, hits, "tom", "low", alone=0.1), oracle(x, hits, "snare", "snare")]
+    tom = oracle(x, hits, "tom", "low", alone=0.1)
+    tom = Template("tom", "kick", found_in, tom.audio, tom.hits, {}, tom.group)
+    templates = [tom, oracle(x, hits, "snare", "snare")]
     events = explain(x, templates)
     for name in ("tom", "snare"):
         times = [t for n, t, _ in hits if n == name]

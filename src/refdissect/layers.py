@@ -7,9 +7,9 @@ snare, a clap layered on a snare, the grace note of a flam and the hits of a
 64th roll. explain() instead:
 
 1. takes each template's matched-filter hits (its own band and attack, NCC
-   at its threshold) 8 ms apart (100 ms in the low band), and those of
-   pitched copies of the noisy templates (1-5 semitones up and down, as
-   Simpler plays them);
+   at its threshold) 8 ms apart (tones 35 ms, the low band 100 ms), and
+   those of pitched copies of the noisy templates (1-5 semitones up and
+   down, as Simpler plays them);
 2. fits the neighbourhood of every hit (+-150 ms) as a non-negative sum of
    all the hits in it (NNLS), on the kick, snare and hat bands concatenated,
    each band weighted by the stem's level in it. Two hits whose placed
@@ -79,7 +79,12 @@ PAIR_MS, PAIR_MIN = 40, 5  # co-detections that give a pair offset
 SEARCH_MS, ONSET_MS = 3, 6  # how far a probe looks, around a predicted window start and around an onset
 SAME_MS = 15  # a probe where the template already plays is not a new hit
 FLAM_MS = 35  # a quieter hit this close before another of the same sound is its grace note
-TAIL = (0.25, 0.5)  # low band: a hit this soon (s) after one this much louder is its ringing
+# A tone's matched filter peaks again a period or two on: its candidates are
+# 35 ms apart (as detect() kept every template's) and its ringing is no hit
+# (TAIL), wherever it was found. With 8 ms, a kick found in the snare band
+# was found again 15-23 ms after every strike (v1-1)
+TONE_MS = 35
+TAIL = (0.25, 0.5)  # a low or tonal template's hit this soon (s) after one this much louder is its ringing (_tails)
 
 
 @dataclass
@@ -523,15 +528,30 @@ def passes(got: dict, usual: float, null: float, threshold: float, min_gain: flo
     return (got["drop"] >= null) & (loud | clear)
 
 
-def _tails(cands: Candidates, gains: np.ndarray, low: set[int]) -> np.ndarray:
-    """Low-band hits that are not the ringing of a louder hit of the same
-    template within TAIL (a low tone matches its own template later on)."""
+def decay(full: np.ndarray, n: int) -> np.ndarray:
+    """How much of a template's first n samples (weighted bands) its own
+    continuation holds d samples on, for d up to TAIL[0]: the gain its
+    ringing gets where the column is placed again. A tom's (110 Hz, 150 ms)
+    found in the snare band: 0.61 at 54 ms; a kick's on v1-1: 0.70 at 23
+    ms."""
+    col = full[:, :n].astype(np.float64)
+    span = min(full.shape[1], n + samples(TAIL[0] * 1000))
+    r = sum(np.correlate(full[b, :span].astype(np.float64), col[b], "valid") for b in range(len(col)))
+    return r / (float((col ** 2).sum()) or 1.0)
+
+
+def _tails(cands: Candidates, gains: np.ndarray, rings: dict[int, np.ndarray]) -> np.ndarray:
+    """Hits of the low and tonal columns (rings: their decay) that are not
+    the ringing of a louder hit of the same column: within TAIL[0], below
+    TAIL[1] of its gain or below what its own decay holds there (within 1
+    ms), whichever is more."""
     keep = np.ones(len(cands), bool)
-    for c in low:
+    for c, r in rings.items():
         idx = np.flatnonzero(cands.col == c)
         last = None
         for i in idx[np.argsort(cands.p[idx])]:
-            if last is not None and cands.p[i] - cands.p[last] < TAIL[0] * SR and gains[i] < TAIL[1] * gains[last]:
+            d = cands.p[i] - cands.p[last] if last is not None else len(r)
+            if d < len(r) and gains[i] < max(TAIL[1], r[max(0, d - samples(1)):d + samples(1) + 1].max()) * gains[last]:
                 keep[i] = False
                 continue
             last = i
@@ -553,8 +573,9 @@ class Scene:
     """What the steps of explain() share: the templates, their attack lengths
     (n) and how they overlap (relations); the columns (kit.columns: kept
     templates purified, then pitched copies) with the padded stem's bands;
-    the column of each kept template; and per column its threshold, usual
-    gain and null, as the steps set them."""
+    the column of each kept template; per column its threshold; the decay of
+    the low and tonal columns; and per column its usual gain and null, as
+    the steps set them."""
     templates: list
     n: list[int]
     rel: dict
@@ -563,6 +584,7 @@ class Scene:
     col_of: dict[int, int]
     kit: Kit
     thr: np.ndarray
+    rings: dict[int, np.ndarray]
     usual: np.ndarray | None = None
     null: np.ndarray | None = None
 
@@ -606,14 +628,16 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     inband = {b: [band(tp.audio, b)[None, :] for tp in templates] for b in {tp.band for tp in templates}}
     tones = {k for k in range(len(templates)) if tonal(full[k], n[k])}
     rows = [ROW[tp.band] for tp in templates]
-    # A tone is never held (a kick template's low ring explains a little of
-    # almost anything), unless it was found in the hat band with less than
-    # TONAL[0] of its energy in the kick band: a hat whose average carries
-    # the body of the kicks under some of its hits rings there, and is held
-    # as a hat (24 of 24 hats under the snares, kicks at half level on 2 of
-    # every 8 hats, against 0)
-    holdable = {k for k in range(len(templates)) if k not in tones
-                or (rows[k] == ROW["hat"] and low_share(full[k], n[k]) < TONAL[0])}
+    # A tone found in the hat band with less than TONAL[0] of its energy in
+    # the kick band is a hat whose average carries the body of the kicks
+    # under some of its hits: held as a hat (a tone is never held: a kick
+    # template's low ring explains a little of almost anything), its hits as
+    # close as a hat's and no hit a ringing (kicks at half level on 2 of
+    # every 8 hats: 24 of 24 hats under the snares, against 0); still not
+    # probed (a kick found in the hat band, 31 % in the kick band, probed:
+    # kick808-1 drums F1@20 0.636 -> 0.415)
+    hatlike = {k for k in tones if rows[k] == ROW["hat"] and low_share(full[k], n[k]) < TONAL[0]}
+    holdable = {k for k in range(len(templates)) if k not in tones or k in hatlike}
     rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
@@ -631,7 +655,9 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
             columns.append(Column(names[k], k, _bands(transpose(templates[k].audio, st), w)[:, :n[k]], st))
     kit = Kit(_bands(xp, w), columns)
     thr = np.array([thresholds[templates[col.template].band] for col in columns])
-    sc = Scene(templates, n, rel, tones, noisy, {k: c for c, k in enumerate(rel["kept"])}, kit, thr)
+    rings = {c: decay(full[col.template], n[col.template]) for c, col in enumerate(columns)
+             if templates[col.template].band == "low" or col.template in tones - hatlike}
+    sc = Scene(templates, n, rel, tones, noisy, {k: c for c, k in enumerate(rel["kept"])}, kit, thr, rings)
     decided = {"composite": {names[k]: {"share": v["share"], "by": {names[j]: c for j, (c, _) in v["by"].items()}}
                              for k, v in rel["composite"].items()},
                "echo": {names[k]: v for k, v in rel["echo"].items()}, "tonal": sorted(names[k] for k in tones),
@@ -650,7 +676,8 @@ def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> t
         tp = templates[col.template]
         audio = tp.audio if not col.semitones else transpose(tp.audio, col.semitones)
         score, gain = sliding_ncc(xp, audio[:n[col.template]], tp.band)
-        p, props = find_peaks(score, height=CANDIDATE_NCC, distance=samples(closest_ms[tp.band]))
+        gap = max(closest_ms[tp.band], TONE_MS) if c in sc.rings else closest_ms[tp.band]
+        p, props = find_peaks(score, height=CANDIDATE_NCC, distance=samples(gap))
         sure = props["peak_heights"] >= sc.thr[c]
         cands.add(c, p[sure], props["peak_heights"][sure], "matched")
         weak[c] = p[~sure]
@@ -756,7 +783,7 @@ def _settle(sc: Scene, cands: Candidates, layers: Candidates, min_gain: float) -
     the hits already kept win), a low template's ringing dropped (_tails),
     and the floors checked again once everything is fit together. Returns
     the hits and their gains."""
-    kit, columns = sc.kit, sc.kit.columns
+    kit = sc.kit
     if len(layers):
         joined = cands.join(layers)
         lg, _ = fit(kit, joined)
@@ -765,8 +792,7 @@ def _settle(sc: Scene, cands: Candidates, layers: Candidates, min_gain: float) -
         mask[keep] = True
         cands = joined.take(mask | np.array([s != "layer" for s in joined.source], dtype=bool))
     gains, _ = fit(kit, cands)
-    low = {c for c, col in enumerate(columns) if sc.templates[col.template].band == "low"}
-    cands = cands.take(_tails(cands, gains, low) & (gains > 0))
+    cands = cands.take(_tails(cands, gains, sc.rings) & (gains > 0))
     for _ in range(2):
         gains, _ = fit(kit, cands)
         layer = np.array([s == "layer" for s in cands.source], dtype=bool)
