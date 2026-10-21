@@ -31,7 +31,19 @@ from . import scenarios as S
 from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples
 from .calibrate import _f1
 from .grid import BAR_SLACK
-from .render import as_played, fader_db, pad_settings, pitch_808, resolve, settings_808, velocity_gain
+from .render import (
+    as_played,
+    chain_semitones,
+    chains_808,
+    fader_db,
+    glide_s,
+    pad_settings,
+    pitch_808,
+    read_at,
+    resolve,
+    settings_808,
+    velocity_gain,
+)
 
 SCHEMA = "refdissect.events/1"
 ROLES = ("kick", "snare", "clap", "rim", "hat", "open_hat", "perc", "tom", "crash", "ride", "808", "melodic", "vocal")
@@ -259,6 +271,13 @@ def _plan_melodic(plan: dict, bps: float) -> dict:
                             key=lambda n: (n["t"], n["layer"], n["midi"]))}
 
 
+def _glide(g: dict | None) -> dict | None:
+    """A notes_808 glide as the schema's (from_midi, to_midi, t, ms, shape)."""
+    if not g:
+        return None
+    return {k: g[k] for k in ("from_midi", "to_midi", "t", "ms", "shape") if k in g}
+
+
 def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dict:
     """What the analysis heard, as an estimate.
 
@@ -270,8 +289,10 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     role's band: where its full-band attack sits on the tail of the kick or
     808 before it, the band puts it back where the snare starts (calibration
     snares: 21-24 ms early by the full band, -0.6 to +1.8 ms by the snare
-    band, 12 analyses). 808: notes_808 (t, end, midi_float; t is an onset
-    backtracked in the 808 band, taken as the attack). Rhythm: the grid as
+    band, 12 analyses). 808: notes_808 (bass808's: t_attack, end, midi_float
+    the pitch heard, midi_settled, glide; an analysis from before bass808 has
+    no t_attack, and its t, an onset backtracked in the 808 band, is taken
+    as the attack). Rhythm: the grid as
     grid.estimate left it (_analysis_time): tempo, meter, first bar line,
     swing and tempo map. Melodic notes and chords: melodic.json (_melodic);
     without it the estimate carries neither, and they are not scored."""
@@ -290,9 +311,10 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
                           "t_attack": round(max(0.0, e.get("t_attack", e["t"] + lead)), 5),
                           "gain": e.get("gain", 1.0), "velocity": None, "layer_of": None, "flags": []})
     bass = [{"sound": "808", "t": n["t"], "t_attack": n.get("t_attack", n["t"]), "end": n["end"],
-             "midi": float(n.get("midi_float", n.get("pitch"))), "glide": None, "with_kick": False,
-             "gain": n.get("peak", 1.0),
-             "flags": [f"slide:{n['slide']:+.1f}"] if abs(n.get("slide", 0.0)) >= 1.5 else []}
+             "midi": float(n.get("midi_float", n.get("pitch"))), "midi_settled": n.get("midi_settled"),
+             "glide": _glide(n.get("glide")), "with_kick": False, "gain": n.get("peak", 1.0),
+             "flags": list(n.get("flags", [])) + ([f"slide:{n['slide']:+.1f}"] if abs(n.get("slide", 0.0)) >= 1.5
+                                                 else [])}
             for n in analysis.get("notes_808", [])]
     if bass:
         t808 = work / "templates" / "808.npy"
@@ -320,24 +342,37 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
     f0, curve = S.tuning(shot)
     cents = s["cents"] if t808.get("cents") is not None else round(100 * (S.hz_to_midi(f0) - s["root_midi"]), 1)
     bps, gain = plan["tempo"] / 60, 10 ** ((fader_db(plan, "808") + s["volume_db"]) / 20)
+    own = s["root_midi"] + cents / 100  # the one-shot's settled pitch, played at shift 0
     leads: dict[float, float] = {}
     bass = []
-    for n in t808["notes"]:
-        shift = pitch_808(s, n["pitch"])[0]
-        settled, rate = s["root_midi"] + cents / 100 + shift, 2 ** (shift / 12)
+    for chain in chains_808(t808):
+        first = chain[0]
+        shift = pitch_808(s, first["pitch"])[0]
         if shift not in leads:
             leads[shift] = attack_time(as_played(shot, 0.0, shift), "808")
-        t, dur = n["start_time"] / bps, min(n["duration"] / bps, len(shot) / SR / rate)
-        heard = settled + S.sounding(lambda x, r=rate: S.drop(curve, x * r) / 100, dur)
-        bass.append({"sound": "808", "t": round(t, 5), "t_attack": round(t + leads[shift], 5),
-                     "end": round(t + n["duration"] / bps, 5), "midi": round(heard, 4),
-                     "midi_settled": round(settled, 4), "glide": None, "with_kick": False,
-                     "gain": round(gain * velocity_gain(n["velocity"], s["velocity_curve"] or velocity_curve), 5),
-                     "flags": []})
-    own = pitch_808(s, s["root_midi"])[0]
+        semis = chain_semitones(chain, s, bps, glide_s(t808))
+        pos = read_at(semis)  # where Simpler reads the one-shot, sample by sample
+        heard = own + semis + S.drop(curve, pos / SR) / 100
+        heard[pos >= len(shot)] = np.nan  # the one-shot has ended
+        a0 = first["start_time"] / bps
+        v = velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve)
+        for k, n in enumerate(chain):
+            t = n["start_time"] / bps
+            stop = chain[k + 1]["start_time"] / bps if k + 1 < len(chain) else t + n["duration"] / bps
+            o = int(round((t - a0) * SR))
+            dur = min(stop - t, float(np.sum(np.isfinite(heard[o:]))) / SR)
+            midi = S.sounding(lambda x, o=o, h=heard: h[np.clip(o + np.round(x * SR).astype(int), 0, len(h) - 1)],
+                              dur)
+            glide = None if not k else {"from_midi": round(own + semis[max(0, o - 1)], 4),
+                                        "to_midi": round(own + pitch_808(s, n["pitch"])[0], 4), "t": round(t, 5),
+                                        "ms": round(1000 * glide_s(t808), 1), "shape": "lin"}
+            bass.append({"sound": "808", "t": round(t, 5), "t_attack": round(t + (leads[shift] if not k else 0.0), 5),
+                         "end": round(stop, 5), "midi": round(float(midi), 4),
+                         "midi_settled": round(own + pitch_808(s, n["pitch"])[0], 4), "glide": glide,
+                         "with_kick": False, "gain": round(gain * v, 5), "flags": ["legato"] if k else []})
+    at_root = as_played(shot, 0.0, pitch_808(s, s["root_midi"])[0])
     sounds["808"] = {"role": "808", "path": str(path), "sha256": _sha256(path), "semitones": s["transpose"],
-                     "cents": cents, "attack_s": round(attack_time(as_played(shot, 0.0, own), "808"), 5),
-                     "f0_hz": round(f0, 3)}
+                     "cents": cents, "attack_s": round(attack_time(at_root, "808"), 5), "f0_hz": round(f0, 3)}
     return bass
 
 
@@ -355,8 +390,12 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     build's Transpose; a plan without cents gets the one-shot's own,
     scenarios.tuning), and sounds (midi) as a truth's note does: the one-shot's
     own pitch drop (its pitch curve, read at the note's rate) through
-    scenarios.sounding over the note's length. gain = track fader x volume_db
-    x the velocity law.
+    scenarios.sounding over the note's length. With Glide on, a note that
+    starts while the one before is held (render.chains_808) is a legato
+    note: no attack (t_attack = t), the voice sliding to its pitch over the
+    Glide Time with the one-shot read on, its glide in the schema's form.
+    gain = track fader x volume_db x the velocity law (a chain's first
+    note's).
     Notes on a pad without a readable sample, and 808 notes without a
     one-shot, play nothing and are left out (their files under "missing").
     Melodic notes: the plan's melodic tracks (_plan_melodic). Rhythm: Live's
