@@ -152,14 +152,18 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
 
 def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
     """A pad per pitched copy of the sound on pad `note`: the same sample,
-    transposed `semitones` further, on the next free PITCHED_PADS note.
-    Returns {semitones: note}."""
+    transposed `semitones` further, on the next free PITCHED_PADS note (or
+    the pad that already plays it so). Returns {semitones: note}."""
     out = {}
+    base = pads[str(note)]
     for st in sorted(semitones):
-        free = next((k for k in PITCHED_PADS if str(k) not in pads), None)
+        transpose_to = int(base["transpose"] + st)
+        same = next((int(k) for k, v in pads.items() if v["path"] == base["path"] and v["transpose"] == transpose_to),
+                    None)
+        free = same or next((k for k in PITCHED_PADS if str(k) not in pads), None)
         if free is None:
             break
-        pads[str(free)] = {**pads[str(note)], "transpose": int(pads[str(note)]["transpose"] + st), "semitones": int(st)}
+        pads.setdefault(str(free), {**base, "transpose": transpose_to, "semitones": int(st)})
         out[st] = free
     return out
 
