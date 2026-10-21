@@ -7,6 +7,7 @@ from conftest import burst, placed
 
 from refdissect import pipeline
 from refdissect.audio import SR, band, fit, samples, shift
+from refdissect.detect import Template, detect
 
 
 def test_kicks_keep_whole_semitones(noisy):
@@ -156,3 +157,21 @@ def test_a_same_recording_names_the_role():
     assert pipeline._role([dict(top[0], ncc=0.9)] + top[1:], named, "kick") == "kick"
     votes = Counter({"snare": 3, "hat": 2})
     assert pipeline._role([{"role": "hat", "ncc": 0.8}], votes, "kick") == "snare"
+
+
+def test_heard_is_detects_matched_filter(noisy):
+    """_heard finds a sound where detect() finds it (the same filter,
+    threshold and gap), from xcorr and scipy alone: a hat placed at 24
+    moments of a quiet stem is heard at each of them; a snare that never
+    plays there is not heard."""
+    lib, sounds = noisy
+    hat = lib.candidate(14, samples(40))
+    x = np.random.default_rng(4).standard_normal(int(7 * SR)).astype(np.float32) * 0.002
+    at = np.array([int((0.2 + 0.27 * k) * SR) for k in range(24)])
+    for a in at:
+        x[a:a + len(sounds[14])] += 0.5 * sounds[14]
+    found = pipeline._heard(x, hat, "hat")
+    by_detect = detect(x, [Template("h", "hat", "hat", hat, 24)])["h"]
+    assert len(found) == 24 and np.allclose(found, [e["t"] for e in by_detect], atol=1e-4)
+    assert np.max(np.abs(found - at / SR)) <= 0.003
+    assert not len(pipeline._heard(x, lib.candidate(30, samples(60)), "snare"))
