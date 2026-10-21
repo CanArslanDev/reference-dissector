@@ -17,10 +17,11 @@ from pathlib import Path
 
 import librosa
 import numpy as np
+from scipy.signal import find_peaks
 
 from . import describe as describe_mod
 from . import detect as det
-from .audio import SR, band, read, samples, shift, transpose, write
+from .audio import PRE, SR, band, read, samples, shift, transpose, write
 from .audio import fit as fit_to
 from .beats import track_stems
 from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
@@ -29,6 +30,7 @@ from .hits import Group, group, template
 from .library import Library, null_test, pair_fit, per_hit_votes, verdict
 from .structure import bar_activity, sections
 from .synth808 import Params, compare, fit, laid_out, one_shot
+from .xcorr import sliding_ncc
 
 TONAL_STEMS = ("bass", "other", "piano", "vocals", "guitar")
 # library roles grouped into the drum families a Drum Rack is laid out by
@@ -232,12 +234,21 @@ def kick_sources(work: Path, analysis: dict, stems: Path, drums: np.ndarray) -> 
     return out, r808, info
 
 
+def _heard(drums: np.ndarray, sound: np.ndarray, b: str) -> np.ndarray:
+    """Where a sound (laid out like a template) plays in the drum stem, in
+    seconds: detect()'s matched filter in band b, with its threshold and
+    minimum gap, built from xcorr and scipy rather than from detect's own
+    helpers, which are not an interface."""
+    score, _ = sliding_ncc(drums, sound, b)
+    peaks, _ = find_peaks(score, height=det.THRESHOLD[b], distance=samples(det.MIN_GAP_MS[b]))
+    return (peaks + PRE) / SR
+
+
 def _elsewhere(library: Library, r: dict, b: str, drums: np.ndarray, hits: np.ndarray) -> tuple[int, int]:
     """At how many of a template's hits (attack times, s) a library sound is
-    heard in the drum stem, and at how many other moments: detect()'s
-    matched filter, with the sound's attack, over the whole stem."""
-    found = det._times(drums, library.candidate(r["i"], samples(det.DETECT_MS[b]), r["semitones"]), b,
-                       det.THRESHOLD[b])
+    heard in the drum stem, and at how many other moments (_heard, with the
+    sound's attack, over the whole stem)."""
+    found = _heard(drums, library.candidate(r["i"], samples(det.DETECT_MS[b]), r["semitones"]), b)
     if not len(found):
         return 0, 0
     d = np.min(np.abs(found[:, None] - np.asarray(hits)[None, :]), axis=1) if len(hits) else np.full(len(found), 9.0)
