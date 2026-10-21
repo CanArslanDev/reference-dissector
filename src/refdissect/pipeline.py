@@ -302,6 +302,19 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     return [layer], {**evidence, "accepted": True}
 
 
+def _role(top: list[dict], named: Counter, guess: str) -> str:
+    """A template's role: its top match's when that is the same recording
+    (NCC >= 0.95); else the majority of the top five's names when the top
+    match is close (>= 0.75) and three agree; else the energy guess. In a
+    20-beat suite run, 7 hat templates matched to their own hat at NCC
+    0.976-0.997 were called kick (5) or perc (2): the five names split, and
+    the guess hears the kick under the hats."""
+    if top[0]["ncc"] >= 0.95:
+        return FAMILY.get(top[0]["role"], top[0]["role"])
+    vote, votes_n = named.most_common(1)[0]
+    return vote if top[0]["ncc"] >= 0.75 and votes_n >= 3 else guess
+
+
 def _kick_source(library: Library, info: dict, ranked: list[dict], sources: dict, r808: np.ndarray | None,
                  claimed) -> tuple[dict, np.ndarray | None, list[dict] | None]:
     """A kick-band template read from each other source (kick_sources): the
@@ -391,8 +404,7 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
         t = windows[name, b]
         top = by_band[name][b][:5]
         named = Counter(FAMILY.get(r["role"], r["role"]) for r in top)
-        vote, votes_n = named.most_common(1)[0]
-        role = vote if top[0]["ncc"] >= 0.75 and votes_n >= 3 else info["role_guess"]
+        role = _role(top, named, info["role_guess"])
         margin = round(top[0]["ncc"] - top[1]["ncc"], 3) if len(top) > 1 else top[0]["ncc"]
         candidates = {r["path"]: library.candidate(r["i"], len(t), r["semitones"]) for r in top[:3]}
         members = info.get("members") or []
