@@ -256,10 +256,10 @@ class Library:
     def load(cls, path: str | Path) -> Library:
         """The library, with its speckle index when one is kept next to it
         (speckle_path) and was built from these entries by this version."""
-        with np.load(str(path), allow_pickle=False) as data:
-            spectra = np.array(data["spectra"]) if "spectra" in data.files else None
+        with np.load(str(path), allow_pickle=False) as data:  # each array read once: not copied again (0.5 GB)
+            spectra = data["spectra"] if "spectra" in data.files else None
             lib = cls([str(p) for p in data["paths"]], [str(r) for r in data["roles"]],
-                      np.array(data["audio"]), float(data["seconds"]), spectra)
+                      data["audio"], float(data["seconds"]), spectra)
         if speckle_path(path).is_file():
             lib.load_speckle(speckle_path(path))
         return lib
@@ -301,8 +301,8 @@ class Library:
             if why:
                 self.speckles, self.speckle_info = {}, {"ignored": f"{Path(path).name}: built for {why}"}
                 return self.speckle_info
-            rows = np.array(data["rows"])
-            self.speckles = {name: (rows, np.array(data[name])) for name in SPECKLE}
+            rows = data["rows"]
+            self.speckles = {name: (rows, data[name]) for name in SPECKLE}
             self.speckle_info = {"version": SPECKLE_VERSION, "entries": int(len(rows)),
                                  "build_s": float(data["build_s"]), "file": Path(path).name}
         return self.speckle_info
