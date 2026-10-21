@@ -6,13 +6,14 @@ import numpy as np
 import pytest
 from conftest import burst
 
-from refdissect.audio import SR, attack_time, samples
-from refdissect.detect import count_once, detect, discover, places
+from refdissect.audio import PRE, SR, attack_time, samples
+from refdissect.detect import Candidate, Template, count_once, detect, discover, one_per_sound, places
 from refdissect.evaluate import assign, onset_scores
 from refdissect.grid import Grid
+from refdissect.hits import Group
 
 ROLE = {"kick": "kick", "snare": "snare", "hat": "hat", "rim": "rim", "perc": "perc", "crash": "crash",
-        "hat2": "hat", "late": "kick", "lead": "snare", "boom": "kick"}
+        "hat2": "hat", "late": "kick", "lead": "snare", "boom": "kick", "tonal": "snare", "pickup": "hat"}
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +54,7 @@ def pattern(bpm: float, bars: int, steps: dict[str, list[int]], per_bar: int = 1
 
 def found(x: np.ndarray, grid: Grid) -> tuple[list, dict]:
     templates = discover(x, grid)
-    return templates, count_once(detect(x, templates), templates)
+    return templates, count_once(detect(x, templates), templates, x)
 
 
 def scored(templates, events, truth: dict) -> dict:
@@ -195,3 +196,52 @@ def test_places_follow_the_song_not_the_straight_grid():
     where = places(t, grid, 12.0, 3)
     assert len(set(where[:8])) == 1 and len(set(where[8:16])) == 1 and where[0] != where[8]
     assert where[-1] == -1
+
+
+def test_a_tonal_snares_ring_is_not_its_hits(sounds):
+    """A snare with a 190 Hz body (70 ms decay), a pickup one 32nd before
+    each one (140 BPM): the snare template matched its own ring 37-158 ms
+    after every snare (101 hits for 32), and the scorer gave it to no
+    sound; the template that held the snare in the low band was its view,
+    its hits all counted as the other's."""
+    tonal = burst(31, 250, 150, 3500, 70, tone_hz=190.0)
+    hits, grid = pattern(140, 16, {"kick": [0, 10], "tonal": [4, 12], "hat": [0, 2, 4, 6, 8, 10, 12, 14]},
+                         gains={"hat": (0.3, 0.5)})
+    step = 60 / 140 / 4
+    hits += [("pickup", t - step / 2, 0.25) for name, t, _ in list(hits) if name == "tonal"]
+    pickup = burst(32, 60, 4000, 14000, 12)
+    x, truth = arrange({**sounds, "tonal": tonal, "pickup": pickup}, hits, 16 * 4 * 60 / 140 + 1)
+    sc = scored(*found(x, grid), truth)
+    assert sc["tonal"]["f1_20"] > 0.95 and abs(sc["tonal"]["error_ms"]["median"]) < 2
+
+
+def test_a_views_hits_found_again_37_ms_later_count_once():
+    """A view finds its main's hits again at one lag: full-1's snare-band
+    view of the kick kept 43 hits 37 ms after a kick when hits counted once
+    only within 15 ms, none of them on a kick. Within 50 ms they are its
+    main's; its own hit stays."""
+    main = Template("sound_1", "kick", "low", np.zeros(10, np.float32), 8)
+    view = Template("sound_2", "kick", "snare", np.zeros(10, np.float32), 8, same_sound_as="sound_1")
+
+    def hits(times):
+        return [{"t": t, "t_attack": t, "ncc": 0.9, "gain": 1.0} for t in times]
+
+    out = count_once({"sound_1": hits([1.0, 2.0, 3.0, 4.0]), "sound_2": hits([1.0, 1.037, 2.037, 3.037, 5.5])},
+                     [main, view])
+    assert [e["t_attack"] for e in out["sound_2"]] == [5.5] and len(out["sound_1"]) == 4
+
+
+def test_hits_found_again_do_not_make_a_view(kit):
+    """A candidate of a kept sound that finds 4 of its hits, and the same 4
+    again 37 ms later, finds nothing new: it is no view of that sound, its
+    hits are not counted twice."""
+    t = np.arange(1.0, 9.0)
+
+    def cand(band_name, times):
+        n = len(times)
+        return Candidate(band_name, Group(), np.zeros(10, np.float32), PRE, np.sort(times), np.ones(n),
+                         np.full(n, 0.9), kit["kick"][:samples(100)], "kick")
+
+    kept = cand("low", t)
+    assert one_per_sound([cand("snare", np.r_[t[:4], t[:4] + 0.037])], [kept]) == [kept]
+    assert len(one_per_sound([cand("snare", np.r_[t[:4], 9.5, 10.5, 11.5])], [kept])) == 2

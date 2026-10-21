@@ -12,7 +12,9 @@ Drums, in two passes:
    (hits.RISE), so a hit's time is its attack: t_attack.
 2. detect(): each template slides over the whole stem (matched filter); its
    peaks above a threshold are its hits, with a level. Where two templates of
-   one band claim the same moment, the better match keeps it.
+   one band claim the same moment, the better match keeps it. count_once()
+   then keeps each hit once: not a view's hits again, nor a template's own
+   ring.
 
 The templates come from the song itself, so the second pass finds a sound
 even where the first could not see it (under other hits, off the grid).
@@ -49,6 +51,11 @@ MIN_GAP_MS = {"kick": 35, "snare": 35, "hat": 35, "low": 100}
 
 
 SAME_MS = 15  # hits of two templates this close are one moment
+# A view finds its main's hits again at one lag, 36-39 ms before or after
+# them on 4 suite beats (full-1, glides-1, layers-1, rolls-1): its hits
+# this close to the main's are those hits
+VIEW_MS = 50
+RING_MS = 250  # how long after a hit its template's own ring is looked for (ringing())
 ROLE_BAND = {"kick": "low", "snare": "snare", "hat": "hat"}  # where a guessed role's sound is compared
 RESIDUAL_MS = 10  # an onset this close to a template's hit is explained by it
 # How far before an onset-strength peak its start is looked for: a kick's
@@ -328,9 +335,11 @@ def starts_something(c: Candidate, onsets: np.ndarray, top: np.ndarray, min_onse
     return on >= min_onsets and up >= min_top
 
 
-def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float, float]:
+def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float, float, int]:
     """(the kept candidate that explains the most of a's hits (explains()),
-    the share of a's hits it holds, the share any kept one finds)."""
+    the share of a's hits it holds, the share any kept one finds, and how
+    many of a's hits are new: none of the kept ones finds them, nor the
+    holder within VIEW_MS, where a view finds its main's hits again)."""
     covered = np.zeros(len(a.times), bool)
     best, held = None, 0.0
     for k in kept:
@@ -340,7 +349,10 @@ def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float
         covered[i] = True
         if len(i) / len(a.times) > held and len(i) >= 3 and explains(likeness(a, k)):
             best, held = k, len(i) / len(a.times)
-    return best, held, float(covered.mean()) if len(a.times) else 0.0
+    new = ~covered
+    if best is not None:
+        new[pairs(a.times, best.times, VIEW_MS)[0]] = False
+    return best, held, float(covered.mean()) if len(a.times) else 0.0, int(new.sum())
 
 
 def one_per_sound(cands: list[Candidate], kept: list[Candidate] | None = None, alone: float = 0.6,
@@ -355,13 +367,19 @@ def one_per_sound(cands: list[Candidate], kept: list[Candidate] | None = None, a
     kick's hits and some of the hat's). One that its holder explains on
     `view` of its hits but that finds min_new hits nobody else does is kept
     as a view of the same sound (view_of: the kick in the hat band, where
-    the low band missed it under an 808)."""
+    the low band missed it under an 808); with fewer new hits it is left
+    out too. A hit it finds again within VIEW_MS of its holder's is not
+    new. Such candidates used to stay as sounds of their own and play their
+    holder's hits a second time: dropped, kick F1@20 over 22 suite scenarios
+    went from 0.839 to 0.869 (analysis, guessed roles)."""
     kept = list(kept or [])
     for c in sorted(cands, key=lambda c: (-np.sum(c.ncc >= 0.8) ** 2 / max(1, len(c.ncc)), -float(np.median(c.ncc)))):
-        k, held, covered = holder(c, kept)
+        k, held, covered, new = holder(c, kept)
         if held >= alone or (k is not None and covered >= share):
             continue
-        if k is not None and held >= view and (1 - covered) * len(c.times) >= min_new:
+        if k is not None and held >= view:
+            if new < min_new:
+                continue
             c.view_of = k.view_of or k
         kept.append(c)
     return kept
@@ -477,16 +495,64 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     return out
 
 
-def count_once(events: dict[str, list[dict]], templates: list[Template]) -> dict[str, list[dict]]:
-    """The events of a template that holds the same sound as another one
-    (same_sound_as) without those within SAME_MS of that one's: a hit found
-    in two bands is one hit."""
-    out = dict(events)
+def ring(tp: Template) -> np.ndarray:
+    """How loud the template's own ring can be at each lag (samples) after
+    its start, as a share of its start: its level in its band over its
+    detection length there, never more than at a lag before (a ring only
+    decays; a hat template's level rises again 220 ms on, where the next 8th
+    hat always plays, and that is no ring)."""
+    y = band(tp.audio, tp.band).astype(np.float64)
+    e = np.convolve(y ** 2, np.ones(samples(DETECT_MS[tp.band])), mode="valid")
+    return np.minimum.accumulate(np.sqrt(e / (e[0] or 1e-12)))
+
+
+def ringing(y: np.ndarray, times: np.ndarray, gains: np.ndarray, own: np.ndarray, ms: float | None = None,
+            margin: float = 1.25) -> np.ndarray:
+    """Which of a template's hits (start times in s, sorted, and gains) are a
+    louder hit of its own ringing on: within ms after a kept hit, no louder
+    than that hit's ring there (its gain times own, ring(), at the lag; the
+    matched filter finds a ring at NCC times that), and nothing starts in
+    the template's band y (no hits.rise to half the window's peak within 15
+    ms). NCC ignores level, so a tonal snare's template matched its own ring
+    37-158 ms after each snare at 0.10-0.59 of its gain: 101 extra hits for
+    32 snares, and the scorer gave the template to no sound. A hat's ring is
+    gone within the 110 ms to the next 16th, so a soft hat after an
+    accented one is never taken for it."""
+    out = np.zeros(len(times), bool)
+    last = None
+    ms = RING_MS if ms is None else ms
+    for k, t in enumerate(times):
+        lag = int(round((t - times[last]) * SR)) if last is not None else len(own)
+        if (lag < min(len(own), samples(ms)) and gains[k] <= margin * gains[last] * own[lag]
+                and rise(y, int(round(t * SR)), samples(15), samples(15), level=0.5) is None):
+            out[k] = True
+            continue
+        last = k
+    return out
+
+
+def count_once(events: dict[str, list[dict]], templates: list[Template],
+               drums: np.ndarray | None = None) -> dict[str, list[dict]]:
+    """Each hit once. A template that holds the same sound as another one
+    (same_sound_as) loses its events within VIEW_MS of that one's: a hit
+    found in two bands is one hit, and so is a hit a view finds again at a
+    lag. Within 15 ms instead, full-1's snare-band view of the kick kept 43
+    hits 37 ms after a kick, none of them on a true one. Given the stem
+    (drums), every template also loses its own ringing (ringing())."""
+    def at(name):
+        return np.array([e.get("t_attack", e["t"]) for e in out[name]], dtype=float)
+
+    out = {k: sorted(v, key=lambda e: e.get("t_attack", e["t"])) for k, v in events.items()}
+    if drums is not None:
+        ys = {b: band(drums, b) for b in {tp.band for tp in templates}}
+        for tp in templates:
+            if out.get(tp.name):
+                rung = ringing(ys[tp.band], at(tp.name), np.array([e["gain"] for e in out[tp.name]]), ring(tp))
+                out[tp.name] = [e for e, r in zip(out[tp.name], rung) if not r]
     for tp in templates:
-        if tp.same_sound_as and tp.same_sound_as in events:
-            main = np.sort(np.array([e.get("t_attack", e["t"]) for e in events[tp.same_sound_as]]))
-            shared = set(pairs(np.array([e.get("t_attack", e["t"]) for e in events[tp.name]]), main)[0].tolist())
-            out[tp.name] = [e for k, e in enumerate(events[tp.name]) if k not in shared]
+        if tp.same_sound_as and tp.same_sound_as in out:
+            shared = set(pairs(at(tp.name), np.sort(at(tp.same_sound_as)), VIEW_MS)[0].tolist())
+            out[tp.name] = [e for k, e in enumerate(out[tp.name]) if k not in shared]
     return out
 
 
