@@ -446,12 +446,11 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     band), the sound's start in its role's band PRE into it (attack_s).
 
     Against the code before (16th slots +-12 ms, 8 hits a slot, a cross-band
-    duplicate test, the full-band attack) on 30 suite beats of 14 scenarios
-    (htdemucs stems, the same grids; detect() and the scorer unchanged),
-    strict F1@20 of the analysis per role, mean over scenarios: kick 0.26 ->
-    0.83, snare 0.85 -> 0.90, hat 0.45 -> 0.75, open hat 0.23 -> 0.97, clap
-    0.61 -> 0.83, crash 0 -> 0.47 (templates scored with their guessed roles,
-    the code before with the library's)."""
+    duplicate test, the full-band attack) on 32 suite beats of 14 scenarios
+    (htdemucs stems, the library's roles), strict F1@20 per role, mean over
+    scenarios, analysis: kick 0.26 -> 0.87, snare 0.85 -> 0.96, hat 0.45 ->
+    0.75, open hat 0.23 -> 0.97, crash 0 -> 0.47; plan: kick 0.17 -> 0.80,
+    snare 0.58 -> 0.79. Kicks were found 22.6 ms late (median), now 0.9."""
     min_hits = min_hits or min_hits_for(len(drums), grid)
     onsets = np.sort(np.concatenate([seeds(drums, b) for b in bands]))
     top = band(drums, "hat")
