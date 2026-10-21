@@ -54,14 +54,30 @@ The 808 has a tuning of its own (`detect.pitch_offset`, the circular mean of its
    - This matters for matching: hit times from onset-strength peaks sit several ms off the attack, and a template 12 ms off matched its true sample at NCC 0.15 instead of 0.85.
 7. **Names and roles.** Templates are named `sound_1`, `sound_2`, … by number of detections. The role is only a guess here (`kick`/`snare`/`hat`, from the energy the hits add over the 60 ms before them). Matching decides it later.
 
-### Hits (`detect.detect`)
+### Hits (`detect.detect`, `layers.explain`)
 
-**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are hits; the least-squares gain at the peak is the hit's level.
+**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are candidate hits, 8 ms apart at least (100 ms in the low band), so a flam's grace note 10–30 ms before its hit and a 64th roll (27.6 ms apart at 136 BPM) stay apart. The stem is padded: a hit at 0 s is found too.
 
-Three cleanups:
-- **Quiet tails.** Hits below 25 % of the template's median gain are dropped. NCC ignores level, so a ringing tail matches its own template too.
-- **Low band.** Hits are at least 100 ms apart, and a hit less than half as loud within 250 ms after a louder one is its tail.
-- **Overlaps within a band.** A moment claimed by two templates goes to the better match.
+**Every moment at once.** Keeping one template per moment and band lost nearly every hat under a snare (416 of 432 on 22 suite beats). Instead, each candidate's neighbourhood (±150 ms) is fit as a non-negative sum of all the candidates in it (NNLS) on the kick, snare and hat bands, each band weighted by the stem's level in it. Each hit gets its own gain, the hit's level.
+- **One sound found twice.** Two candidates whose placed templates correlate at 0.6 or more are the same sound (a duplicate template, a kick ringing one period on): the one that explains more of the stem keeps it. Templates of one kind that lose half their hits to each other are merged, so a hat found in the hat band and in the snare band plays once.
+- **Held sounds.** A template that holds another (the snare template holds the hat on every snare: 0.8–1.4 times the hat's average level, 1.8–8 % of the snare's energy) has it subtracted first. Otherwise the snare takes the hat's place at every hit.
+- **Composites.** A template the others explain to 80 % is left out, and its hits go to them.
+- **Keeping a hit.** Its gain reaches 25 % of the template's median gain, and the fit loses more without it than the template takes at shifted, empty windows (their 95th percentile).
+
+**Where the kept hits leave something out.** A held template is looked for at its offset under every hit of the template that holds it; every template where its matched filter peaked below the threshold, and at the onsets of its band. Such a hit needs half the template's median gain (a quarter where what the other hits leave matches the template at its threshold), and the null. It is marked `source: "layer"`, with `under`, the template it was under.
+
+**Pitched copies.** A noisy template (its copy one semitone off matches it at NCC < 0.5: hats, snares) is also matched 1–5 semitones up and down, transposed as Simpler plays it. Its hits carry `semitones` and are scored as sounds of their own. Tones (25 % or more of their energy in the kick band, which still matches itself 8–35 ms later at NCC 0.5) get no pitched copies and are not looked for under other hits: their matched filter has a broad maximum.
+
+Two cleanups remain: in the low band a hit less than half as loud within 250 ms after a louder one is its tail, and a quieter hit at most 35 ms before another of the same sound (no third within 70 ms) is a flam's grace note (`flam_of`).
+
+On the 22 suite beats of the layers, rolls, flams, dynamics, v1, v1orig, producer, full and kick808 scenarios (htdemucs stems), against one template per moment and band:
+- hats within 20 ms of a snare: 16 → 326 of 432 found;
+- drums, strict F1 at 20 ms: 0.421 → 0.581 (mean over the scenarios), hats 0.501 → 0.794;
+- 64th hat rolls: 19 → 50 of 64 hits; pitched roll hits: 23 → 68 of 84;
+- hits more than 20 ms from any truth hit of their sound: 102 → 40 per beat. Most of the rest are kicks whose template attacks 20–50 ms off;
+- per-hit level, on the 3,332 hits both find: median error 0.49 → 0.43 dB, 90th percentile 2.57 → 2.48 dB (one offset per sound removed). The 525 hits found now have 1.26 dB median error.
+
+It costs about 2 s per 30 s beat, 10 s for a 2-minute stem. Not found: a sound that always plays with another has no template of its own (the layers scenario's clap on every snare), and a hat 14 dB under a clap's top end (one of the v1 beats).
 
 **Why the attack only.** Patterns repeat, so whatever always follows a hit is in its average too: the kick two sixteenths after a snare, for example. With a 300 ms window, that louder kick decided the matched filter: the snare's "hits" landed 352 ms early.
 
@@ -138,7 +154,7 @@ Kicks and 808s are mostly decaying sines, so every one correlates highly with ev
 
 **Drum pads:**
 - **Which sounds.** A template gets a Drum Rack pad when it was detected at least 12 times and at least half its hits matched at NCC ≥ 0.8. It also needs either a library match ≥ 0.75, or to be a kick or snare: the backbone is played with the closest sound, however far.
-- **Pads** follow GM (kick 36, snare 38, hats 42/44/46, …). A `same_as` template shares its twin's pad.
+- **Pads** follow GM (kick 36, snare 38, hats 42/44/46, …). A `same_as` template shares its twin's pad. A pitched copy (hits with `semitones`) gets the next free pad from 54 up: the same sample, transposed that much further. On the rolls, full and producer beats the plan's strict F1 at 20 ms is 0.452 with these pads, 0.179 with the copies played unpitched.
 - **Velocities** come from the hit gains: 127 at the 90th percentile.
 
 **Notes:**
