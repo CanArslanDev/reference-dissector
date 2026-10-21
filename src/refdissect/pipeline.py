@@ -21,7 +21,17 @@ import numpy as np
 from . import describe as describe_mod
 from .audio import SR, band, read, samples, write
 from .beats import track_stems
-from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
+from .detect import (
+    LENGTH_MS,
+    Template,
+    count_once,
+    detect,
+    discover,
+    isolated,
+    notes_808,
+    peak_score_histogram,
+    pitch_offset,
+)
 from .grid import Grid, estimate, offsets, onset_grid, tuning
 from .hits import group, template
 from .library import Library, null_test, per_hit_votes, verdict
@@ -76,14 +86,14 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
         log(f"  the first bar line is unsure ({why}); --meter sets the meter")
     for warning in fit_info["warnings"]:
         log(f"  warning: {warning}")
-    # discover() and offsets() read onset-strength peaks, which come a few ms after the attacks
+    # offsets() reads onset-strength peaks, which come a few ms after the attacks discover() works on
     peaks_grid = onset_grid(grid, fit_info)
     tunings = {s: tuning(read(stems_dir / f"{s}.wav")) for s in TONAL_STEMS
                if (stems_dir / f"{s}.wav").is_file()}
     consensus = round(float(np.median(list(tunings.values()))), 2) + 0.0 if tunings else 0.0  # no -0.0
     log(f"tuning (semitones from A440): {tunings} -> {consensus:+.2f}")
-    templates = discover(drums, peaks_grid)
-    events = detect(drums, templates)
+    templates = discover(drums, grid)
+    events = count_once(detect(drums, templates), templates)
     tdir = work / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     out_templates = {}
@@ -91,7 +101,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
         np.save(tdir / f"{tp.name}.npy", tp.audio)
         write(tdir / f"{tp.name}.wav", tp.audio)
         out_templates[tp.name] = {"role_guess": tp.role, "band": tp.band, "template_hits": tp.hits,
-                                  "slots": tp.slots,
+                                  "slots": tp.slots, "attack_s": tp.attack_s, "same_sound_as": tp.same_sound_as,
+                                  "found": tp.found,
                                   "detected_hits": len(events[tp.name]),
                                   "peak_ncc_histogram_0.3_to_1.0": peak_score_histogram(drums, tp),
                                   "describe": describe_mod.describe(band(tp.audio[:samples(LENGTH_MS[tp.role])],
