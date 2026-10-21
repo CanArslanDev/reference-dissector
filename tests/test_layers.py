@@ -328,11 +328,16 @@ def test_one_hit_per_strike_of_a_ringing_sound(sounds, found_in):
 
 def test_a_hit_at_zero_seconds(sounds):
     """The stem is padded: a hit attacking at 0 s is found (detect.py
-    started its windows PRE before an attack, so it could not)."""
+    started its windows PRE before an attack, so it could not), and one
+    whose attack the stem cuts off 3 ms in is found at 0 s, not at -3 ms
+    (the plan wrote a note with a negative start)."""
     hits = [("snare", 0.0, 0.8)] + [("snare", 0.3 + 0.4 * k, 0.8) for k in range(12)]
     x = render(sounds, hits, 6.0)
     events = explain(x, [oracle(x, hits[1:], "snare", "snare")])
     assert found(events, "snare", [t for _, t, _ in hits]).all()
+    cut = x[int(0.003 * SR):]
+    events = explain(cut, [oracle(cut, [(n, t - 0.003, g) for n, t, g in hits[1:]], "snare", "snare")])
+    assert min(e["t"] for e in events["snare"]) == 0.0
 
 
 def test_velocity_is_the_joint_least_squares_gain(sounds):

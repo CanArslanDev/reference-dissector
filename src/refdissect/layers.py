@@ -836,7 +836,7 @@ def _events(templates: list, kit: Kit, cands: Candidates, gains: np.ndarray) -> 
     columns = kit.columns
     longest = max(c.n for c in columns)
     out: dict[str, list[dict]] = {tp.name: [] for tp in templates}
-    t = (cands.p - LEAD + PRE) / SR
+    t = np.maximum((cands.p - LEAD + PRE) / SR, 0.0)  # an attack the stem cuts off (1-5 ms) plays from 0 s
     owner = np.array([columns[c].template for c in cands.col])
     for i in np.argsort(cands.p, kind="stable"):
         col = columns[cands.col[i]]
