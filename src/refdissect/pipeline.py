@@ -356,7 +356,7 @@ def _kick_source(library: Library, info: dict, ranked: list[dict], sources: dict
 
 
 def match(work: str | Path, library: Library, stems_dir: str | Path | None = None, detune: float | None = None,
-          log=print) -> dict:
+          kick_sources_on: bool = False, log=print) -> dict:
     """The library's sound for each template, with a verdict.
 
     Every template is matched in all three bands (_search): in the snare and
@@ -367,11 +367,16 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     Identities are handed out from the strongest match down; a sample
     already given to another template goes to this one too only if it
     matches it just as well (>= 0.9: the same sound found twice, `same_as`),
-    otherwise this template takes its best match in another band. A
-    template given the kick band is then also read from drums + bass and
-    from the mix with the 808 taken out (kick_sources), and the source whose
-    best match is closest wins (`source`). Last, a template matched in the
-    snare or hat band gets its second sound, if it is layered (_layer).
+    otherwise this template takes its best match in another band. With
+    kick_sources_on, a template given the kick band is then also read from
+    drums + bass and from the mix with the 808 taken out (kick_sources), and
+    the source whose best match is closest wins (`source`). It is off by
+    default: it needs fit-808's one-shot, which a full run makes after
+    match, and with fit-808's synth one-shot it found 13 of 20 kicks at the
+    true times against 12 from the drum stem, while in a 20-beat suite run
+    both of its switches put an 808 file first, one of them pushing the
+    true kick out of the top five. Last, a template matched in the snare or
+    hat band gets its second sound, if it is layered (_layer).
     """
     work = Path(work)
     analysis = _load(work / "analysis.json")
@@ -407,7 +412,8 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
             same_as[name] = claims[path][0]
     band_of = {name: chosen.get(name) or (same_as.get(name) and chosen.get(same_as[name]))
                or {"low": "kick"}.get(info["band"], info["band"]) for name, info in templates.items()}
-    kicks = [n for n in templates if band_of[n] == "kick" and n not in same_as and templates[n].get("members")]
+    kicks = [n for n in templates if kick_sources_on and band_of[n] == "kick" and n not in same_as
+             and templates[n].get("members")]
     sources, r808, source_info = kick_sources(work, analysis, stems, drums) if kicks else ({}, None, {})
     kick_source: dict[str, dict] = {}
     for name in kicks:

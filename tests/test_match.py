@@ -1,12 +1,15 @@
 """pipeline.match's parts on synthetic one-shots: kicks left to whole
-semitones, layered and plain templates, a kick under an 808."""
+semitones, layered and plain templates, a kick under an 808, the role
+rule, kick sources only when asked."""
+
+import json
 
 import numpy as np
 import pytest
 from conftest import burst, placed
 
 from refdissect import pipeline
-from refdissect.audio import SR, band, fit, samples, shift
+from refdissect.audio import SR, band, fit, samples, shift, write
 from refdissect.detect import Template, detect
 
 
@@ -119,7 +122,6 @@ def test_a_kick_read_from_a_cleaner_source(noisy):
 def test_kick_sources_take_the_808_out(tmp_path):
     """drums + bass and the mix, with the 808 notes played by fit-808's
     one-shot at their pitches; nothing but the drum stem without one."""
-    from refdissect.audio import write
     stems, work = tmp_path / "stems", tmp_path / "work"
     n = int(2 * SR)
     drums, bass = np.zeros(n, np.float32), np.zeros(n, np.float32)
@@ -188,3 +190,41 @@ def test_heard_is_detects_matched_filter(noisy):
     assert len(found) == 24 and np.allclose(found, [e["t"] for e in by_detect], atol=1e-4)
     assert np.max(np.abs(found - at / SR)) <= 0.003
     assert not len(pipeline._heard(x, lib.candidate(30, samples(60)), "snare"))
+
+
+def _kick_work(tmp_path, kick: np.ndarray):
+    """A work folder whose one template is a kick heard 8 times in the drum
+    stem (with hiss above the kick band on the template, so the kick band
+    matches it best), stems with bass.wav and the mix they came from."""
+    stems, work = tmp_path / "stems", tmp_path / "work"
+    n = int(4.5 * SR)
+    starts = [int((0.3 + 0.5 * k) * SR) for k in range(8)]
+    drums = np.random.default_rng(5).standard_normal(n).astype(np.float32) * 0.002
+    for a in starts:
+        drums[a:a + len(kick)] += kick
+    write(stems / "drums.wav", drums, peak=None)
+    write(stems / "bass.wav", np.zeros(n, np.float32), peak=None)
+    write(tmp_path / "mix.wav", drums, peak=None)
+    (stems / "separation.json").write_text(json.dumps({"audio": str(tmp_path / "mix.wav")}))
+    hiss = burst(6, 350, 10000, 16000, 1000)
+    (work / "templates").mkdir(parents=True)
+    np.save(work / "templates" / "sound_1.npy", placed(kick, 0.0, 350) + 0.3 * fit(hiss, samples(350)))
+    analysis = {"source": {"stems": str(stems)}, "notes_808": [],
+                "templates": {"sound_1": {"role_guess": "kick", "band": "low",
+                                          "members": [[a, 0, 1.0, 1.0, 1.0] for a in starts]}}}
+    (work / "analysis.json").write_text(json.dumps(analysis))
+    return work
+
+
+def test_kick_sources_only_when_asked(noisy, tmp_path):
+    """match() reads a kick template from drums + bass and the mix only with
+    kick_sources_on: by default matches.json names no source. Here there is
+    no 808 note, so both sources are read as they are."""
+    lib, sounds = noisy
+    work = _kick_work(tmp_path, sounds[-2])
+    out = pipeline.match(work, lib, log=lambda *a: None)["sound_1"]
+    assert out["matched_in_band"] == "kick" and out["top"][0]["path"] == lib.paths[len(sounds) - 2]
+    assert "source" not in out and "kick_source" not in out
+    on = pipeline.match(work, lib, kick_sources_on=True, log=lambda *a: None)["sound_1"]
+    assert on["kick_source"]["808_from"] is None and set(on["kick_source"]["top_ncc"]) == {"drums", "drums+bass",
+                                                                                         "mix"}
