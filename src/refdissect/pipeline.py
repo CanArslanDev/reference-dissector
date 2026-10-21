@@ -35,6 +35,7 @@ from .xcorr import sliding_ncc
 TONAL_STEMS = ("bass", "other", "piano", "vocals", "guitar")
 # library roles grouped into the drum families a Drum Rack is laid out by
 FAMILY = {"clap": "snare", "rim": "snare", "open_hat": "hat", "crash/ride": "hat", "808": "kick"}
+DRUM_FAMILIES = ("kick", "snare", "hat", "perc")  # live.PADS: the families a pad is laid out by
 # kick-band templates are not searched for layers: any sine-like file takes energy off a kick, so the pair
 # search gave 3 of 24 research-beat kicks a layer, none of them true (and found no true one)
 TONAL_LAYERS = "kick band: not searched (any sine-like file takes energy off a kick)"
@@ -316,15 +317,20 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     return [layer], {**evidence, "accepted": True}
 
 
-def _role(top: list[dict], named: Counter, guess: str) -> str:
-    """A template's role: its top match's when that is the same recording
-    (NCC >= 0.95); else the majority of the top five's names when the top
-    match is close (>= 0.75) and three agree; else the energy guess. In a
-    20-beat suite run, 7 hat templates matched to their own hat at NCC
-    0.976-0.997 were called kick (5) or perc (2): the five names split, and
-    the guess hears the kick under the hats."""
-    if top[0]["ncc"] >= 0.95:
-        return FAMILY.get(top[0]["role"], top[0]["role"])
+def _role(top: list[dict], named: Counter, guess: str, b: str) -> str:
+    """A template's role, from its top five matches in band b: the top
+    match's family when it is matched in the snare or hat band at NCC >=
+    0.95 and that family is a drum one (DRUM_FAMILIES); else the majority
+    of the five's names when the top match is close (>= 0.75) and three
+    agree; else the energy guess. In a 20-beat suite run, 7 hat templates
+    matched to their own hat at NCC 0.976-0.997 were called kick (5) or perc
+    (2): the five names split, and the guess hears the kick under the hats.
+    The kick band does not tell recordings apart (an open hat's top match
+    there was an fx file at 0.957, a hat template's a kick at 0.952), and a
+    family that is no drum would be played and scored as a perc."""
+    family = FAMILY.get(top[0]["role"], top[0]["role"])
+    if b in ("snare", "hat") and top[0]["ncc"] >= 0.95 and family in DRUM_FAMILIES:
+        return family
     vote, votes_n = named.most_common(1)[0]
     return vote if top[0]["ncc"] >= 0.75 and votes_n >= 3 else guess
 
@@ -418,7 +424,7 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
         t = windows[name, b]
         top = by_band[name][b][:5]
         named = Counter(FAMILY.get(r["role"], r["role"]) for r in top)
-        role = _role(top, named, info["role_guess"])
+        role = _role(top, named, info["role_guess"], b)
         margin = round(top[0]["ncc"] - top[1]["ncc"], 3) if len(top) > 1 else top[0]["ncc"]
         candidates = {r["path"]: library.candidate(r["i"], len(t), r["semitones"]) for r in top[:3]}
         members = info.get("members") or []

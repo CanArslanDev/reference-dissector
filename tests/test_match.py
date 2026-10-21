@@ -144,19 +144,32 @@ def test_kick_sources_take_the_808_out(tmp_path):
     assert abs(np.argmax(np.abs(np.fft.rfft(up3))) * SR / len(up3) - 46.25 * 2 ** (3 / 12)) < 3
 
 
-def test_a_same_recording_names_the_role():
-    """A hat found at NCC 0.99 is a hat, whatever the other four names say
-    and however the template's energy guessed it; below 0.95 the vote and
-    the guess decide as before."""
+def test_a_close_match_names_the_role_in_the_snare_and_hat_bands():
+    """A hat found at NCC 0.99 in the hat band is a hat, whatever the other
+    four names say and however the template's energy guessed it; below
+    0.95 the vote and the guess decide as before. Not in the kick band, nor
+    for a family that is no drum: an open hat matched there to an fx file
+    at 0.957, with three hats among the five, stays a hat, and a hat
+    template matched to a kick at 0.952, with three percs, a perc."""
     from collections import Counter
+
+    def named(top):
+        return Counter(pipeline.FAMILY.get(r["role"], r["role"]) for r in top)
+
     top = [{"role": "hat", "ncc": 0.994}, {"role": "kick", "ncc": 0.4}, {"role": "perc", "ncc": 0.38},
            {"role": "other", "ncc": 0.37}, {"role": "other", "ncc": 0.35}]
-    named = Counter(pipeline.FAMILY.get(r["role"], r["role"]) for r in top)
-    assert pipeline._role(top, named, "kick") == "hat"
-    assert pipeline._role([{"role": "open_hat", "ncc": 0.97}], Counter({"hat": 1}), "kick") == "hat"
-    assert pipeline._role([dict(top[0], ncc=0.9)] + top[1:], named, "kick") == "kick"
-    votes = Counter({"snare": 3, "hat": 2})
-    assert pipeline._role([{"role": "hat", "ncc": 0.8}], votes, "kick") == "snare"
+    assert pipeline._role(top, named(top), "kick", "hat") == "hat"
+    assert pipeline._role([{"role": "open_hat", "ncc": 0.97}], Counter({"hat": 1}), "kick", "snare") == "hat"
+    assert pipeline._role([dict(top[0], ncc=0.9)] + top[1:], named(top), "kick", "hat") == "kick"
+    assert pipeline._role([{"role": "hat", "ncc": 0.8}], Counter({"snare": 3, "hat": 2}), "kick", "hat") == "snare"
+    fx = [{"role": "fx", "ncc": 0.957}, *({"role": "crash/ride", "ncc": v} for v in (0.885, 0.874, 0.84)),
+          {"role": "fx", "ncc": 0.778}]
+    assert pipeline._role(fx, named(fx), "hat", "kick") == "hat"
+    assert pipeline._role(fx, named(fx), "snare", "hat") == "hat"  # fx is no drum family: the vote decides
+    kick = [{"role": "kick", "ncc": 0.952}, {"role": "perc", "ncc": 0.835}, {"role": "perc", "ncc": 0.826},
+            {"role": "fx", "ncc": 0.799}, {"role": "perc", "ncc": 0.768}]
+    assert pipeline._role(kick, named(kick), "kick", "kick") == "perc"
+    assert pipeline._role(kick, named(kick), "kick", "snare") == "kick"
 
 
 def test_heard_is_detects_matched_filter(noisy):
