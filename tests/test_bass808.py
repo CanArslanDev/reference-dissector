@@ -158,15 +158,16 @@ def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
     """A note found where nothing attacks inside a held note: a legato note
     where the period-by-period pitch has moved a semitone or more; the held
     note going on where it has moved less than 0.75 semitone (a sustain
-    still falling: 60 cents here) or where the note found lasts under
-    80 ms. The slide starts where the pitch leaves the note before for good,
-    not where it first strays (60 ms up a fifth, 60 ms into the note)."""
+    still falling: 60 cents here), where the note found lasts under 80 ms,
+    or where the pitch read is farther from the template than any note's
+    (20 semitones down). The slide starts where the pitch leaves the note before
+    for good, not where it first strays (60 ms up a fifth, 60 ms in)."""
     from refdissect.audio import band
     hz = 32.70
     tpl = B.Template(np.zeros(1), np.zeros(1), [], hz, "qifft_300_600ms", [[0.0, 0.0], [2.0, 0.0]])
     # (where the pitch moves, by how much, the note found's start and end, notes out, the legato note's start)
     cases = ((0.5, -0.6, 0.5, 1.5, 1, None), (0.5, -1.0, 0.5, 1.5, 2, 0.5), (0.5, 5.0, 0.5, 1.5, 2, 0.5),
-             (0.5, 5.0, 0.5, 0.56, 1, None), (0.4, 5.0, 0.55, 1.5, 2, 0.4))
+             (0.5, 5.0, 0.5, 0.56, 1, None), (0.4, 5.0, 0.55, 1.5, 2, 0.4), (0.5, -20.0, 0.5, 1.5, 1, None))
     for at, moved, t, end, notes_out, start in cases:
         f = np.full(int(1.5 * SR), hz)
         f[int(at * SR):] *= 2 ** (moved / 12)
