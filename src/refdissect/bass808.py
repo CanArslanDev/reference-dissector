@@ -63,9 +63,10 @@ VARIANTS = ("drums", "drums|notch", "all")  # the onsets a template is learnt fr
 TIE = 0.015  # templates whose notes explain this close a share of the band are as good a fit
 ATTACKED_NCC = 0.9  # a note whose template fit (attack and drop included) reaches this has an attack
 # legato(): semitones a note found where nothing attacks must have moved from the note before to be a
-# legato note (late in a held note the sustain of the suite's htdemucs stems reads 0.5-0.7 off), and
-# the shortest such note (seconds; 80 ms is 2.6 periods at 33 Hz)
-LEGATO_STEP, LEGATO_SHORTEST = 0.75, 0.08
+# legato note (late in a held note the sustain of the suite's htdemucs stems reads 0.5-0.7 off), the
+# shortest such note (seconds; 80 ms is 2.6 periods at 33 Hz), and how far from the template its pitch
+# may be (semitones: as far as candidates() looks; PIRAMIT's stems gave one at MIDI -7 without it)
+LEGATO_STEP, LEGATO_SHORTEST, LEGATO_REACH = 0.75, 0.08, 12.75
 
 
 # ── Attacks ──
@@ -785,15 +786,16 @@ def _track(lo: np.ndarray, t: float, end: float, near_hz: float, skip_s: float =
 
 def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, kicks: np.ndarray,
            attacked_ncc: float = ATTACKED_NCC, step: float = LEGATO_STEP,
-           shortest: float = LEGATO_SHORTEST) -> list[dict]:
+           shortest: float = LEGATO_SHORTEST, reach: float = LEGATO_REACH) -> list[dict]:
     """Notes found where nothing attacks (no envelope foot within 20 ms, no
     drum attack from 30 ms before to 15 ms after, a template fit under
     attacked_ncc, and no restart of the sample's drop: _restarts) are not
     notes of their own: where the period-by-period pitch has moved from the
-    note before by `step` semitones or more and the note found lasts
-    `shortest` or more, a legato note, starting where that pitch leaves the
-    note before for good (its glide: from, to, t, ms, linear) at the
-    template's nearest semitone; otherwise the note before going on. A
+    note before by `step` semitones or more, to within `reach` of the
+    template, and the note found lasts `shortest` or more, a legato note,
+    starting where that pitch leaves the note before for good (its glide:
+    from, to, t, ms, linear) at the template's nearest semitone; otherwise
+    the note before going on. A
     slide without an attack made segment() explain it with three or four
     short restarts at wrong pitches (glides scenario: 48 truth notes, up to
     130 found).
@@ -820,7 +822,7 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
         t, midi = _track(lo, prev["t"], n["end"], 1.3 * hz)
         later = midi[t >= (n["t"] - prev["t"]) + 0.4 * (n["end"] - n["t"])] if len(t) else midi
         to = float(np.median(later)) if len(later) else n["midi_settled"]
-        if abs(to - prev["midi_settled"]) < step or n["end"] - n["t"] < shortest:
+        if abs(to - prev["midi_settled"]) < step or abs(to - tpl.midi) > reach or n["end"] - n["t"] < shortest:
             prev["end"] = n["end"]
             continue
         to = tpl.midi + round(to - tpl.midi) if abs((to - tpl.midi) - round(to - tpl.midi)) < 0.3 else to
