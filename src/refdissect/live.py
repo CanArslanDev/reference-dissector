@@ -28,7 +28,7 @@ from pathlib import Path
 import mido
 import numpy as np
 
-from .audio import SR, read, rms_db, transpose, trim_onset
+from .audio import PRE, SR, read, rms_db, transpose, trim_onset
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -104,9 +104,12 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
         hits = analysis["events"][name]
+        # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
+        lead = info.get("attack_s", PRE / SR) - PRE / SR
         for e, v in zip(hits, velocities([h["gain"] for h in hits])):
-            drum_notes.append({"pitch": note, "start_time": round(e["t"] * beats_per_second, 4),
-                               "duration": 1.0, "velocity": v})
+            t = e.get("t_attack", e["t"] + lead)
+            drum_notes.append({"pitch": note, "start_time": round(t * beats_per_second, 4), "duration": 1.0,
+                               "velocity": v})
     notes808 = analysis["notes_808"]
     peaks = np.array([n["peak"] for n in notes808]) if notes808 else np.array([1.0])
     med = float(np.median(peaks)) or 1.0
