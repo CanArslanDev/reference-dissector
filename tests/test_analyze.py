@@ -86,5 +86,5 @@ def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypat
     assert grid["tracker"]["name"] == "beat_this" and len(grid["alternatives"]) == 5
     assert grid["drift_ms"] < 10 and grid["tempo_map"] is None
     assert set(grid["swing"]) == {"ratio_16", "ratio_8", "evidence"}
-    # discover() still gets the grid on its onset-strength time base: the same hits
+    # discover() groups onsets by their place in the beat, so a phase on the attacks finds the same hits
     assert {k: len(v) for k, v in a["events"].items()} == {k: len(v) for k, v in stems["old_events"].items()}
