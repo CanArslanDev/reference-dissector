@@ -57,7 +57,7 @@ def calibration(work: Path) -> dict:
     return out
 
 
-SUITE_KEEP = ("schema", "tag", "model", "options", "render", "refdissect", "beats", "last_run")
+SUITE_KEEP = ("schema", "tag", "model", "options", "steps", "reuse", "render", "refdissect", "beats", "last_run")
 SCENARIO_KEEP = ("beats", "seeds", "analysis", "plan", "seconds")
 LOCAL = re.compile(r"/Users/|/home/|/Volumes/|/private/|/tmp/|/Applications/|~/|[A-Za-z]:\\\\|"
                    r"\.(wav|flac|mp3|m4a|ogg|opus|aac|aiff?|mid|midi|npy|npz|als|alc|adg|adv)\b", re.IGNORECASE)
@@ -86,16 +86,16 @@ def plain(value, where: str = "options") -> None:
 
 def suite_scores(root: Path, tag: str) -> dict:
     """results/calibration/suite-<tag>.json from root/scores-<tag>.json: how
-    the run was made (model, seed, shifts, versions, options) and the means
-    per scenario and overall. The run's description must be plain(), and
-    nothing may look like a local path or an audio, MIDI, array or Live
-    file name."""
+    the run was made (model, seed, shifts, versions, options, the steps run
+    and the tag the others were reused from) and the means per scenario and
+    overall. The run's description must be plain(), and nothing may look
+    like a local path or an audio, MIDI, array or Live file name."""
     agg = json.loads((root / f"scores-{tag}.json").read_text(encoding="utf-8"))
     sep = agg.get("separation") or {}
     out = {k: agg.get(k) for k in SUITE_KEEP}
     out["separation"] = {k: sep.get(k) for k in ("model", "seed", "shifts", "devices", "versions")}
     out["failed"] = len(agg.get("failed") or [])
-    for key in ("tag", "model", "options", "render", "refdissect", "separation"):
+    for key in ("tag", "model", "options", "steps", "reuse", "render", "refdissect", "separation"):
         plain(out[key], key)
     out["scenarios"] = {name: {k: v[k] for k in SCENARIO_KEEP} for name, v in agg["scenarios"].items()}
     out["overall"] = agg["overall"]
