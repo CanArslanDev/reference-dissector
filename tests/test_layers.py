@@ -226,3 +226,14 @@ def test_explain_reports_what_it_decided(sounds):
     assert "hat" in info["purified"]["snare"]  # the snare's template holds the hat on every snare
     assert info["tonal"] == ["kick"] and set(info["usual_gain"]) == {"hat", "kick", "snare"}
     assert layers.SEMITONES and info["pitched"]["hat"] < layers.SHARP
+
+
+def test_silence_and_a_lone_template(sounds):
+    """Nothing to find in silence, and one template finds its own hits."""
+    hits = [("snare", 0.3 + 0.4 * k, 0.8) for k in range(10)]
+    x = render(sounds, hits, 5.0)
+    snare = oracle(x, hits, "snare", "snare")
+    assert explain(np.zeros(SR * 3, np.float32), [snare]) == {"snare": []}
+    assert layers.explain(x, [], {}, {}).events == {}
+    events, times = explain(x, [snare]), [t for _, t, _ in hits]
+    assert found(events, "snare", times).all() and extra(events, "snare", times) == 0

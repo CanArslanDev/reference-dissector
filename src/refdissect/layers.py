@@ -167,10 +167,11 @@ class Kit:
         """Inner product of the stem with each placed column."""
         out = np.zeros(len(p))
         for c in np.unique(col):
-            idx = np.flatnonzero(col == c)
             data = self.columns[c].data
-            win = self.y[:, p[idx, None] + np.arange(data.shape[1])]  # (bands, hits, n)
-            out[idx] = np.einsum("bhn,bn->h", win, data, dtype=np.float64)
+            every = np.flatnonzero(col == c)
+            for idx in np.array_split(every, max(1, len(every) // 512)):  # (bands, hits, n) windows: 512 at a time
+                win = self.y[:, p[idx, None] + np.arange(data.shape[1])]
+                out[idx] = np.einsum("bhn,bn->h", win, data, dtype=np.float64)
         return out
 
     def energy(self, c: int) -> float:
@@ -448,15 +449,15 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
 
 def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int],
                kind: list[bool]) -> dict[int, tuple[int, int]]:
-    """Columns of one kind (kind: tonal or not) that keep losing their hits
-    to each other (DUPLICATE of the fewer's hits found twice; a kick+hat
+    """Columns of one kind (kind: tonal or not; None, never merged) that
+    keep losing their hits to each other (DUPLICATE of the fewer's hits found twice; a kick+hat
     template and a hat template share the hat, not the kind): {merged:
     (into, offset)} with p_into = p_merged + offset, into the one earlier in
     first."""
     count: dict[tuple[int, int], list[int]] = {}
     for i, j in pairs:
         a, b = int(cands.col[i]), int(cands.col[j])
-        if a != b and kind[a] == kind[b]:
+        if a != b and kind[a] is not None and kind[a] == kind[b]:
             key = (min(a, b), max(a, b))
             count.setdefault(key, []).append(int(cands.p[j] - cands.p[i]) if a == key[0] else
                                              int(cands.p[i] - cands.p[j]))
@@ -587,8 +588,8 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
     for _ in range(3):
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
-        dup = {a: v for a, v in duplicates(cands, pairs, order, [c.template in tones for c in columns]).items()
-               if not columns[a].semitones}
+        kind = [None if c.semitones else c.template in tones for c in columns]  # pitched copies are never merged
+        dup = duplicates(cands, pairs, order, kind)
         if not dup:
             break
         for a, (b, off) in dup.items():
@@ -651,13 +652,13 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
         keep, _ = distinct(kit, joined, lg)
         mask = np.zeros(len(joined), bool)
         mask[keep] = True
-        cands = joined.take(mask | np.array([s != "layer" for s in joined.source]))
+        cands = joined.take(mask | np.array([s != "layer" for s in joined.source], dtype=bool))
     gains, _ = fit(kit, cands)
     low = {c for c, col in enumerate(columns) if templates[col.template].band == "low"}
     cands = cands.take(_tails(cands, gains, low) & (gains > 0))
     for _ in range(2):  # 5. what still passes once everything is fit together
         gains, _ = fit(kit, cands)
-        layer = np.array([s == "layer" for s in cands.source])
+        layer = np.array([s == "layer" for s in cands.source], dtype=bool)
         clear = cands.ncc >= thr[cands.col]
         floor = np.where(layer & ~clear, LAYER_GAIN, min_gain) * usual[cands.col]
         if np.all(gains >= floor):
