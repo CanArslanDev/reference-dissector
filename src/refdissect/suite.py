@@ -367,6 +367,8 @@ def _rhythm(r: dict) -> dict:
         out["rhythm.downbeat_error_ms_abs"] = abs(r["downbeat"]["first_error_ms"])
         if "f" in r["downbeat"]:
             out["rhythm.downbeat_f"] = r["downbeat"]["f"]
+        if "unsure" in r["downbeat"]:
+            out["rhythm.downbeat_unsure"] = float(r["downbeat"]["unsure"])
     if "beat_f" in r:
         out["rhythm.beat_f"] = r["beat_f"]
     if (r.get("swing") or {}).get("ratio_error") is not None:

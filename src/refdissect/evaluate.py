@@ -30,6 +30,7 @@ from . import __version__
 from . import scenarios as S
 from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples
 from .calibrate import _f1
+from .grid import BAR_SLACK
 from .render import as_played, fader_db, pad_settings, pitch_808, resolve, settings_808, velocity_gain
 
 SCHEMA = "refdissect.events/1"
@@ -162,11 +163,50 @@ def _drum_role(role: str | None) -> str:
     return role if role in DRUM_ROLES else "perc"
 
 
-def _grid_time(bpm: float, first: float, beats_per_bar: int, end: float) -> dict:
-    beats = np.arange(first, max(end, first + 1e-9), 60 / bpm)
-    return {"bpm": bpm, "beats_per_bar": beats_per_bar, "beat_unit": 4, "downbeat_s": round(first, 5),
-            "beats_s": np.round(beats, 5).tolist(), "downbeats_s": np.round(beats[::beats_per_bar], 5).tolist(),
-            "swing": None, "tempo_map": None}
+def _map_offsets(lines: np.ndarray, bpm: float, first: float, tempo_map) -> np.ndarray:
+    """Where a tempo map (grid.drift: the grid's quarter-note lines from its
+    first, moved where the beats drift) puts each line, less the line;
+    interpolated between its beats and held beyond them."""
+    if not tempo_map:
+        return np.zeros(len(lines))
+    m, q = np.asarray(tempo_map, dtype=float), 60 / bpm
+    own = first + (np.round((m[0] - first) / q) + np.arange(len(m))) * q  # consecutive lines, as drift lists them
+    return np.interp(lines, own, m - own)
+
+
+def _grid_time(bpm: float, first: float, beats_per_bar: int, end: float, beat_unit: int = 4,
+               swing: dict | None = None, tempo_map=None, flags=()) -> dict:
+    """A grid as an events time block: beats of the meter's unit (bpm counts
+    quarter notes, so an eighth in 6/8) on the lines through `first`, the
+    first bar line, up to `end`, a bar line every beats_per_bar of them. The
+    beats start at the earliest line at or after -BAR_SLACK: a pickup before
+    the first bar line is beats too (as Grid.bar_of counts the bars). With a
+    tempo map, every line moves by its offset there."""
+    beat = 60 / bpm * 4 / beat_unit
+    k = np.arange(np.ceil((-BAR_SLACK - first) / beat), max(np.ceil((end - first) / beat), 1))
+    lines = first + k * beat
+    lines = lines + _map_offsets(lines, bpm, first, tempo_map)
+    down = lines[k % beats_per_bar == 0]
+    return {"bpm": bpm, "beats_per_bar": beats_per_bar, "beat_unit": beat_unit,
+            "downbeat_s": round(float(lines[k == 0][0]) if (k == 0).any() else first, 5),
+            "beats_s": np.round(lines, 5).tolist(), "downbeats_s": np.round(down, 5).tolist(), "swing": swing,
+            "tempo_map": tempo_map or None, "flags": list(flags)}
+
+
+def _analysis_time(g: dict, end: float) -> dict:
+    """The analysis grid (grid.estimate) as an events time block: its tempo,
+    meter and first bar line (phase), its tempo map where the beats drift,
+    the swing from the hats' attacks at the finer level it read (ratio_16 if
+    it has one, else ratio_8: grid.swing leaves ratio_16 out when the 8ths
+    swing), and "downbeat_unsure" when the bar line is a guess: no tracker
+    (phase is fit_grid's first grid beat) or a vote it calls ambiguous."""
+    sw = g.get("swing") or {}
+    swing = ({"ratio": sw["ratio_16"], "level": 16} if sw.get("ratio_16") is not None
+             else {"ratio": sw["ratio_8"], "level": 8} if sw.get("ratio_8") is not None else None)
+    down = g.get("downbeat")
+    flags = ["downbeat_unsure"] if not down or down.get("ambiguous") else []
+    return _grid_time(g["bpm"], g["phase"], int(g.get("beats_per_bar", 4)), end, int(g.get("beat_unit", 4)), swing,
+                      g.get("tempo_map"), flags)
 
 
 def _with_kick(bass: list[dict], drums: list[dict], window: float = 0.02) -> None:
@@ -207,9 +247,10 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     808 before it, the band puts it back where the snare starts (calibration
     snares: 21-24 ms early by the full band, -0.6 to +1.8 ms by the snare
     band, 12 analyses). 808: notes_808 (t, end, midi_float; t is an onset
-    backtracked in the 808 band, taken as the attack). Rhythm: the grid, its
-    first beat taken as a bar line, as Grid does. Melodic notes and chords:
-    melodic.json when it exists."""
+    backtracked in the 808 band, taken as the attack). Rhythm: the grid as
+    grid.estimate left it (_analysis_time): tempo, meter, first bar line,
+    swing and tempo map. Melodic notes and chords: melodic.json when it
+    exists."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
@@ -236,10 +277,10 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     drums.sort(key=lambda e: e["t_attack"])
     _with_kick(bass, drums)
     notes, chords = _melodic(work / "melodic.json")
-    g, duration = analysis["grid"], analysis["source"]["duration_s"]
+    duration = analysis["source"]["duration_s"]
     return _events(scenario or work.name, {"from": "analysis", "work": str(work)},
                    audio={"sr": SR, "n_samples": int(round(duration * SR))},
-                   time=_grid_time(g["bpm"], g["phase"], g.get("beats_per_bar", 4), duration),
+                   time=_analysis_time(analysis["grid"], duration),
                    sounds=sounds, drums=drums, bass808=bass, notes=notes, chords=chords)
 
 
@@ -618,9 +659,10 @@ def _f_beats(ref: list[float], est: list[float], span: tuple[float, float]) -> f
 
 def rhythm_scores(truth: dict, est: dict) -> dict | None:
     """Tempo (relative error and octave class), meter, the first downbeat's
-    error modulo one bar (beats_per_bar of the truth's beats, _beat_s) and
-    the downbeat F-measure when the estimate has downbeats, the beat
-    F-measure when both have beats, and swing when either has it."""
+    error modulo one bar (beats_per_bar of the truth's beats, _beat_s), with
+    whether the estimate flagged its bar line as unsure, and the downbeat
+    F-measure when the estimate has downbeats, the beat F-measure when both
+    have beats, and swing when either has it."""
     tt, et = truth.get("time") or {}, est.get("time") or {}
     if not tt.get("bpm") or not et:
         return None
@@ -638,7 +680,8 @@ def rhythm_scores(truth: dict, est: dict) -> dict | None:
     if first_t is not None and first_e is not None:
         bar = meters[0][0] * beat
         d = (first_e - first_t + bar / 2) % bar - bar / 2
-        out["downbeat"] = {"first_error_ms": round(d * 1000, 2), "first_error_beats": round(d / beat, 3)}
+        out["downbeat"] = {"first_error_ms": round(d * 1000, 2), "first_error_beats": round(d / beat, 3),
+                           "unsure": "downbeat_unsure" in (et.get("flags") or [])}
         if tt.get("downbeats_s") and et.get("downbeats_s"):
             out["downbeat"]["f"] = _f_beats(tt["downbeats_s"], et["downbeats_s"], span)
     if tt.get("beats_s") and et.get("beats_s"):
