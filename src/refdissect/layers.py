@@ -69,7 +69,11 @@ DUPLICATE = 0.5  # share of a template's hits that are another's found twice: on
 TONAL = (0.25, 0.5)  # a template with this share in the kick band, ringing this much, is a tone
 SHARP = 0.5  # NCC with its copy 1 semitone off under which a template is noisy enough for pitched copies
 SEMITONES = (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5)
-LAG_MS = (-10, 30)  # where a held template may sit in the one holding it
+# Where a held template may sit in the one holding it. Either window may start
+# first: on the conftest beat discover()'s hat template starts 23 ms before
+# its hats' attack, so the hat sits at -23 ms in the snare; suite holds run
+# from -8 to +29 ms
+LAG_MS = (-30, 30)
 PAIR_MS, PAIR_MIN = 40, 5  # co-detections that give a pair offset
 SEARCH_MS, ONSET_MS = 3, 6  # how far a probe looks, around a predicted window start and around an onset
 SAME_MS = 15  # a probe where the template already plays is not a new hit

@@ -140,19 +140,20 @@ def test_64th_hat_rolls(sounds):
     templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
     events = explain(x, templates)
     hats = [t for n, t, _ in hits if n == "hat"]
-    assert found(events, "hat", hats).mean() >= 0.95  # 35 ms apart at least: 0.25 of a 64th roll
+    assert found(events, "hat", hats).mean() >= 0.95  # hits 35 ms apart, as detect() kept them: 0.25
     assert extra(events, "hat", hats) <= 2
 
 
 def test_a_pitched_hat_roll(sounds):
-    """32nds climbing 1 to 5 semitones, the hat as Simpler transposes it."""
-    sounds = {**sounds, **{f"hat{st:+d}": transpose(sounds["hat"], st) for st in range(1, 6)}}
+    """32nds climbing 1 to 4 semitones, two at each, the hat as Simpler
+    transposes it."""
+    sounds = {**sounds, **{f"hat{st:+d}": transpose(sounds["hat"], st) for st in range(1, 5)}}
     hits = []
     for b in range(12):
         o = 0.05 + b * 16 * STEP
         hits += [("kick", o, 0.9), ("snare", o + 4 * STEP, 0.8), ("kick", o + 8 * STEP, 0.9)]
         hits += [("hat", o + s * STEP, 0.35) for s in range(0, 12, 2)]
-        hits += [(f"hat{1 + i // 2:+d}", o + 12 * STEP + i * STEP / 2, 0.3) for i in range(8) if i // 2 < 5]
+        hits += [(f"hat{1 + i // 2:+d}", o + 12 * STEP + i * STEP / 2, 0.3) for i in range(8)]
     x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
     templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
     events = explain(x, templates)
@@ -165,16 +166,52 @@ def test_a_pitched_hat_roll(sounds):
     assert extra(plain, "hat", [t for n, t, _ in hits if n == "hat"]) == 0
 
 
-def test_no_layers_on_plain_hits(beat):
-    """The conftest beat (nothing plays under anything but the hats on the
-    kicks): every hit found, nothing added under another sound."""
+def identify(events: list[dict], truth: dict) -> tuple[str, float, np.ndarray]:
+    """The truth sound a template's hits play, the template's offset from it
+    (s, a discovered window need not start PRE before the attack) and which
+    hits sit at that offset (3 ms): the sound with the most such hits, then
+    the smallest offset."""
+    t = np.array([e["t"] for e in events])
+    best = None
+    for name, times in truth.items():
+        times = np.asarray(times)
+        d = np.array([times[np.argmin(np.abs(times - u))] - u for u in t])
+        off = float(np.median(d))
+        at = np.abs(d - off) <= 0.003
+        if best is None or (at.sum(), -abs(off)) > (best[2].sum(), -abs(best[1])):
+            best = (name, off, at)
+    return best
+
+
+def discovered(beat: dict) -> list[Template]:
     from refdissect.detect import discover
     from refdissect.grid import fit_grid
-    templates = discover(beat["audio"], fit_grid(beat["audio"], (100, 180))[0])
-    events = detect(beat["audio"], templates)
-    added = [e for evs in events.values() for e in evs if e["source"] == "layer"]
-    truth = np.sort(np.concatenate([np.array(v) for v in beat["truth"].values()]))
-    assert all(np.min(np.abs(truth - e["t"])) < 0.005 for e in added)
+    return discover(beat["audio"], fit_grid(beat["audio"], (100, 180))[0])
+
+
+def test_the_conftest_beat_with_discovered_templates(beat):
+    """The conftest beat (a hat on every eighth, under the 20 snares and the
+    40 kicks too) with discover()'s templates, as the pipeline runs: every
+    hit found once, the hat under each snare as a layer under it, and every
+    layer hit on a hit of its own template's sound. The hat template starts
+    23 ms before its hats' attack, so the hat sits at -23 ms in the snare:
+    held lags of -10..30 ms found 0 of the 20."""
+    found_ = detect(beat["audio"], discovered(beat))
+    heard = {name: identify(evs, beat["truth"]) for name, evs in found_.items() if evs}
+    for sound, times in beat["truth"].items():
+        mine = [name for name, (s, _, _) in heard.items() if s == sound]
+        hits = sum(int(heard[name][2].sum()) for name in mine)
+        extra_ = sum(len(found_[name]) - int(heard[name][2].sum()) for name in mine)
+        assert hits == len(times) and extra_ == 0, sound  # 160 hats, 40 kicks, 20 snares
+    hat = next(name for name, (s, _, _) in heard.items() if s == "hat")
+    off = heard[hat][1]
+    snares = np.array(beat["truth"]["snare"])
+    under = [e for e in found_[hat] if np.min(np.abs(snares - (e["t"] + off))) < 0.003]
+    assert len(under) == 20 and all(e["source"] == "layer" for e in under)
+    for name, evs in found_.items():
+        if any(e["source"] == "layer" for e in evs):
+            at = heard[name][2]
+            assert all(ok for e, ok in zip(evs, at) if e["source"] == "layer"), name
 
 
 def test_one_hit_per_strike_of_a_ringing_sound(sounds):
