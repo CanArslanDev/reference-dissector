@@ -183,6 +183,70 @@ def test_a_6_8_bar_is_six_eighths_at_a_quarter_note_tempo():
     assert r["meter"] == {"truth": [6, 8], "est": [6, 8], "equal": True} and r["tempo"]["octave"] == "x1"
 
 
+def analysis_grid(**over):
+    """An analysis.json grid as grid.estimate writes it (the keys scoring reads)."""
+    return {"bpm": 136.0, "phase": 0.4, "beats_per_bar": 4, "beat_unit": 4, "tempo_map": None,
+            "swing": {"ratio_16": 0.55, "ratio_8": None}, "downbeat": {"downbeats": 16, "ambiguous": False}} | over
+
+
+def test_the_analysis_grid_scores_every_rhythm_number():
+    """A grid read right (the full scenario's: first bar line at 0.4 s, 16ths
+    swung 54 %, read 55 %) scores each rhythm number as right: the bars count
+    from its first bar line, and the beat 41 ms before the audio is a pickup
+    (within BAR_SLACK, as Grid.bar_of counts)."""
+    from refdissect.suite import headline
+    t = events("truth", time={**grid(136.0, 0.4, 16), "swing": {"ratio": 0.54, "level": 16}})
+    tm = evaluate._analysis_time(analysis_grid(), 30.0)
+    assert tm["beats_s"][:3] == [-0.04118, 0.4, 0.84118] and tm["downbeat_s"] == 0.4
+    assert tm["downbeats_s"][:2] == pytest.approx([0.4, 0.4 + 240 / 136], abs=1e-5)
+    s = score(t, events("estimate", time=tm))
+    r = s["rhythm"]
+    assert (r["tempo"]["octave"], r["meter"]["equal"], r["downbeat"], r["beat_f"]) == (
+        "x1", True, {"first_error_ms": 0.0, "first_error_beats": 0.0, "unsure": False, "f": 1.0}, 1.0)
+    assert r["swing"]["ratio_error"] == pytest.approx(0.01) and r["swing"]["level_equal"]
+    assert {k: v for k, v in headline(s).items() if k.startswith("rhythm.")} == {
+        "rhythm.meter_equal": 1.0, "rhythm.octave_x1": 1.0, "rhythm.tempo_error_abs": 0.0,
+        "rhythm.downbeat_error_ms_abs": 0.0, "rhythm.downbeat_f": 1.0, "rhythm.downbeat_unsure": 0.0,
+        "rhythm.beat_f": 1.0, "rhythm.swing_ratio_error": pytest.approx(0.01)}
+
+
+def test_the_analysis_grid_in_6_8_with_a_pickup():
+    """6/8 at 136 BPM, first bar line 0.9 s in: beats are eighths (0.22 s),
+    the four before the bar line are beats too (a pickup), and bars are six
+    of them (1.32 s)."""
+    eighth = 30 / 136
+    tm = evaluate._analysis_time(analysis_grid(phase=0.9, beats_per_bar=6, beat_unit=8), 6.0)
+    assert tm["beats_s"][:5] == pytest.approx([0.9 - 4 * eighth, 0.9 - 3 * eighth, 0.9 - 2 * eighth,
+                                               0.9 - eighth, 0.9], abs=1e-5)
+    assert tm["downbeats_s"] == pytest.approx([0.9 + 6 * eighth * k for k in range(4)], abs=1e-5)
+    assert (tm["downbeat_s"], tm["beats_per_bar"], tm["beat_unit"]) == (0.9, 6, 8)
+    t = events("truth", time={**grid(272.0, 0.9, 4, 6), "bpm": 136.0, "beat_unit": 8})
+    r = evaluate.rhythm_scores(t, events("estimate", time=tm))
+    assert r["meter"]["equal"] and r["downbeat"]["first_error_ms"] == 0.0 and r["beat_f"] == 1.0
+
+
+def test_the_analysis_grid_swing_flags_and_tempo_map():
+    """Swing at the finer level read (16ths, else 8ths); a bar line without
+    a tracker, or one its vote calls ambiguous, is flagged; a tempo map moves
+    each beat by its offset there (an eighth halfway between two of its
+    quarter notes)."""
+    def time(**over):
+        return evaluate._analysis_time(analysis_grid(**over), 8.0)
+    assert time()["swing"] == {"ratio": 0.55, "level": 16} and time()["flags"] == []
+    assert time(swing={"ratio_16": None, "ratio_8": 0.62})["swing"] == {"ratio": 0.62, "level": 8}
+    assert time(swing={"ratio_16": None, "ratio_8": None})["swing"] is None
+    assert time(downbeat=None)["flags"] == time(downbeat={"ambiguous": True})["flags"] == ["downbeat_unsure"]
+    q = 60 / 136
+    lines = 0.4 + np.arange(16) * q
+    tempo_map = (lines + np.linspace(0.0, 0.03, 16)).round(4).tolist()  # 30 ms ahead by the end
+    moved, still = time(tempo_map=tempo_map)["beats_s"], time()["beats_s"]
+    assert moved[1:17] == pytest.approx(tempo_map, abs=1e-5) and moved[0] == still[0]  # the pickup: before the map
+    assert moved[-1] == pytest.approx(still[-1] + 0.03, abs=1e-4)  # held after it (the map is in 0.1 ms)
+    eighths = time(tempo_map=tempo_map, beats_per_bar=6, beat_unit=8)["beats_s"]
+    j = eighths.index(0.4)
+    assert eighths[j + 1] == pytest.approx((tempo_map[0] + tempo_map[1]) / 2, abs=1e-5)
+
+
 def test_validate_names_the_problems():
     assert validate(truth()) is not None
     bad = truth() | {"schema": "other"}
