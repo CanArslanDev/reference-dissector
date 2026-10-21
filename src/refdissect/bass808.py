@@ -20,7 +20,10 @@ operation Simpler performs:
    per note. A kick inside a note, or the ripple of a distorted low tone,
    would have to explain the note's sustain with the template's attack and
    drop, and loses to the note going on;
-5. refine(): each note's transposition to the cent over up to 300 ms.
+5. refine(): each note's transposition to the cent over up to 300 ms;
+6. legato(): a note found where nothing attacks is the note before going
+   on, or, where the pitch has moved to another semitone, a legato note
+   that slides there from the note before.
 
 The template is learnt twice (from the re-attacks, then from the notes
 found) from three sets of onsets: those with a drum attack, those with a
@@ -32,8 +35,9 @@ template learnt from such dips misses the attack, and every note comes out
 before them, the template is learnt again that much earlier.
 
 transcribe() returns what bass808.json holds; project() turns it into
-analysis.json's notes_808 (t, end, pitch, midi_float, slide, peak, cents),
-so structure, groove and make_plan read it as before.
+analysis.json's notes_808 (t, t_attack, end, pitch, midi_float,
+midi_settled, cents, slide, peak, glide, flags), so structure, groove and
+make_plan read it as before.
 """
 
 from __future__ import annotations
@@ -58,6 +62,10 @@ DRUM_RISE_DB = 6.0  # the drum stem's low band rising this much marks a kick (an
 VARIANTS = ("drums", "drums|notch", "all")  # the onsets a template is learnt from, tried in turn
 TIE = 0.015  # templates whose notes explain this close a share of the band are as good a fit
 ATTACKED_NCC = 0.9  # a note whose template fit (attack and drop included) reaches this has an attack
+# legato(): semitones a note found where nothing attacks must have moved from the note before to be a
+# legato note (late in a held note the sustain of the suite's htdemucs stems reads 0.5-0.7 off), and
+# the shortest such note (seconds; 80 ms is 2.6 periods at 33 Hz)
+LEGATO_STEP, LEGATO_SHORTEST = 0.75, 0.08
 
 
 # ── Attacks ──
@@ -776,17 +784,29 @@ def _track(lo: np.ndarray, t: float, end: float, near_hz: float, skip_s: float =
 
 
 def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, kicks: np.ndarray,
-           attacked_ncc: float = ATTACKED_NCC, step: float = 0.5) -> list[dict]:
+           attacked_ncc: float = ATTACKED_NCC, step: float = LEGATO_STEP,
+           shortest: float = LEGATO_SHORTEST) -> list[dict]:
     """Notes found where nothing attacks (no envelope foot within 20 ms, no
     drum attack from 30 ms before to 15 ms after, a template fit under
     attacked_ncc, and no restart of the sample's drop: _restarts) are not
     notes of their own: where the period-by-period pitch has moved from the
-    note before by `step` semitones or more, a legato note, starting where
-    that pitch leaves the note before (its glide: from, to, t, ms, linear)
-    at the template's nearest semitone; otherwise the note before going on.
-    A slide without an attack made segment() explain it with three or four
+    note before by `step` semitones or more and the note found lasts
+    `shortest` or more, a legato note, starting where that pitch leaves the
+    note before for good (its glide: from, to, t, ms, linear) at the
+    template's nearest semitone; otherwise the note before going on. A
+    slide without an attack made segment() explain it with three or four
     short restarts at wrong pitches (glides scenario: 48 truth notes, up to
-    130 found)."""
+    130 found).
+
+    For good: the last run of periods before the note found that sit 0.3
+    semitone or more past the note before (its own drop included), towards
+    the new pitch. The first such period was often the note's own drop
+    misread (tempo160-1, v1-1: slides 58-61 ms in, gliding 400 ms to a note
+    that attacks 280 ms later). On the suite's 24 lane beats (htdemucs, the
+    step's inputs replayed), half a semitone, no shortest and the first
+    period gave note F1@50 0.882; 0.75 semitone 0.893, 80 ms 0.897, the
+    start for good 0.914 (no slide in the note before's first 100-150 ms
+    instead: 0.901-0.905, and a slide one 16th into a note is lost)."""
     out: list[dict] = []
     for n in notes:
         if not out or _attacked(n, feet, kicks, attacked_ncc) or _restarts(lo, tpl, n):
@@ -800,14 +820,19 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
         t, midi = _track(lo, prev["t"], n["end"], 1.3 * hz)
         later = midi[t >= (n["t"] - prev["t"]) + 0.4 * (n["end"] - n["t"])] if len(t) else midi
         to = float(np.median(later)) if len(later) else n["midi_settled"]
-        if abs(to - prev["midi_settled"]) < step:
+        if abs(to - prev["midi_settled"]) < step or n["end"] - n["t"] < shortest:
             prev["end"] = n["end"]
             continue
         to = tpl.midi + round(to - tpl.midi) if abs((to - tpl.midi) - round(to - tpl.midi)) < 0.3 else to
         towards = np.sign(to - prev["midi_settled"])
         own = prev["midi_settled"] + (0.0 if "legato" in prev["flags"] else _drop(tpl, prev, t))  # its own drop
-        moved = np.flatnonzero((t < n["t"] - prev["t"]) & (towards * (midi - own) > 0.3))
-        start = prev["t"] + float(t[moved[0]]) if len(moved) else n["t"]
+        moved = towards * (midi - own) > 0.3
+        before = np.flatnonzero(t < n["t"] - prev["t"])
+        if len(before) and moved[before[-1]]:  # back from the note found while the pitch stays moved
+            back = np.flatnonzero(~moved[before])
+            start = prev["t"] + float(t[before[back[-1] + 1] if len(back) else before[0]])
+        else:
+            start = n["t"]
         there = np.flatnonzero((t >= start - prev["t"]) & (np.abs(midi - to) < 0.3))
         ms = float(np.clip(1000 * ((prev["t"] + t[there[0]] if len(there) else n["t"]) - start), 20, 400))
         prev["end"] = round(start, 5)
