@@ -178,16 +178,25 @@ def places(t: np.ndarray, grid: Grid, width_ms: float = 12.0, min_hits: int = 3)
     return out
 
 
-def found_by(x: np.ndarray, audio: np.ndarray, band_name: str, attack: int,
-             min_gain: float = 0.25) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def found_by(x: np.ndarray, audio: np.ndarray, band_name: str, attack: int, min_gain: float = 0.25,
+             tail_ms: float = 100) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """What a detection template finds over the whole stem, as detect()
     finds it: (start times in s, gains, NCC), hits far below the usual gain
-    left out."""
+    left out, and those within tail_ms after a hit of twice their level:
+    the same hit ringing on, or found again where the template's own later
+    part lines up with it."""
     score, gain = sliding_ncc(x, audio, band_name)
     p, props = find_peaks(score, height=THRESHOLD[band_name], distance=samples(MIN_GAP_MS[band_name]))
     g, h = gain[p], props["peak_heights"]
     keep = g >= min_gain * np.median(g) if len(g) else np.zeros(0, bool)
-    return (p[keep] + attack) / SR, g[keep], h[keep]
+    t, g, h = (p[keep] + attack) / SR, g[keep], h[keep]
+    tail = np.zeros(len(t), bool)
+    last = 0
+    for i in range(1, len(t)):
+        tail[i] = t[i] - t[last] < tail_ms / 1000 and g[i] < 0.5 * g[last]
+        if not tail[i]:
+            last = i
+    return t[~tail], g[~tail], h[~tail]
 
 
 def candidate(x: np.ndarray, g: Group, band_name: str, found: str = "grid", median: bool = False) -> Candidate:
@@ -251,19 +260,21 @@ def likeness(a: Candidate, b: Candidate) -> dict:
 
 def explains(L: dict) -> bool:
     """Whether likeness() says b holds a's sound on the hits they share: the
-    gains move together (r >= 0.6); or in a's role's band b's template has
-    a's shape (NCC >= 0.6) at a's level or louder (within 6 dB), and either
-    the two find each other's hits (cover >= 0.8 both ways), or they guess
-    the same role and b holds a's level in the band a was found in too.
-    A kick under some of the hats is not held by the hat: the hat templates
-    of v1 beats held it 5.9-10.9 dB down in the low band (2.9 dB on a slow
-    beat where htdemucs had left little of the kick's body in the drum
-    stem), but each guessed its own role and the kick was on a third of the
-    hats or less. A crash on every kick it plays with guesses kick too, and
-    the kick holds its low band, but not the crash in the hat band it was
-    found in. Views of one hit found in the low band hold its top 14 dB
-    down (low-band onsets line the hits up too loosely for it)."""
-    if L["r"] is not None and L["r"] >= 0.6:
+    gains move together (r >= 0.8, or 0.6 when the two guess the same
+    role); or in a's role's band b's template has a's shape (NCC >= 0.6) at
+    a's level or louder (within 6 dB), and either the two find each other's
+    hits (cover >= 0.8 both ways), or they guess the same role and b holds
+    a's level in the band a was found in too. A kick under some of the hats
+    is not held by the hat: the hat templates of v1 beats held it 5.9-10.9
+    dB down in the low band (2.9 dB on a slow beat where htdemucs had left
+    little of the kick's body in the drum stem), each guessed its own role,
+    and the kick was on a third of the hats or less; their gains on the 15
+    hits they shared on a 95 BPM beat still went together at r = 0.66. A
+    crash on every kick it plays with guesses kick too, and the kick holds
+    its low band, but not the crash in the hat band it was found in. Views
+    of one hit found in the low band hold its top 14 dB down (low-band
+    onsets line the hits up too loosely for it)."""
+    if L["r"] is not None and L["r"] >= (0.6 if L["same_role"] else 0.8):
         return True
     if L["alike"] < 0.6 or L["level_db"] < -6.0:
         return False
@@ -333,16 +344,18 @@ def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float
 def one_per_sound(cands: list[Candidate], kept: list[Candidate] | None = None, alone: float = 0.6,
                   share: float = 0.8, view: float = 0.3, min_new: int = 3) -> list[Candidate]:
     """The candidates that are sounds of their own, those with more clean
-    hits (NCC >= 0.8) first. One the kept ones already hold is left out: a
-    kept one that explains it (holder) holds `alone` of its hits, or kept
-    ones find `share` of them and one of those explains it (a template of a
-    kick and the hat on it, found in the snare band, has the kick's hits and
-    some of the hat's). One that its holder explains on `view` of its hits
-    but that finds min_new hits nobody else does is kept as a view of the
-    same sound (view_of: the kick in the hat band, where the low band missed
-    it under an 808)."""
+    hits (NCC >= 0.8), at a larger share of their hits, first (clean hits
+    squared over hits: 17 clean of 32 come after 16 of 16, where the 16
+    other hits were a low band's guesses). One the kept ones already hold is
+    left out: a kept one that explains it (holder) holds `alone` of its
+    hits, or kept ones find `share` of them and one of those explains it (a
+    template of a kick and the hat on it, found in the snare band, has the
+    kick's hits and some of the hat's). One that its holder explains on
+    `view` of its hits but that finds min_new hits nobody else does is kept
+    as a view of the same sound (view_of: the kick in the hat band, where
+    the low band missed it under an 808)."""
     kept = list(kept or [])
-    for c in sorted(cands, key=lambda c: (-int(np.sum(c.ncc >= 0.8)), -float(np.median(c.ncc)), -len(c.times))):
+    for c in sorted(cands, key=lambda c: (-np.sum(c.ncc >= 0.8) ** 2 / max(1, len(c.ncc)), -float(np.median(c.ncc)))):
         k, held, covered = holder(c, kept)
         if held >= alone or (k is not None and covered >= share):
             continue
@@ -350,6 +363,43 @@ def one_per_sound(cands: list[Candidate], kept: list[Candidate] | None = None, a
             c.view_of = k.view_of or k
         kept.append(c)
     return kept
+
+
+def locked(a: Candidate, b: Candidate, share: float = 0.8, spread_ms: float = 2.0) -> bool:
+    """Whether a's hits come at one lag, 15-60 ms, after b's: share of a's
+    hits within spread_ms of it, and share of b's hits followed there."""
+    if len(a.times) < 3 or len(b.times) < 3:
+        return False
+    j = np.searchsorted(b.times, a.times - SAME_MS / 1000) - 1
+    lag = np.where(j >= 0, a.times - b.times[np.maximum(j, 0)], np.inf)
+    near = (lag >= SAME_MS / 1000) & (lag <= 0.06)
+    if near.mean() < share:
+        return False
+    at = float(np.median(lag[near]))
+    return (np.mean(np.abs(lag - at) <= spread_ms / 1000) >= share
+            and len(pairs(b.times + at, a.times, spread_ms)[0]) >= share * len(b.times))
+
+
+def loudness_db(x: np.ndarray, c: Candidate, ms: float = 30) -> float:
+    """The median level (dB, full band) of the first ms of c's hits."""
+    n = samples(ms)
+    rms = [np.sqrt(np.mean(np.square(x[i:i + n], dtype=np.float64))) for i in np.round(c.times * SR).astype(int)]
+    return float(20 * np.log10(np.median(rms) + 1e-12)) if rms else -np.inf
+
+
+def unlocked(x: np.ndarray, kept: list[Candidate]) -> list[Candidate]:
+    """kept without the quieter of two candidates of different roles that
+    always come one fixed lag apart (locked): what always comes 40 ms
+    before a snare is part of it, or of the sound before it. On two suite
+    beats a candidate played no true hit 41.6 and 42.7 ms before every
+    snare, 1.6 and 15.4 dB under it; on 28 others no candidates were
+    locked. A kick's body after its click guesses kick too, and stays."""
+    out = list(kept)
+    for a in kept:
+        for b in kept:
+            if a is not b and a in out and b in out and a.role != b.role and locked(a, b):
+                out.remove(a if loudness_db(x, a) < loudness_db(x, b) else b)
+    return out
 
 
 def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: int = 3) -> list[Candidate]:
@@ -410,6 +460,7 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     if residual:
         kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual)
                               if starts_something(c, onsets, top)], kept)
+    kept = unlocked(drums, kept)
     kept.sort(key=lambda c: -len(c.times))
     names = {id(c): f"sound_{k + 1}" for k, c in enumerate(kept)}
     out: list[Template] = []
