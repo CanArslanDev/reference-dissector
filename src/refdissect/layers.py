@@ -12,7 +12,7 @@ snare, a clap layered on a snare, the grace note of a flam and the hits of a
    down, as Simpler plays them);
 2. fits the neighbourhood of every hit (+-150 ms) as a non-negative sum of
    all the hits in it (NNLS), on the kick, snare and hat bands concatenated,
-   each band weighted by the stem's level in it. Two hits whose placed
+   each band weighted by 1 / RMS of the stem in it. Two hits whose placed
    templates correlate 0.6 or more are one sound found twice (a duplicate
    template, a pitched copy, a kick ringing on): the one that explains more
    keeps the moment, and templates that keep losing to each other are
@@ -25,7 +25,9 @@ snare, a clap layered on a snare, the grace note of a flam and the hits of a
    peaks below its threshold, and at the onsets of its band (not for tones:
    their matched filter has a broad maximum). A hit found there needs half
    its usual gain, or a quarter where what the others leave matches the
-   template as well as a matched-filter hit does, and the null.
+   template as well as a matched-filter hit does, and the null (a backstop
+   there: on 48 suite beats it alone rejected 44 of the 1,724 probe hits
+   over those floors).
 
 Before the fit, a template that holds another (a snare template holds the
 hat that plays on every snare) has it subtracted, else it takes that
@@ -35,8 +37,9 @@ out, its hits handed to the templates that explain it.
 
 On 22 calibration-suite beats (layers, rolls, flams, dynamics, v1, v1orig,
 producer, full, kick808), against one template per moment and band: hats
-under a snare 16 -> 326 of 432 found, 64th hat rolls 19 -> 50 of 64, drum
-F1 at 20 ms 0.421 -> 0.581 (docs/01-pipeline.md).
+within 20 ms of a snare or clap 16 -> 324 of 432 found, 64th hat rolls 19 ->
+50 of 64, drum F1 at 20 ms over hits 0.613 -> 0.781 (the mean over sounds
+0.421 -> 0.584; docs/01-pipeline.md).
 """
 
 from __future__ import annotations
