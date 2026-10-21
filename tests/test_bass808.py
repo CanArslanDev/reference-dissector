@@ -154,6 +154,35 @@ def test_a_slide_without_an_attack_is_a_legato_note():
     assert all(n["t"] == n["t_attack"] and n["glide"]["shape"] == "lin" for n in legato)
 
 
+def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
+    """A note found where nothing attacks inside a held note: a legato note
+    where the period-by-period pitch has moved a semitone or more; the held
+    note going on where it has moved less than 0.75 semitone (a sustain
+    still falling: 60 cents here) or where the note found lasts under
+    80 ms. The slide starts where the pitch leaves the note before for good,
+    not where it first strays (60 ms up a fifth, 60 ms into the note)."""
+    from refdissect.audio import band
+    hz = 32.70
+    tpl = B.Template(np.zeros(1), np.zeros(1), [], hz, "qifft_300_600ms", [[0.0, 0.0], [2.0, 0.0]])
+    # (where the pitch moves, by how much, the note found's start and end, notes out, the legato note's start)
+    cases = ((0.5, -0.6, 0.5, 1.5, 1, None), (0.5, -1.0, 0.5, 1.5, 2, 0.5), (0.5, 5.0, 0.5, 1.5, 2, 0.5),
+             (0.5, 5.0, 0.5, 0.56, 1, None), (0.4, 5.0, 0.55, 1.5, 2, 0.4))
+    for at, moved, t, end, notes_out, start in cases:
+        f = np.full(int(1.5 * SR), hz)
+        f[int(at * SR):] *= 2 ** (moved / 12)
+        f[int(0.06 * SR):int(0.12 * SR)] *= 2 ** (7 / 12)
+        lo = band(np.sin(2 * np.pi * np.cumsum(f) / SR).astype(np.float32), "808")
+        notes = [{"t": 0.0, "t_attack": 0.0, "end": t, "midi_settled": tpl.midi, "ncc": 0.95, "flags": []},
+                 {"t": t, "t_attack": t, "end": end, "midi_settled": tpl.midi + moved, "ncc": 0.6, "flags": []}]
+        out = B.legato(notes, lo, tpl, np.array([0.0]), np.zeros(0))
+        assert len(out) == notes_out
+        if notes_out == 1:
+            assert out[0]["end"] == end
+        else:
+            assert out[1]["flags"] == ["legato"] and out[1]["midi_settled"] == pytest.approx(tpl.midi + moved, abs=0.01)
+            assert out[0]["end"] == out[1]["t"] == pytest.approx(start, abs=0.035)
+
+
 def test_tune_808_splits_a_fraction_into_transpose_and_detune():
     """Simpler plays a sample at its own pitch on C3 (MIDI 60): a sample
     sounding at MIDI 23.746 (32.228 Hz) needs Transpose +36 and Detune +25
