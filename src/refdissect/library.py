@@ -188,6 +188,19 @@ def _digest(paths: list[str]) -> str:
     return hashlib.sha256("\n".join(paths).encode("utf-8")).hexdigest()[:16]
 
 
+def copies(a: np.ndarray, b: np.ndarray, pitched: bool, threshold: float = 0.95) -> bool:
+    """Whether two library entries laid out as played (candidate()) are one
+    recording: |NCC| over threshold in the full band (+-2 ms), and when
+    they are played at different transpositions in the snare band too.
+    Two different kicks brought to one pitch agree where their tone is, not
+    above it: in a 20-beat suite run a wrong kick 2 semitones down hid the
+    true one as its "copy" (0.952 full band, 0.83 in the snare band), while
+    a kit's copy a semitone up agreed in both (0.997 and 0.992)."""
+    if abs(ncc(a, b, samples(2))[0]) <= threshold:
+        return False
+    return not pitched or abs(ncc(band(a, "snare"), band(b, "snare"), samples(2))[0]) > threshold
+
+
 class _Ncc:
     """|NCC| of a template against blocks of candidates of its length, both
     filtered to the role's band (band()'s response applied to the spectra),
@@ -445,22 +458,24 @@ class Library:
 
     def same(self, i: int, j: int, length: int, threshold: float = 0.95, semitones=(0.0, 0.0)) -> bool:
         """Two entries that are one recording (kits copy each other's sounds),
-        each played at its semitones: a kit's copy at another pitch too."""
+        each played at its semitones: a kit's copy at another pitch too
+        (copies())."""
         if i == j:
             return True
         a, b = self.candidate(i, length, semitones[0]), self.candidate(j, length, semitones[1])
-        return abs(ncc(a, b, samples(2))[0]) > threshold
+        return copies(a, b, semitones[0] != semitones[1], threshold)
 
     def distinct(self, ranked: list[dict], length: int, keep: int = 5) -> list[dict]:
-        """The ranking with copies of a higher-ranked sound removed, also
-        copies at another pitch that sound the same where they were found
-        (the fine search finds them: an open hat's copy 0.22 semitones down
-        tied the original at NCC 0.84 and left the verdict no margin)."""
+        """The ranking with copies of a higher-ranked sound removed (copies(),
+        each entry played at the transposition it was found at), also a
+        kit's copy at another pitch: the fine search finds them, and an open
+        hat's copy 0.22 semitones down tied the original at NCC 0.84 and
+        left the verdict no margin."""
         out: list[dict] = []
         laid: list[np.ndarray] = []  # each kept entry as played, laid out once (same() would redo it per pair)
         for r in ranked:
             c = self.candidate(r["i"], length, r["semitones"])
-            if any(r["i"] == o["i"] or abs(ncc(c, x, samples(2))[0]) > 0.95 for o, x in zip(out, laid)):
+            if any(r["i"] == o["i"] or copies(c, x, r["semitones"] != o["semitones"]) for o, x in zip(out, laid)):
                 continue
             out.append(r)
             laid.append(c)
