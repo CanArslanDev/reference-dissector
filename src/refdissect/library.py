@@ -125,9 +125,11 @@ def semitone_spectrum(x: np.ndarray, ms: float = 100, n_fft: int = 16384) -> np.
 # with no time alignment and no resampling. NCC needs the pitch to a cent: the
 # true file's NCC halves within 1-5 cents (open hat 0.97 at 0, 0.59 at 1 cent;
 # snare 0.98, 0.56 at 5 cents), so a search over whole semitones misses a
-# detuned snare or hat. On 30 oracle templates at five transpositions (0, +32.5,
-# -47.5, -100 and +240 cents) the speckle shortlist with NCC at quarter cents
-# found 416 of 450, the semitone search 111 (research measurement, not this code).
+# detuned snare or hat. Calibration v2, 57 noisy sounds at the true hit times,
+# each template played 0, +32.5, -47.5, -100 and +240 cents off: match_fine
+# with union finds 191 of 285 (snares 65/70, open hats 70/80, hats 31/80), the
+# semitone search 65; when right, the transposition is within 1.5 cents (median
+# 0, p90 0.5).
 
 SPECKLE_VERSION = 1
 # per band pipeline.match searches noisy sounds in: the range whose fine structure is
