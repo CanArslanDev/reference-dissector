@@ -7,7 +7,17 @@ import pytest
 from conftest import burst
 
 from refdissect.audio import PRE, SR, attack_time, samples
-from refdissect.detect import Candidate, Template, count_once, detect, discover, one_per_sound, places, starts_something
+from refdissect.detect import (
+    Candidate,
+    Template,
+    count_once,
+    detect,
+    discover,
+    one_per_sound,
+    places,
+    starts_something,
+    unlocked,
+)
 from refdissect.evaluate import assign, onset_scores
 from refdissect.grid import Grid
 from refdissect.hits import Group
@@ -235,6 +245,26 @@ def test_a_kick_without_a_click_is_found(sounds, bpm, steps):
     x, truth = arrange({**sounds, "sine": sine_kick()}, hits, 16 * 4 * 60 / bpm + 1)
     sc = scored(*found(x, grid), truth)
     assert sc["sine"]["f1_20"] > 0.95 and abs(sc["sine"]["error_ms"]["median"]) < 3
+
+
+def test_a_view_goes_with_its_main():
+    """unlocked() drops the quieter of two candidates locked 42 ms apart; a
+    view of the one it drops is the same sound and goes with it (it stayed,
+    named after a template that was gone: discover() raised KeyError)."""
+    x = np.zeros(SR * 4, np.float32)
+    t_b = np.arange(0.5, 3.5, 0.25)
+    for t, level in [(t, 0.8) for t in t_b] + [(t + 0.042, 0.1) for t in t_b]:
+        x[int(t * SR):int(t * SR) + 600] = level
+
+    def cand(band_name, role, times):
+        n = len(times)
+        return Candidate(band_name, Group(), np.zeros(10, np.float32), PRE, np.sort(times), np.ones(n), np.ones(n),
+                         np.zeros(100, np.float32), role)
+
+    main, louder = cand("low", "kick", t_b + 0.042), cand("snare", "snare", t_b)
+    view = cand("hat", "kick", np.r_[t_b[:6] + 0.042, t_b[:6] + 0.167])
+    view.view_of = main
+    assert unlocked(x, [main, view, louder]) == [louder]
 
 
 def test_lead_ins_of_different_lengths(sounds):
