@@ -63,7 +63,7 @@ On those 32 beats (14 scenarios, htdemucs stems), against the code before (16th 
 
 ### Hits (`detect.detect`)
 
-**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are hits; the least-squares gain at the peak is the hit's level. Each hit carries `t`, 5 ms after the window starts, and `t_attack`, where the sound starts: the template's `attack_s` after it.
+**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are hits; the least-squares gain at the peak is the hit's level. Each hit carries `t`, 5 ms after the window starts, and `t_attack`, where the sound starts: the template's `attack_s` after it. A hit without `t_attack` is timed by its template's `attack_s` too (`evaluate.estimate_from_analysis`). Timed by `audio.attack_time` on the averaged template instead, the kicks of 32 suite beats came 15.7 ms late (drums F1@20 0.810 → 0.717).
 
 Three cleanups:
 - **Quiet tails.** Hits below 25 % of the template's median gain are dropped. NCC ignores level, so a ringing tail matches its own template too.
