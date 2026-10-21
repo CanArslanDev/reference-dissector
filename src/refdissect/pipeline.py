@@ -21,7 +21,7 @@ import numpy as np
 from . import describe as describe_mod
 from .audio import SR, band, read, samples, write
 from .beats import track_stems
-from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
+from .detect import LENGTH_MS, Template, discover, explain, isolated, notes_808, peak_score_histogram, pitch_offset
 from .grid import Grid, estimate, offsets, onset_grid, tuning
 from .hits import group, template
 from .library import Library, null_test, per_hit_votes, verdict
@@ -83,7 +83,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     consensus = round(float(np.median(list(tunings.values()))), 2) + 0.0 if tunings else 0.0  # no -0.0
     log(f"tuning (semitones from A440): {tunings} -> {consensus:+.2f}")
     templates = discover(drums, peaks_grid)
-    events = detect(drums, templates)
+    found = explain(drums, templates)
+    events = found.events
     tdir = work / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     out_templates = {}
@@ -96,11 +97,14 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                                   "peak_ncc_histogram_0.3_to_1.0": peak_score_histogram(drums, tp),
                                   "describe": describe_mod.describe(band(tp.audio[:samples(LENGTH_MS[tp.role])],
                                                                          tp.role)),
-                                  "clean": round(float(np.mean([e["ncc"] >= 0.8 for e in events[tp.name]]))
-                                                 if events[tp.name] else 0.0, 3),
+                                  "clean": _clean(events[tp.name]),
                                   "members": tp.group.members if tp.group else []}
+        layered = sum(e.get("source") == "layer" for e in events[tp.name])
+        pitched = sum(bool(e.get("semitones")) for e in events[tp.name])
         log(f"  {tp.name:8s} ({tp.band} band, looks like a {tp.role}) {tp.hits:3d} hits in the template, "
-            f"{len(events[tp.name]):3d} detected")
+            f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
+    for name, into in found.info.get("merged", {}).items():
+        log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
     notes = notes_808(bass, consensus)
     offset_808, agreement_808 = pitch_offset([n["midi_float"] for n in notes])
     tuning_808 = offset_808 if agreement_808 >= 0.5 else consensus
@@ -116,11 +120,18 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                 "tuning": {"per_stem": tunings, "consensus": consensus,
                            "a4_hz": round(440 * 2 ** (consensus / 12), 1),
                            "808": tuning_808, "808_agreement": agreement_808},
-                "templates": out_templates, "events": events, "notes_808": notes,
+                "templates": out_templates, "events": events, "layers": found.info, "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
     _save(work / "analysis.json", analysis)
     return analysis
+
+
+def _clean(events: list[dict]) -> float:
+    """Share of a template's own matched-filter hits at NCC 0.8 or more (a
+    hit found under another sound is not its own match)."""
+    own = [e["ncc"] >= 0.8 for e in events if e.get("source", "matched") == "matched"]
+    return round(float(np.mean(own)), 3) if own else 0.0
 
 
 def _template(work: Path, name: str) -> np.ndarray:
