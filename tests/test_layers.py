@@ -241,6 +241,33 @@ def test_no_hat_under_a_kick_that_has_none(sounds):
     assert found(events, "hat", hats).all() and extra(events, "hat", hats) == 0
 
 
+@pytest.mark.parametrize("kick_gain", [0.9, 0.45])
+def test_hats_under_the_snare_when_kicks_land_on_hats(sounds, kick_gain):
+    """discover()'s templates on a beat whose kicks land on 2 of every 8
+    hats. The hat's average carries their body, so its kick band calls it a
+    tone (38 % of its energy there at full level, ringing), and tones were
+    never held: the 24 hats under the snares were lost. At full level a
+    second hat template, found in the snare band 22 ms late, is held at -22
+    ms (lags of -10..30 ms missed it); at half level there is none, and the
+    hat-band template itself is held."""
+    rng = np.random.default_rng(5)
+    hits = []
+    for b in range(12):
+        o = 0.05 + b * 16 * STEP
+        hits += [("kick", o + s * STEP, kick_gain) for s in (0, 10)] + [("snare", o + s * STEP, 0.8) for s in (4, 12)]
+        hits += [("hat", o + s * STEP, float(rng.uniform(0.25, 0.4))) for s in range(0, 16, 2)]
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    truth = {name: [t for n, t, _ in hits if n == name] for name in ("kick", "snare", "hat")}
+    events = detect(x, discovered({"audio": x}))
+    heard = {name: identify(evs, truth) for name, evs in events.items() if evs}
+    hat = max((name for name, (s, _, _) in heard.items() if s == "hat"), key=lambda name: heard[name][2].sum())
+    off, snares = heard[hat][1], np.array(truth["snare"])
+    under = [t for t in truth["hat"] if np.min(np.abs(snares - t)) < 0.001]
+    t = np.array([e["t"] for e in events[hat]]) + off
+    assert all(np.min(np.abs(t - u)) <= 0.003 for u in under)
+    assert heard[hat][2].all()  # every hit of the hat template on a hat
+
+
 def test_one_hit_per_strike_of_a_ringing_sound(sounds):
     """A tom ringing 400 ms (110 Hz) on every beat, a snare on 2 and 4: one
     hit per strike, none on the decay."""
