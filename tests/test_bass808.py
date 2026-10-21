@@ -194,6 +194,33 @@ def test_plan_808_writes_the_notes_where_they_attack(tmp_path):
         assert p["duration"] == pytest.approx(2 * (n["end"] - h["t"]), abs=0.001)
 
 
+def test_plan_808_detunes_the_one_shot_to_the_pitch_heard(tmp_path):
+    """Notes heard 15 cents over their settled pitch (an 808 still falling
+    over the read window) played by a one-shot that does not fall: Detune
+    +15, and estimate_from_plan hears them there; notes that disagree (half
+    at their settled pitch, half a semitone over) leave Detune alone."""
+    import soundfile as sf
+
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.live import plan_808
+    hz = 440 * 2 ** ((24 - 69) / 12)
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+
+    def notes(heard):
+        return [{"t": 0.5 * i, "t_attack": 0.5 * i + 0.005, "end": 0.5 * i + 0.4, "pitch": 24, "peak": 1.0,
+                 "midi_settled": 24.0, "midi_float": 24.0 + h} for i, h in enumerate(heard)]
+
+    track = plan_808({"tuning": {"808": 0.0}, "notes_808": notes([0.15] * 8)}, synth, tmp_path / "stems", 2.0)
+    assert (track["transpose"], track["detune_cents"]) == (36, 15) and track["heard_cents"] == pytest.approx(15, abs=1)
+    plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
+            "levels": {}}
+    assert [n["midi"] for n in estimate_from_plan(plan)["bass808"]] == pytest.approx([24.15] * 8, abs=0.01)
+    track = plan_808({"tuning": {"808": 0.0}, "notes_808": notes([0.0, 0.5] * 4)}, synth, tmp_path / "stems", 2.0)
+    assert (track["transpose"], track["detune_cents"], track["heard_cents"]) == (36, 0, None)
+
+
 def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     """A legato note is planned where its glide starts, with the note before
     held over it, one voice and Glide; what Live would play (render_plan,
