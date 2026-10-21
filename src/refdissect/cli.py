@@ -97,10 +97,13 @@ def _analyze_kwargs(a) -> dict:
 
 def _match_options(s) -> None:
     s.add_argument("--detune", type=float, default=None, help="also try every sound shifted by this many semitones")
+    s.add_argument("--kick-sources", action="store_true",
+                   help="also read kick templates from drums + bass and the mix, the 808 taken out with fit-808's "
+                        "one-shot (run fit-808 before match)")
 
 
 def _match_kwargs(a) -> dict:
-    return {"detune": a.detune}
+    return {"detune": a.detune, "kick_sources_on": a.kick_sources}
 
 
 def _analyze(a):
