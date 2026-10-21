@@ -101,6 +101,21 @@ def test_reattacks_find_a_cut_and_a_note_after_a_rest():
         assert np.min(np.abs(onsets - n["t"])) < 0.003
 
 
+def test_drum_attacks_and_notes_found_late_against_them():
+    """The kicks of a drum stem, each at the foot of its rise (2.7 ms late
+    here, the 5 ms RMS rising to a tenth of the kick; the one at the file's
+    first sample has nothing before it, 15 ms); notes found 60 ms after them
+    are late by that, notes 0-20 ms after them (an 808 that starts with its
+    kick or just after) are not."""
+    _, drums, truth = line(BAR, bars=2)
+    kicks = B.drum_attacks(B.rms_envelope(B.band(drums, "low")))
+    played = [n["t"] for i, n in enumerate(truth) if i % 2 == 0]
+    assert len(kicks) == len(played) and np.max(np.abs(kicks[1:] / SR - played[1:])) < 0.004
+    late = [int((t + 0.060) * SR) for t in played]
+    assert abs(B._late(late, kicks) / SR - 0.060) < 0.003
+    assert B._late([int((t + d) * SR) for t, d in zip(played, np.linspace(0, 0.02, len(played)))], kicks) == 0
+
+
 def test_a_line_with_retriggers_sixteenths_and_kicks():
     """Every note's attack within 20 ms and its pitch within 50 cents (28 of
     28 measured); the 808's own tuning (+11 cents) within 3 (+11.6); the
