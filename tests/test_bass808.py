@@ -285,3 +285,27 @@ def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     assert B.qifft(x[int(1.2 * SR):int(1.55 * SR)], 35, 50) == pytest.approx(440 * 2 ** ((29 - 69) / 12), rel=0.002)
     env = B.rms_envelope(x, 5.0)
     assert env[int(0.98 * SR):int(1.05 * SR)].min() > 0.5 * env[int(0.9 * SR)]  # no cut, no new attack
+
+
+def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path):
+    """A chain held past the end of its one-shot (0.5 s here) is silent from
+    there on: a legato note that starts after it is left out of what Live
+    plays, not given a pitch it never sounds at."""
+    import soundfile as sf
+
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.live import plan_808
+    hz = 32.70
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 0.5), SR, subtype="FLOAT")
+    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.2, "ms": 80.0, "shape": "lin", "kind": "legato"}
+    analysis = {"tuning": {"808": 0.0},
+                "notes_808": [{"t": 0.5, "t_attack": 0.505, "end": 1.2, "pitch": 24, "peak": 1.0},
+                              {"t": 1.2, "t_attack": 1.2, "end": 1.6, "pitch": 29, "peak": 1.0, "glide": glide,
+                               "flags": ["legato"]}]}
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    plan = {"tempo": 120.0, "length_beats": 8.0, "levels": {},
+            "tracks": {"drums": {"pads": {}, "notes": []}, "808": plan_808(analysis, synth, tmp_path / "stems", 2.0)}}
+    assert len(plan["tracks"]["808"]["notes"]) == 2
+    heard = estimate_from_plan(plan)["bass808"]
+    assert len(heard) == 1 and heard[0]["t"] == pytest.approx(0.5, abs=0.01) and np.isfinite(heard[0]["midi"])

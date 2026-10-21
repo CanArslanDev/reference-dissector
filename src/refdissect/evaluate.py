@@ -360,7 +360,10 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
             t = n["start_time"] / bps
             stop = chain[k + 1]["start_time"] / bps if k + 1 < len(chain) else t + n["duration"] / bps
             o = int(round((t - a0) * SR))
-            dur = min(stop - t, float(np.sum(np.isfinite(heard[o:]))) / SR)
+            ring = float(np.sum(np.isfinite(heard[o:])) - 1) / SR  # until the voice reads past the one-shot
+            if ring <= 0:  # it had ended before this note started: nothing plays
+                continue
+            dur = min(stop - t, ring)
             midi = S.sounding(lambda x, o=o, h=heard: h[np.clip(o + np.round(x * SR).astype(int), 0, len(h) - 1)],
                               dur)
             glide = None if not k else {"from_midi": round(own + semis[max(0, o - 1)], 4),
@@ -397,7 +400,9 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     gain = track fader x volume_db x the velocity law (a chain's first
     note's).
     Notes on a pad without a readable sample, and 808 notes without a
-    one-shot, play nothing and are left out (their files under "missing").
+    one-shot, play nothing and are left out (their files under "missing");
+    so is a legato note that starts after the voice has read past the
+    one-shot's end (a long chain at a high pitch: the voice is silent).
     Melodic notes: the plan's melodic tracks (_plan_melodic). Rhythm: Live's
     own grid, bar 1 at 0 s at the plan's tempo; the plan puts notes at their
     seconds, so the song's bars fall on it only when the song's first bar
