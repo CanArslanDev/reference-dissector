@@ -5,6 +5,7 @@ the notes in the drum stem and leaking into the bass stem, as a separator
 leaves them."""
 
 import numpy as np
+import pytest
 
 from refdissect import bass808 as B
 from refdissect.audio import SR, attack_time, samples
@@ -136,3 +137,80 @@ def test_a_slide_without_an_attack_is_a_legato_note():
                                       for n in legato)]
     assert len(right) >= 3 and len(b["notes"]) <= 1.2 * len(truth)
     assert all(n["t"] == n["t_attack"] and n["glide"]["shape"] == "lin" for n in legato)
+
+
+def test_tune_808_splits_a_fraction_into_transpose_and_detune():
+    """Simpler plays a sample at its own pitch on C3 (MIDI 60): a sample
+    sounding at MIDI 23.746 (32.228 Hz) needs Transpose +36 and Detune +25
+    for MIDI 24 to sound at 24; one at the reference's own tuning, none."""
+    from refdissect.live import tune_808
+    assert tune_808(23.746, 0.0) == (36, 25)
+    assert tune_808(24.117, 11.7) == (36, 0)
+    assert tune_808(24.4, -20.0) == (35, 40)
+    semis, detune = tune_808(30.62, 0.0)
+    assert abs(30.62 + (24 - 60) + semis + detune / 100 - 24) <= 0.005
+
+
+def test_plan_808_writes_the_notes_where_they_attack(tmp_path):
+    """The plan's notes are the written pitches at their own lengths, each
+    moved so that the one-shot, played at the note's pitch, attacks where the
+    analysis heard the note attack; estimate_from_plan then hears the 808
+    at the written pitch plus the reference's tuning."""
+    import soundfile as sf
+
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.live import plan_808
+    hz = 32.70 * 2 ** (11.7 / 1200)
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz * 2, 40, 1.2, 4, 2.0, 0.05, 0.3), 2.0), SR, subtype="FLOAT")
+    analysis = {"tuning": {"808": 0.117},
+                "notes_808": [{"t": 1.0, "t_attack": 1.006, "end": 1.4, "pitch": 24, "peak": 1.0},
+                              {"t": 1.4, "t_attack": 1.405, "end": 1.5, "pitch": 31, "peak": 0.5}]}
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    track = plan_808(analysis, synth, tmp_path / "stems", 2.0)
+    assert (track["transpose"], track["detune_cents"], track["tuning_cents"]) == (36, 0, 11.7)
+    plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
+            "levels": {}}
+    heard = estimate_from_plan(plan)["bass808"]
+    assert [n["t_attack"] for n in heard] == pytest.approx([1.006, 1.405], abs=0.0005)
+    own = 69 + 12 * np.log2(hz / 440)  # C1 + 11.7 cents
+    assert [n["midi_settled"] for n in heard] == pytest.approx([own, own + 7], abs=0.002)
+    for n, h, p in zip(analysis["notes_808"], heard, track["notes"]):  # until the note ends: 0.2 beats, no floor
+        assert p["duration"] == pytest.approx(2 * (n["end"] - h["t"]), abs=0.001)
+
+
+def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
+    """A legato note is planned where its glide starts, with the note before
+    held over it, one voice and Glide; what Live would play (render_plan,
+    estimate_from_plan) slides there without a new attack and settles at
+    the new pitch."""
+    import soundfile as sf
+
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.live import LEGATO_S, plan_808
+    from refdissect.render import render_plan
+    hz = 32.70
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
+    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.0, "ms": 80.0, "shape": "lin", "kind": "legato"}
+    analysis = {"tuning": {"808": 0.0},
+                "notes_808": [{"t": 0.5, "t_attack": 0.505, "end": 1.0, "pitch": 24, "peak": 1.0},
+                              {"t": 1.0, "t_attack": 1.0, "end": 1.6, "pitch": 29, "peak": 1.0, "glide": glide,
+                               "flags": ["legato"]}]}
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    track = plan_808(analysis, synth, tmp_path / "stems", 2.0)
+    assert (track["voices"], track["glide_mode"], track["glide_time_ms"]) == (1, "Glide", 80.0)
+    first, second = track["notes"]
+    assert second["start_time"] == 2.0 and first["start_time"] + first["duration"] == pytest.approx(
+        2.0 + 2 * LEGATO_S, abs=1e-3)
+    plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
+            "levels": {}}
+    heard = estimate_from_plan(plan)["bass808"]
+    assert heard[1]["t_attack"] == heard[1]["t"] == 1.0 and heard[1]["flags"] == ["legato"]
+    assert heard[1]["midi_settled"] == pytest.approx(29.0, abs=0.01)
+    assert heard[1]["midi"] == pytest.approx(29.0, abs=0.1)
+    m = render_plan(plan, tmp_path / "r", faders=False)
+    x = sf.read(tmp_path / "r" / m["tracks"]["808"], dtype="float32")[0]
+    assert B.qifft(x[int(1.2 * SR):int(1.55 * SR)], 35, 50) == pytest.approx(440 * 2 ** ((29 - 69) / 12), rel=0.002)
+    env = B.rms_envelope(x, 5.0)
+    assert env[int(0.98 * SR):int(1.05 * SR)].min() > 0.5 * env[int(0.9 * SR)]  # no cut, no new attack

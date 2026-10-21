@@ -8,7 +8,10 @@ Live facts the build relies on (measured on Live 12.4, see
 docs/07-building-in-live.md):
 - Simpler loads samples at Volume -12 dB; the build sets 0 dB.
 - Simpler plays a sample at its own pitch on C3 (MIDI 60). The 808 notes
-  keep their real MIDI numbers (C1 = 24 here), so Transpose is +36.
+  keep their real MIDI numbers (C1 = 24 here), so Transpose is about +36;
+  Live 12.4.6 keeps whole semitones of it (11.99 plays as 11) and whole
+  cents of Detune (+-50), so the one-shot's fraction goes to Detune
+  (tune_808).
 - A new file in the User Library shows up in Live's browser after a few
   seconds; samples load onto Drum Rack pads through the browser.
 - Reference stems go in as Arrangement audio clips with warping off, so they
@@ -28,7 +31,7 @@ from pathlib import Path
 import mido
 import numpy as np
 
-from .audio import SR, read, rms_db, transpose, trim_onset
+from .audio import SR, attack_time, read, rms_db, transpose, trim_onset
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -38,6 +41,7 @@ GENERATED = Path("Samples") / "AbletonMCP Generated"
 # a placeholder for the melodic tracks until a sound is chosen per stem; they
 # are built muted, so the reference stems still play as before
 MELODIC_INSTRUMENT = "Drift"
+LEGATO_S = 0.01  # a legato 808 note's predecessor is held this long past its start (overlapping notes glide)
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -63,6 +67,96 @@ def velocities(gains: list[float], low: int = 35) -> list[int]:
         return []
     ref = np.percentile(g, 90) or 1.0
     return [int(v) for v in np.clip(np.round(127 * g / ref), low, 127)]
+
+
+def tune_808(own_midi: float, cents: float) -> tuple[int, int]:
+    """Simpler's Transpose (whole semitones) and Detune (whole cents) for a
+    sample whose sustain sits at own_midi (fractional MIDI), so that MIDI
+    note m sounds at m + cents/100 (the reference 808's own tuning): Simpler
+    plays the sample at own_midi + (m - 60) + Transpose + Detune/100. Live
+    12.4.6 keeps whole semitones of Transpose (11.99 plays as 11) and whole
+    cents of Detune (+-50; 11.5 plays as 11), so both are rounded here."""
+    exact = 60 - own_midi + cents / 100
+    transpose = int(np.floor(exact + 0.5))
+    return transpose, int(np.floor(100 * (exact - transpose) + 0.5))
+
+
+def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_per_second: float) -> dict:
+    """The 808 track: the notes at their written pitches (notes_808 pitch),
+    lasting until they end (no floor: a quarter-beat floor over the next
+    note at another pitch is a glide once Glide is on), and with a one-shot
+    (fit_808's), its Transpose and Detune (tune_808: the one-shot's own
+    settled pitch against the 808's tuning, analysis tuning "808"), and each
+    note moved so that the one-shot's attack, as Simpler plays it at the
+    note's pitch, lands on the note's t_attack (it lands t_attack - t after
+    t otherwise: 0.3-13 ms, the drop's own attack against the template's).
+    cents is the one-shot's own pitch over root_midi (metadata).
+
+    A legato note (notes_808 glide kind "legato": no attack of its own)
+    starts where its glide starts and the note before is held LEGATO_S past
+    it: with one voice and Glide Mode "Glide", Live 12.4.6 slides
+    overlapping notes linearly in semitones over exactly the Glide Time and
+    does not start the sample again; notes 25 ms apart jump. The track then
+    carries voices 1, glide_mode and glide_time_ms (the median of the
+    glides', one per Simpler) for the build, and every glide (legato, and
+    the start and end glides no note plays yet) under "slides"."""
+    notes = analysis["notes_808"]
+    peaks = np.array([n["peak"] for n in notes]) if notes else np.array([1.0])
+    med = float(np.median(peaks)) or 1.0
+    track: dict = {}
+    shot, shift0 = None, 0.0
+    if synth:
+        root = synth["root_midi"]
+        own = 69 + 12 * math.log2(synth["pitch_hz"] / 440) if synth.get("pitch_hz") else float(root)
+        # the 808's tuning as analysed, or the one-shot's where fit_808 found the analysis' reading unsettled
+        tuning = 100 * (own - root if synth.get("pitch_from") == "fit"
+                        else (analysis.get("tuning") or {}).get("808", own - root))
+        semis, detune = tune_808(own, tuning)
+        # named after the song: the User Library keeps one file per name
+        song = Path(stems_dir).resolve().parent.name
+        track.update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"], transpose=semis,
+                     detune_cents=detune, root_midi=root, cents=round(100 * (own - root), 1),
+                     tuning_cents=round(tuning, 1))
+        shift0 = semis + detune / 100 - 60
+        try:
+            shot = read(synth["file"])
+        except (OSError, RuntimeError):
+            shot = None
+    leads: dict[float, float] = {}
+
+    def lead(pitch: int) -> float:
+        shift = round(pitch + shift0, 2)
+        if shot is None:
+            return 0.0
+        if shift not in leads:
+            leads[shift] = attack_time(transpose(shot, shift), "808")
+        return leads[shift]
+
+    out, slid, slides = [], [], []
+    for n in notes:
+        g = n.get("glide") or {}
+        legato_note = g.get("kind") == "legato" and bool(out)
+        start = n["t"] if legato_note or "t_attack" not in n or shot is None else n["t_attack"] - lead(n["pitch"])
+        out.append({"pitch": n["pitch"], "start_time": round(max(0.0, start) * beats_per_second, 4),
+                    "duration": round(max(0.05, (n["end"] - start) * beats_per_second), 4),
+                    "velocity": int(np.clip(round(115 * n["peak"] / med), 70, 127))})
+        slid.append(legato_note)
+        if g:
+            slides.append({"start_time": out[-1]["start_time"], "kind": g.get("kind", "legato"),
+                           "from_midi": g.get("from_midi"), "to_midi": g.get("to_midi"), "ms": g.get("ms")})
+    order = sorted(range(len(out)), key=lambda i: out[i]["start_time"])
+    for a, b in zip(order, order[1:]):  # one voice: a note ends where the next starts, or holds over it to slide
+        nxt = out[b]["start_time"]
+        if slid[b]:
+            out[a]["duration"] = round(nxt + LEGATO_S * beats_per_second - out[a]["start_time"], 4)
+        else:
+            out[a]["duration"] = round(max(0.01, min(out[a]["duration"], nxt - out[a]["start_time"] - 0.001)), 4)
+    legato = [sl["ms"] for sl in slides if sl["kind"] == "legato" and sl["ms"]]
+    if legato:
+        track.update(voices=1, glide_mode="Glide", glide_time_ms=round(float(np.median(legato)), 1))
+    if slides:
+        track["slides"] = slides
+    return {"notes": no_overlaps(out, None), **track}
 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
@@ -107,24 +201,10 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         for e, v in zip(hits, velocities([h["gain"] for h in hits])):
             drum_notes.append({"pitch": note, "start_time": round(e["t"] * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
-    notes808 = analysis["notes_808"]
-    peaks = np.array([n["peak"] for n in notes808]) if notes808 else np.array([1.0])
-    med = float(np.median(peaks)) or 1.0
-    bass_notes = [{"pitch": n["pitch"], "start_time": round(n["t"] * beats_per_second, 4),
-                   "duration": round(max(0.25, (n["end"] - n["t"]) * beats_per_second), 4),
-                   "velocity": int(np.clip(round(115 * n["peak"] / med), 70, 127))} for n in notes808]
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
-                       "808": {"notes": no_overlaps(bass_notes, None)}},
+                       "808": plan_808(analysis, synth, stems_dir, beats_per_second)},
             "stems": {}, "locators": [], "levels": {}}
-    if synth:
-        root = synth["root_midi"]
-        # named after the song: the User Library keeps one file per name
-        song = Path(stems_dir).resolve().parent.name
-        plan["tracks"]["808"].update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"],
-                                     transpose=int(60 - root), root_midi=root)
-        if synth.get("pitch_hz"):  # the one-shot sits at the 808's own tuning, not on root_midi (-14..+46 cents)
-            plan["tracks"]["808"]["cents"] = round(1200 * math.log2(synth["pitch_hz"] / 440) + 6900 - 100 * root, 1)
     stems_dir = Path(stems_dir)
     for stem in ("drums", "bass", "other", "piano", "guitar", "vocals"):
         path = stems_dir / f"{stem}.wav"
