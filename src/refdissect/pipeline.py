@@ -19,18 +19,24 @@ import librosa
 import numpy as np
 
 from . import describe as describe_mod
-from .audio import SR, band, read, samples, write
+from . import detect as det
+from .audio import SR, band, read, samples, shift, transpose, write
+from .audio import fit as fit_to
 from .beats import track_stems
 from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
 from .grid import Grid, estimate, offsets, onset_grid, tuning
-from .hits import group, template
-from .library import Library, null_test, per_hit_votes, verdict
+from .hits import Group, group, template
+from .library import Library, null_test, pair_fit, per_hit_votes, verdict
 from .structure import bar_activity, sections
 from .synth808 import Params, compare, fit, laid_out, one_shot
 
 TONAL_STEMS = ("bass", "other", "piano", "vocals", "guitar")
 # library roles grouped into the drum families a Drum Rack is laid out by
 FAMILY = {"clap": "snare", "rim": "snare", "open_hat": "hat", "crash/ride": "hat", "808": "kick"}
+# kick-band templates are not searched for layers: any sine-like file takes energy off a kick, so the pair
+# search gave 3 of 24 research-beat kicks a layer, none of them true (and found no true one)
+TONAL_LAYERS = "kick band: not searched (any sine-like file takes energy off a kick)"
+SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligned, in the band) is that sound
 
 
 def _save(path: Path, obj) -> Path:
@@ -127,33 +133,224 @@ def _template(work: Path, name: str) -> np.ndarray:
     return np.load(work / "templates" / f"{name}.npy")
 
 
+def _entry(r: dict) -> dict:
+    """A ranked library entry as matches.json lists it. semitones is the
+    whole transposition (fractional from the speckle search); transpose and
+    cents split it into Simpler's Transpose (whole semitones) and Detune
+    (cents, -50..+50; detune_cents is the same number under Simpler's name)."""
+    st = float(r["semitones"])
+    whole = int(round(st))
+    cents = round(100 * (st - whole), 2) + 0.0
+    out = {"path": r["path"], "file": Path(r["path"]).name, "role": r["role"], "ncc": r["ncc"], "semitones": st,
+           "transpose": whole, "cents": cents, "detune_cents": cents, "lag_ms": r["lag_ms"]}
+    if "speckle" in r:
+        out["speckle"] = r["speckle"]
+    return out
+
+
+def _search(library: Library, t: np.ndarray, b: str, tonal: bool, detune: float | None) -> tuple[list[dict], str]:
+    """One template window ranked in one band (its best 40), and how. The
+    snare and hat bands: by the speckle index at any pitch, with the
+    whole-semitone search's best 20 tried at their speckle transposition
+    too (Library.match_fine). The kick band, every band of a tonal template
+    (one found in the low band: role guesses are no help, 51 of 71 hat
+    templates of a 48-beat suite run were guessed kicks), and every band
+    without a speckle index: whole semitones, as before (a fine search let
+    other kicks at fractional transpositions beat the right one)."""
+    if not tonal and b in library.speckles:
+        return library.match_fine(t, b, semitones=range(-3, 4), union=20, top=40), "speckle"
+    semis = range(-4, 5) if b == "kick" else range(-3, 4)
+    best = None
+    for base in [0.0] + ([detune] if detune else []):
+        ranked = library.match(t, b, semitones=semis, base=base, top=40)
+        if best is None or ranked[0]["ncc"] > best[0]["ncc"]:
+            best = ranked
+    return best, "semitones"
+
+
+def _mix(stems: Path, n: int) -> np.ndarray | None:
+    """The mix the stems were separated from (separation.json's audio), n samples long."""
+    info = stems / "separation.json"
+    if not info.is_file():
+        return None
+    audio = Path(_load(info).get("audio") or "")
+    return fit_to(read(audio), n) if audio.is_file() else None
+
+
+def _render_808(notes: list[dict], shot: np.ndarray, root: int, n: int) -> np.ndarray:
+    """The 808 notes played with one one-shot: each transposed to its pitch,
+    at its peak level, cut at its end."""
+    out = np.zeros(n, np.float32)
+    played: dict[int, np.ndarray] = {}
+    for note in notes:
+        k = int(note["pitch"]) - root
+        if k not in played:
+            played[k] = transpose(shot, k)
+        a, b = int(round(note["t"] * SR)), min(n, int(round(note["end"] * SR)))
+        x = played[k][: max(0, b - a)]
+        out[a:a + len(x)] += float(note.get("peak", 1.0)) * x
+    return out
+
+
+def _explained(t: np.ndarray, atom: np.ndarray, max_lag_ms: float = 5.0) -> np.ndarray:
+    """t without the 808 under it (atom: the rendered 808 notes averaged like
+    t's hits), lined up by the largest positive correlation within
+    +-max_lag_ms and scaled by least squares in the kick band, never added."""
+    tb, ab = band(t, "kick").astype(np.float64), band(atom, "kick").astype(np.float64)
+    lag = max(range(-samples(max_lag_ms), samples(max_lag_ms) + 1), key=lambda d: float(np.dot(tb, shift(ab, d))))
+    ab = shift(ab, lag)
+    g = max(0.0, float(np.dot(tb, ab) / (np.dot(ab, ab) or 1.0)))
+    return (t - g * shift(atom, lag)).astype(np.float32)
+
+
+def kick_sources(work: Path, analysis: dict, stems: Path, drums: np.ndarray) -> tuple[dict, np.ndarray | None, dict]:
+    """What else a kick template can be read from: drums + bass and the mix
+    the stems came from, each with the song's 808 taken out (analysis
+    notes_808 played with fit-808's one-shot, synth808.json). Demucs puts
+    part of a kick's body in the bass stem, and a kick under an 808 is lost
+    in drums + bass unless the 808 is explained first. With no 808 notes
+    the sources are taken as they are; with notes but no one-shot yet
+    (fit-808 runs after match) only the drum stem is used.
+    Returns ({source: signal}, the rendered 808 or None, what was used)."""
+    notes = analysis.get("notes_808") or []
+    r808, info = None, {"808_from": None}
+    if notes:
+        if not (work / "synth808.json").is_file() or not Path(_load(work / "synth808.json")["file"]).is_file():
+            return {}, None, {"808_from": None, "why": "no 808 one-shot to take the 808 out with (run fit-808 first)"}
+        synth = _load(work / "synth808.json")
+        r808 = _render_808(notes, read(synth["file"]), int(synth["root_midi"]), len(drums))
+        info = {"808_from": "synth808.json"}
+    out = {}
+    if (stems / "bass.wav").is_file():
+        out["drums+bass" + ("-808" if notes else "")] = drums + fit_to(read(stems / "bass.wav"), len(drums))
+    mix = _mix(stems, len(drums))
+    if mix is not None:
+        out["mix" + ("-808" if notes else "")] = mix
+    return out, r808, info
+
+
+def _elsewhere(library: Library, r: dict, b: str, drums: np.ndarray, hits: np.ndarray) -> tuple[int, int]:
+    """At how many of a template's hits (attack times, s) a library sound is
+    heard in the drum stem, and at how many other moments: detect()'s
+    matched filter, with the sound's attack, over the whole stem."""
+    found = det._times(drums, library.candidate(r["i"], samples(det.DETECT_MS[b]), r["semitones"]), b,
+                       det.THRESHOLD[b])
+    if not len(found):
+        return 0, 0
+    d = np.min(np.abs(found[:, None] - np.asarray(hits)[None, :]), axis=1) if len(hits) else np.full(len(found), 9.0)
+    return int(np.sum(d <= 0.03)), int(np.sum(d > 0.05))
+
+
+def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: list[int], min_db: float = 3.0,
+           pool: int = 30, drums: np.ndarray | None = None, hits=()) -> tuple[list[dict], dict]:
+    """The second sound of a layered noisy template (a clap on a snare), and
+    the evidence. The template's top match is fitted together with each
+    other candidate (the template's `pool` best, and the `pool` best for
+    what the top match leaves), both gains positive (pair_fit). The partner
+    that leaves the least is a layer when it takes the residual down by
+    min_db or more and is not a sound another template was given (`taken`)
+    or a copy of one: a plain snare's best partner is the hat that always
+    plays with it. With the drum stem and the template's hit times, a
+    partner heard at more moments away from those hits than at them (and
+    at more than two) is a sound of its own, found or not by another
+    template. gain_db is the layer's level against the top match's (both
+    files peak-normalized), lag_ms how much later it starts.
+    The research behind it: 10 of 12 layered snares, 0 of 12 plain ones
+    given a layer (the rule was chosen on those 24 cases)."""
+    main, n = ranked[0], len(t)
+    tb = band(t, b)
+    atom, _ = library.atoms(t, b, [main])
+    g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
+    rest = (tb - g * atom[0]).astype(np.float32)
+    seen, partners = {main["i"]}, []
+    for r in library.distinct(ranked, n, keep=pool) + library.distinct(_search(library, rest, b, False, None)[0], n,
+                                                                        keep=pool):
+        if r["i"] not in seen and not library.same(r["i"], main["i"], n):
+            seen.add(r["i"])
+            partners.append(r)
+    atoms, lags = library.atoms(t, b, [main] + partners)
+    fit2 = pair_fit(tb, atoms)
+    # a partner that correlates with the top match is the same sound again (a copy at another pitch, a
+    # near-copy), not a second one: its fit is ill-conditioned (an open hat's near-copy came out +23 dB)
+    alike = atoms @ atoms[0] / (np.linalg.norm(atoms, axis=1) * np.linalg.norm(atoms[0]) + 1e-12) >= SAME_SOUND
+    residual = np.where(alike, np.inf, fit2["residual_db"])
+    k = int(np.argmin(residual)) if partners else 0
+    if not partners or not np.isfinite(residual[k]):
+        return [], {"accepted": False, "why": "no other sound fits with a positive gain"}
+    r = partners[k - 1]
+    better = round(fit2["single_db"] - float(fit2["residual_db"][k]), 2)
+    layer = {**_entry(r), "gain_db": round(float(20 * np.log10(fit2["gains"][1][k] / fit2["gains"][0][k])), 2),
+             "lag_ms": round(float(lags[k] - lags[0]) * 1000 / SR, 2)}
+    evidence = {"single_db": round(fit2["single_db"], 2), "pair_db": round(float(fit2["residual_db"][k]), 2),
+                "better_db": better, "partner": layer["file"]}
+    if any(library.same(r["i"], i, n) for i in taken):
+        return [], {**evidence, "accepted": False, "why": "the partner is another template's sound"}
+    if drums is not None:
+        at, away = _elsewhere(library, r, b, drums, hits)
+        evidence["heard"] = {"at_hits": at, "elsewhere": away}
+        if away > max(at, 2):
+            return [], {**evidence, "accepted": False, "why": "the partner plays elsewhere in the song"}
+    if better < min_db:
+        return [], {**evidence, "accepted": False, "why": f"the partner takes off less than {min_db:g} dB"}
+    return [layer], {**evidence, "accepted": True}
+
+
+def _kick_source(library: Library, info: dict, ranked: list[dict], sources: dict, r808: np.ndarray | None,
+                 claimed) -> tuple[dict, np.ndarray | None, list[dict] | None]:
+    """A kick-band template read from each other source (kick_sources): the
+    best match of each, and the source whose best match is closest wins,
+    unless that match is a sound another template was given (claimed(path)).
+    Returns (the evidence, the winning window and ranking, or None for the
+    drum stem's)."""
+    g = Group(members=[tuple(m) for m in info["members"]])
+    tops, best = {"drums": ranked[0]["ncc"]}, (ranked[0]["ncc"], "drums", None, None)
+    for src, x in sources.items():
+        t = template(x, g, LENGTH_MS["kick"])[0]
+        if r808 is not None:
+            t = _explained(t, template(r808, g, LENGTH_MS["kick"])[0])
+        found = library.match(t, "kick", semitones=range(-4, 5), top=40)
+        tops[src] = found[0]["ncc"]
+        if found[0]["ncc"] > best[0] and not claimed(found[0]["path"]):
+            best = (found[0]["ncc"], src, t, found)
+    return {"source": best[1], "top_ncc": tops}, best[2], best[3]
+
+
 def match(work: str | Path, library: Library, stems_dir: str | Path | None = None, detune: float | None = None,
           log=print) -> dict:
     """The library's sound for each template, with a verdict.
 
-    Every template is matched in all three bands. A template often holds two
-    sounds that always play together (a hat on every kick): each band shows
-    one of them. Identities are handed out from the strongest match down; a
-    sample already given to another template goes to this one too only if it
+    Every template is matched in all three bands (_search): in the snare and
+    hat bands at any pitch through the speckle index (when the library has
+    one), in the kick band, and for templates found in the low band in every
+    band, by whole semitones. A template often holds two sounds that always
+    play together (a hat on every kick): each band shows one of them.
+    Identities are handed out from the strongest match down; a sample
+    already given to another template goes to this one too only if it
     matches it just as well (>= 0.9: the same sound found twice, `same_as`),
-    otherwise this template takes its best match in another band.
+    otherwise this template takes its best match in another band. A
+    template given the kick band is then also read from drums + bass and
+    from the mix with the 808 taken out (kick_sources), and the source whose
+    best match is closest wins (`source`). Last, a template matched in the
+    snare or hat band gets its second sound, if it is layered (_layer).
     """
     work = Path(work)
     analysis = _load(work / "analysis.json")
-    drums = read(Path(stems_dir or analysis["source"]["stems"]) / "drums.wav")
+    templates = analysis["templates"]
+    stems = Path(stems_dir or analysis["source"]["stems"])
+    drums = read(stems / "drums.wav")
+    if library.speckle_info.get("ignored"):
+        log(f"speckle index ignored: {library.speckle_info['ignored']}; noisy sounds by whole semitones")
     by_band: dict[str, dict[str, list[dict]]] = {}
-    for name in analysis["templates"]:
+    ranked_by: dict[tuple[str, str], list[dict]] = {}
+    windows: dict[tuple[str, str], np.ndarray] = {}
+    method: dict[tuple[str, str], str] = {}
+    for name, info in templates.items():
         full = _template(work, name)
         by_band[name] = {}
         for role in ("kick", "snare", "hat"):
-            t = full[: samples(LENGTH_MS[role])]
-            semis = range(-4, 5) if role == "kick" else range(-3, 4)
-            best = None
-            for base in [0.0] + ([detune] if detune else []):
-                ranked = library.distinct(library.match(t, role, semitones=semis, base=base, top=40), len(t))
-                if best is None or ranked[0]["ncc"] > best[0]["ncc"]:
-                    best = ranked
-            by_band[name][role] = best
+            t = windows[name, role] = full[: samples(LENGTH_MS[role])]
+            ranked_by[name, role], method[name, role] = _search(library, t, role, info["band"] == "low", detune)
+            by_band[name][role] = library.distinct(ranked_by[name, role], len(t))
     claims: dict[str, tuple[str, float]] = {}
     chosen: dict[str, str] = {}
     same_as: dict[str, str] = {}
@@ -168,12 +365,23 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
             claims[path] = (name, score)
         elif score >= 0.9 and claims[path][1] >= 0.9:
             same_as[name] = claims[path][0]
+    band_of = {name: chosen.get(name) or (same_as.get(name) and chosen.get(same_as[name]))
+               or {"low": "kick"}.get(info["band"], info["band"]) for name, info in templates.items()}
+    kicks = [n for n in templates if band_of[n] == "kick" and n not in same_as and templates[n].get("members")]
+    sources, r808, source_info = kick_sources(work, analysis, stems, drums) if kicks else ({}, None, {})
+    kick_source: dict[str, dict] = {}
+    for name in kicks:
+        kick_source[name], t, ranked = _kick_source(
+            library, templates[name], ranked_by[name, "kick"], sources, r808,
+            lambda path, me=name: path in claims and claims[path][0] != me)
+        kick_source[name] |= source_info
+        if ranked is not None:
+            windows[name, "kick"], ranked_by[name, "kick"] = t, ranked
+            by_band[name]["kick"] = library.distinct(ranked, len(t))
     out = {}
-    for name, info in analysis["templates"].items():
-        b = chosen.get(name) or (same_as.get(name) and chosen.get(same_as[name])) \
-            or {"low": "kick"}.get(info["band"], info["band"])
-        full = _template(work, name)
-        t = full[: samples(LENGTH_MS[b])]
+    for name, info in templates.items():
+        b = band_of[name]
+        t = windows[name, b]
         top = by_band[name][b][:5]
         named = Counter(FAMILY.get(r["role"], r["role"]) for r in top)
         vote, votes_n = named.most_common(1)[0]
@@ -184,20 +392,35 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
         votes = per_hit_votes(drums, members, candidates, b) if members else None
         wins_share = (votes["wins"][top[0]["path"]] / max(1, sum(votes["wins"].values()))) if votes else None
         out[name] = {"role": role, "matched_in_band": b, "same_as": same_as.get(name),
-                     "library_roles_top5": dict(named),
-                     "top": [{"path": r["path"], "file": Path(r["path"]).name, "role": r["role"], "ncc": r["ncc"],
-                              "semitones": r["semitones"], "lag_ms": r["lag_ms"]} for r in top],
+                     "search": method[name, b], "library_roles_top5": dict(named),
+                     "top": [_entry(r) for r in top],
                      "other_bands": {ob: {"file": Path(r[0]["path"]).name, "ncc": r[0]["ncc"],
-                                          "semitones": r[0]["semitones"]}
+                                          "semitones": r[0]["semitones"], "search": method[name, ob]}
                                      for ob, r in by_band[name].items() if ob != b},
                      "margin": margin, "per_hit": votes,
                      "null_test_db": {Path(p).name: null_test(t, c, b) for p, c in candidates.items()},
                      "verdict": verdict(role, top[0]["ncc"], margin, wins_share)}
+        if name in kick_source:
+            out[name] |= {"source": kick_source[name]["source"], "kick_source": kick_source[name]}
+        if library.speckle_info.get("version"):
+            out[name]["speckle_index"] = library.speckle_info["version"]
         if name in same_as:
             out[name]["verdict"] = f"same sound as {same_as[name]}"
-        others = ", ".join(f"{ob}: {v['file'][:22]} {v['ncc']:.2f}" for ob, v in out[name]["other_bands"].items())
-        log(f"  {name:9s} -> {role:6s} {Path(top[0]['path']).name[:34]:34s} st {top[0]['semitones']:+.0f} "
-            f"ncc {top[0]['ncc']:.3f} margin {margin:+.3f} [{b}] ({out[name]['verdict']}) | {others}")
+    for name in templates:
+        b, m = band_of[name], out[name]
+        if name in same_as or b == "kick":
+            why = f"same sound as {same_as[name]}" if name in same_as else TONAL_LAYERS
+            m["layers"], m["layer_search"] = [], {"accepted": False, "why": why}
+        else:
+            taken = [by_band[o][band_of[o]][0]["i"] for o in templates if o != name]
+            hits = np.array([s - lag for s, lag, *_ in templates[name].get("members") or []]) / SR
+            m["layers"], m["layer_search"] = _layer(library, windows[name, b], b, ranked_by[name, b], taken,
+                                                    drums=drums, hits=hits)
+        others = ", ".join(f"{ob}: {v['file'][:22]} {v['ncc']:.2f}" for ob, v in m["other_bands"].items())
+        layer = f" + {m['layers'][0]['file'][:24]} {m['layers'][0]['gain_db']:+.1f} dB" if m["layers"] else ""
+        where = f"{b}, {m['source']}" if m.get("source") else b
+        log(f"  {name:9s} -> {m['role']:6s} {m['top'][0]['file'][:34]:34s} st {m['top'][0]['semitones']:+.2f} "
+            f"ncc {m['top'][0]['ncc']:.3f} margin {m['margin']:+.3f} [{where}] ({m['verdict']}){layer} | {others}")
     _save(work / "matches.json", out)
     return out
 
