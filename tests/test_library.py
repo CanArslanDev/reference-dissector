@@ -3,11 +3,11 @@ import json
 import numpy as np
 import pytest
 import soundfile as sf
-from conftest import placed
+from conftest import burst, placed
 from scipy.optimize import nnls
 
-from refdissect.audio import SR, fit, transpose
-from refdissect.library import Library, inventory, pair_fit, role_of, speckle_path, summarize, verdict
+from refdissect.audio import SR, fit, samples, transpose, trim_onset
+from refdissect.library import Library, copies, inventory, pair_fit, role_of, speckle_path, summarize, verdict
 
 
 def test_roles_from_names():
@@ -151,3 +151,19 @@ def test_a_copy_at_another_pitch_is_the_same_sound(noisy):
     assert not both.same(30, len(sounds), len(t)) and both.same(30, len(sounds), len(t), semitones=(0.0, 0.22))
     listed = [r["i"] for r in both.distinct(ranked, len(t))]
     assert listed[0] in (30, len(sounds)) and (30 in listed) != (len(sounds) in listed)
+
+
+def test_two_kicks_at_one_pitch_are_two_sounds():
+    """Two different sine-like kicks, the second tuned 2 semitones up:
+    played at one pitch they agree in the full band, where the tone is
+    (0.99), but not in the snare band (0.10), so distinct lists both. (A
+    kit's copy at another pitch agrees in both: the test above.)"""
+    n, length = int(0.6 * SR), samples(200)
+    a, b = burst(500, 400, 30, 2000, 150, tone_hz=50.0), burst(501, 400, 30, 2000, 150, tone_hz=50 * 2 ** (2 / 12))
+    entries = np.stack([fit(trim_onset(x), n) / np.max(np.abs(x)) for x in (a, b)]).astype(np.float16)
+    kicks = Library(["/lib/kick a.wav", "/lib/kick b.wav"], ["kick", "kick"], entries, 0.6)
+    played = kicks.candidate(0, length), kicks.candidate(1, length, -2.0)
+    assert copies(*played, pitched=False)  # what the full band alone calls one recording
+    assert not copies(*played, pitched=True) and not kicks.same(0, 1, length, semitones=(0.0, -2.0))
+    ranked = [{"i": 1, "semitones": -2.0}, {"i": 0, "semitones": 0.0}]
+    assert [r["i"] for r in kicks.distinct(ranked, length)] == [1, 0]
