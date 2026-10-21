@@ -66,7 +66,11 @@ HOLDS = ((0.3, 2.0), (0.015, 0.3))  # S holds H: LS coefficient c, share of S's 
 COMPOSITE = 0.8  # share of a template the earlier ones explain: not a sound of its own
 ECHO = 0.5  # share of a template's own band an earlier one explains: its matched filter repeats that one
 SAME_SOUND = 0.6  # placed templates this alike are one sound found twice
-DUPLICATE = 0.5  # share of a template's hits that are another's found twice: one sound
+# Share of a template's hits that are another's found twice: one sound. A
+# sound layered on another in half its hits (a clap on every other snare)
+# loses half; 13 of the 15 merges on the suite lost 0.67-1.0 of the fewer's
+# hits, and the other two (0.57, 0.63) were sounds of their own
+DUPLICATE = 2 / 3
 TONAL = (0.5, 0.25, 0.5)  # a tone: this share in the kick band, or this one ringing this much (tonal)
 SHARP = 0.5  # NCC with its copy 1 semitone off under which a template is noisy enough for pitched copies
 SEMITONES = (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5)
@@ -483,10 +487,16 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
 def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int],
                kind: list[bool]) -> dict[int, tuple[int, int]]:
     """Columns of one kind (kind: tonal or not; None, never merged) that
-    keep losing their hits to each other (DUPLICATE of the fewer's hits found twice; a kick+hat
-    template and a hat template share the hat, not the kind): {merged:
-    (into, offset)} with p_into = p_merged + offset, into the one earlier in
-    first."""
+    keep losing their hits to each other (DUPLICATE of the fewer's hits
+    found twice; a kick+hat template and a hat template share the hat, not
+    the kind): {merged: (into, offset)} with p_into = p_merged + offset,
+    into the one earlier in first. At half, a clap on every other snare at
+    a constant offset (its template and the snare's each holding half the
+    other) lost half its hits to the snare, was merged into it, and its
+    solo hits went too: 0 of 32 claps. Matching as waveforms instead (NCC
+    0.85 in both bands, as discover() asks) kept that clap apart but also
+    one kick found twice 17 ms apart (0.77 in the snare band; v1orig-5 kick
+    F1@20 0.98 -> 0.22)."""
     count: dict[tuple[int, int], list[int]] = {}
     for i, j in pairs:
         a, b = int(cands.col[i]), int(cands.col[j])
@@ -703,7 +713,7 @@ def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple
     order += [c for c in range(len(columns)) if c not in order]
     kind = [None if c.semitones else c.template in sc.tones for c in columns]  # pitched copies are never merged
     merged: dict[int, tuple[int, int]] = {}
-    for _ in range(3):
+    for _ in range(len(columns)):  # each round merges a column away: the last one merges none
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
         dup = duplicates(cands, pairs, order, kind)
@@ -711,12 +721,25 @@ def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple
             break
         for a, (b, off) in dup.items():
             merged[a] = (b, off)
-            mine = cands.take(cands.col == a)
-            new = _far(mine.p + off, cands.p[cands.col == b], 2)
-            cands = cands.take(cands.col != a)
-            cands.add(b, (mine.p + off)[new], mine.ncc[new], "matched")
+            for ca, cb in _with_copies(columns, a, b):
+                mine = cands.take(cands.col == ca)
+                cands = cands.take(cands.col != ca)
+                if cb is not None:
+                    new = _far(mine.p + off, cands.p[cands.col == cb], 2)
+                    cands.add(cb, (mine.p + off)[new], mine.ncc[new], "matched")
         cands = cands.sorted()
+    else:
+        kept, _ = distinct(kit, cands, fit(kit, cands)[0])
     return cands.take(kept), merged
+
+
+def _with_copies(columns: list[Column], a: int, b: int) -> list[tuple[int, int | None]]:
+    """Column a merged into b, and a's pitched copies into b's of the same
+    semitones (or dropped): left behind, they reported hits under the
+    merged template's name (full-1, one hit)."""
+    theirs = {col.semitones: c for c, col in enumerate(columns) if col.template == columns[b].template}
+    return [(a, b)] + [(c, theirs.get(col.semitones)) for c, col in enumerate(columns)
+                       if col.template == columns[a].template and col.semitones]
 
 
 def _significant(sc: Scene, cands: Candidates, min_gain: float) -> tuple[Candidates, np.ndarray]:
