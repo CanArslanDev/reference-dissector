@@ -425,13 +425,14 @@ def unlocked(x: np.ndarray, kept: list[Candidate]) -> list[Candidate]:
     before a snare is part of it, or of the sound before it. On two suite
     beats a candidate played no true hit 41.6 and 42.7 ms before every
     snare, 1.6 and 15.4 dB under it; on 28 others no candidates were
-    locked. A kick's body after its click guesses kick too, and stays."""
+    locked. A kick's body after its click guesses kick too, and stays. A
+    view of one that goes is the same sound, and goes with it."""
     out = list(kept)
     for a in kept:
         for b in kept:
             if a is not b and a in out and b in out and a.role != b.role and locked(a, b):
                 out.remove(a if loudness_db(x, a) < loudness_db(x, b) else b)
-    return out
+    return [c for c in out if c.view_of is None or c.view_of in out]
 
 
 def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: int = 3,
