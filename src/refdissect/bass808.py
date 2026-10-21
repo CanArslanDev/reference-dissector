@@ -867,7 +867,8 @@ def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 
     sounding()), cents (midi_settled over pitch), transposition (cents re
     the template), gain (re the template), ncc, peak (the 808 band's 25 ms
     RMS peak over the first 200 ms, as notes_808 had it), kick (a drum
-    attack at its onset), flags."""
+    attack at its onset), flags ("legato"), and a legato note's glide
+    (from_midi, to_midi, t, ms, shape "lin", kind "legato": legato())."""
     lo = band(bass, "808")
     x = lowband(bass)
     att = reattacks(lo)
