@@ -56,6 +56,7 @@ SAME_MS = 15  # hits of two templates this close are one moment
 # this close to the main's are those hits
 VIEW_MS = 50
 RING_MS = 250  # how long after a hit its template's own ring is looked for (ringing())
+RESIDUAL_BARS = 16  # the residual pass needs 3 hits, or one per this many bars
 START_BANDS = ("hat", "snare", "kick")  # where a template's hits are seen to start (starts_before)
 ROLE_BAND = {"kick": "low", "snare": "snare", "hat": "hat"}  # where a guessed role's sound is compared
 RESIDUAL_MS = 10  # an onset this close to a template's hit is explained by it
@@ -143,11 +144,11 @@ def new_energy_role(x: np.ndarray, g: Group, gap_ms: float = 10, span_ms: float 
     return role, {k: round(v, 3) for k, v in shares.items()}
 
 
-def min_hits_for(n_samples: int, grid: Grid) -> int:
+def min_hits_for(n_samples: int, grid: Grid, bars_per_hit: float = 4) -> int:
     """How many hits a sound needs at one place of the beat to be seeded: 3,
-    or one per 4 bars in a longer song."""
+    or one per 4 bars in a longer song (bars_per_hit)."""
     bars = max(1.0, (n_samples / SR - max(grid.phase, 0.0)) / grid.bar)
-    return max(3, int(np.ceil(bars / 4)))
+    return max(3, int(np.ceil(bars / bars_per_hit)))
 
 
 def seeds(x: np.ndarray, band_name: str) -> np.ndarray:
@@ -491,7 +492,7 @@ def starts_before(ys: list[np.ndarray], times: np.ndarray, near_ms: float = 2.0,
 
 
 def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_hits: int | None = None,
-             width_ms: float = 12.0, residual: bool = True, min_residual: int = 3) -> list[Template]:
+             width_ms: float = 12.0, residual: bool = True, min_residual: int | None = None) -> list[Template]:
     """Templates of the sounds that repeat. grid: on the attacks' time base
     (grid.estimate's; only its tempo and phase are used).
 
@@ -505,11 +506,12 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     once (one_per_sound; a partial view that finds hits the others miss is
     kept as same_sound_as, its shared hits counted once: count_once). Then
     the onsets none of them explains are grouped wherever they sit
-    (residual_candidates: min_residual hits) and go through the same tests.
-    Each template's role is guessed from the energy its hits add
-    (new_energy_role); its audio is the hits' mean (the median in the hat
-    band), the sound's start in its role's band PRE into it (attack_s), or
-    earlier where most of its hits start (starts_before).
+    (residual_candidates: min_residual hits, by default 3 or one per 16
+    bars) and go through the same tests. Each template's role is guessed
+    from the energy its hits add (new_energy_role); its audio is the hits'
+    mean (the median in the hat band), the sound's start in its role's band
+    PRE into it (attack_s), or earlier where most of its hits start
+    (starts_before).
 
     Against the code before (16th slots +-12 ms, 8 hits a slot, a cross-band
     duplicate test, the full-band attack) on 32 suite beats of 14 scenarios
@@ -524,6 +526,7 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     kept = one_per_sound([c for c in grid_candidates(drums, grid, bands, min_hits, width_ms, seeded)
                           if starts_something(c, onsets, top)])
     if residual:
+        min_residual = min_residual or min_hits_for(len(drums), grid, RESIDUAL_BARS)
         kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual, seeded)
                               if starts_something(c, onsets, top)], kept)
     kept = unlocked(drums, kept)

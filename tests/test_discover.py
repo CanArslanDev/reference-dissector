@@ -13,6 +13,7 @@ from refdissect.detect import (
     count_once,
     detect,
     discover,
+    min_hits_for,
     one_per_sound,
     places,
     starts_before,
@@ -359,3 +360,12 @@ def test_a_template_starts_where_its_hits_do():
     for a in t:
         hit[int(a * SR):int(a * SR) + samples(30)] = 1.0
     assert starts_before([click, hit], t) == 0.0
+
+
+def test_the_residual_pass_asks_more_of_a_long_song():
+    """A residual group needs 3 hits on a 30 s beat, one per 16 bars in a
+    longer song (the grid's groups one per 4 bars): with 3, the extra
+    templates grew with the song's length."""
+    grid = Grid(120.0, 0.0)
+    assert [min_hits_for(int(bars * grid.bar * SR), grid, 16) for bars in (16, 72, 96)] == [3, 5, 6]
+    assert [min_hits_for(int(bars * grid.bar * SR), grid) for bars in (16, 72, 96)] == [4, 18, 24]
