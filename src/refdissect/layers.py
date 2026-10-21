@@ -32,6 +32,11 @@ hat that plays on every snare) has it subtracted, else it takes that
 sound's place at every hit (purification), and a template the others
 explain (a duplicate, a kick+hat found where they always coincide) is left
 out, its hits handed to the templates that explain it.
+
+On 22 calibration-suite beats (layers, rolls, flams, dynamics, v1, v1orig,
+producer, full, kick808), against one template per moment and band: hats
+under a snare 16 -> 326 of 432 found, 64th hat rolls 19 -> 50 of 64, drum
+F1 at 20 ms 0.421 -> 0.581 (docs/01-pipeline.md).
 """
 
 from __future__ import annotations
