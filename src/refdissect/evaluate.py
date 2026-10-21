@@ -513,26 +513,55 @@ def _drum_assignment(truth: dict, est: dict) -> tuple[dict, dict, dict, list]:
     return t_times, e_times, *assign(t_times, e_times, roles=(_roles(truth, t_events), _roles(est, e_events)))
 
 
-def drum_scores(truth: dict, est: dict) -> dict | None:
+def _same_file_cents(truth: dict, est: dict, assignment: dict) -> dict[str, dict[str, float]]:
+    """Per truth sound, each estimated sound assigned to it that plays its
+    file (the same sha256) and how many cents off its pitch (semitones +
+    cents/100 on both sides, estimate minus truth). Another file has no
+    pitch to compare."""
+    t_sounds, e_sounds = truth.get("sounds") or {}, est.get("sounds") or {}
+    out: dict[str, dict[str, float]] = {}
+    for e, a in assignment.items():
+        ts, es = t_sounds.get(a["to"]) or {}, e_sounds.get(e) or {}
+        if ts.get("sha256") and ts["sha256"] == es.get("sha256"):
+            pitch = [100 * v.get("semitones", 0.0) + v.get("cents", 0.0) for v in (es, ts)]
+            out.setdefault(a["to"], {})[e] = round(float(pitch[0] - pitch[1]), 2)
+    return out
+
+
+def drum_scores(truth: dict, est: dict, files: bool = False) -> dict | None:
     """Per truth drum sound (a layer, layer_of, is a sound of its own): the
     onset scores of the estimated sounds assigned to it, their hits pooled (a
     hit played twice is a false positive, on one pad or on two), v1's rule
     beside them; then the assignment, the extra sounds, and the macro means
-    over truth sounds."""
+    over truth sounds. files: the estimate's sounds are the files a sampler
+    plays (a plan's pads), so pitch scores the ones that play their truth
+    sound's file (_same_file_cents): same_file, the share of truth sounds
+    played by their own file, and |cents| over those pads, mean and max.
+    The suite's detuned snare (-0.70 semitones) played with Transpose
+    alone is 30 cents off, which no onset score sees."""
     events = truth.get("drums") or []
     if not events:
         return None
     t_times, e_times, assignment, extra = _drum_assignment(truth, est)
     layer_of, roles = {e["sound"]: e.get("layer_of") for e in events}, _roles(truth, events)
+    cents = _same_file_cents(truth, est, assignment) if files else {}
     sounds = {}
     for s, ref in t_times.items():
         mine = [e for e, a in assignment.items() if a["to"] == s]
         pooled = np.concatenate([e_times[e] for e in mine]) if mine else np.zeros(0)
         sounds[s] = {"role": roles[s], "layer_of": layer_of[s], "estimated": mine,
                      **onset_scores(ref, pooled), "v1": v1_scores(ref, [e_times[e] for e in mine])}
+        if files:
+            sounds[s]["same_file_cents"] = cents.get(s)
     macro = {k: round(float(np.mean([v[k] for v in sounds.values()])), 4) for k in ("f1_20", "f1_50")}
     macro["v1_f1"] = round(float(np.mean([v["v1"]["f1"] for v in sounds.values()])), 4)
-    return {"sounds": sounds, "assignment": assignment, "extra": extra, "macro": macro}
+    out = {"sounds": sounds, "assignment": assignment, "extra": extra, "macro": macro}
+    if files:
+        off = [abs(c) for v in cents.values() for c in v.values()]
+        out["pitch"] = {"same_file": round(len(cents) / len(sounds), 4), "pads": len(off),
+                        "cents_abs_mean": round(float(np.mean(off)), 2) if off else None,
+                        "cents_abs_max": round(float(np.max(off)), 2) if off else None}
+    return out
 
 
 # ── Notes: 808, melodic layers, chords ──
@@ -826,7 +855,8 @@ def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str
     events files: a truth file's audio paths are read from its folder).
     levels needs render_dir, render_plan's output for the plan the estimate
     came from (and reference, the stems its faders were set against, for
-    the kit levels). Melodic notes and chords are scored only when the
+    the kit levels). A plan's drum pads are also scored for pitch
+    (drum_scores' files). Melodic notes and chords are scored only when the
     estimate carries them: without them the step did not run, and zeros
     would read as notes it missed. summary: the strict macro F1 at 20 ms over
     the truth's drum sounds and the 808 onsets, the end-to-end replica
@@ -838,9 +868,9 @@ def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str
         estimate = load_events(estimate)
     validate(truth)
     validate(estimate)
-    out: dict = {"scenario": truth.get("scenario"),
-                 "estimate_from": ((estimate.get("generator") or {}).get("switches") or {}).get("from"),
-                 "drums": drum_scores(truth, estimate), "808": bass_scores(truth, estimate),
+    source = ((estimate.get("generator") or {}).get("switches") or {}).get("from")
+    out: dict = {"scenario": truth.get("scenario"), "estimate_from": source,
+                 "drums": drum_scores(truth, estimate, files=source == "plan"), "808": bass_scores(truth, estimate),
                  "melodic": melodic_scores(truth, estimate) if "notes" in estimate else None,
                  "chords": chord_scores(truth, estimate) if "chords" in estimate else None,
                  "rhythm": rhythm_scores(truth, estimate)}
