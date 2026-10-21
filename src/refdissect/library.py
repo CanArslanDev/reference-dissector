@@ -441,18 +441,22 @@ class Library:
             lags.append(lag)
         return np.stack(out).astype(np.float64), np.array(lags)
 
-    def same(self, i: int, j: int, length: int, threshold: float = 0.95) -> bool:
-        """Two entries that are one recording (kits copy each other's sounds)."""
+    def same(self, i: int, j: int, length: int, threshold: float = 0.95, semitones=(0.0, 0.0)) -> bool:
+        """Two entries that are one recording (kits copy each other's sounds),
+        each played at its semitones: a kit's copy at another pitch too."""
         if i == j:
             return True
-        a, b = self.candidate(i, length), self.candidate(j, length)
+        a, b = self.candidate(i, length, semitones[0]), self.candidate(j, length, semitones[1])
         return abs(ncc(a, b, samples(2))[0]) > threshold
 
     def distinct(self, ranked: list[dict], length: int, keep: int = 5) -> list[dict]:
-        """The ranking with copies of a higher-ranked sound removed."""
+        """The ranking with copies of a higher-ranked sound removed, also
+        copies at another pitch that sound the same where they were found
+        (the fine search finds them: an open hat's copy 0.22 semitones down
+        tied the original at NCC 0.84 and left the verdict no margin)."""
         out: list[dict] = []
         for r in ranked:
-            if any(self.same(r["i"], o["i"], length) for o in out):
+            if any(self.same(r["i"], o["i"], length, semitones=(r["semitones"], o["semitones"])) for o in out):
                 continue
             out.append(r)
             if len(out) == keep:

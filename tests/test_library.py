@@ -6,7 +6,7 @@ import soundfile as sf
 from conftest import placed
 from scipy.optimize import nnls
 
-from refdissect.audio import SR, transpose
+from refdissect.audio import SR, fit, transpose
 from refdissect.library import Library, inventory, pair_fit, role_of, speckle_path, summarize, verdict
 
 
@@ -133,3 +133,21 @@ def test_pair_fit_is_nonnegative_least_squares():
     assert np.allclose([out["gains"][0][3], out["gains"][1][3]], g)
     assert out["residual_db"][3] == pytest.approx(10 * np.log10(res ** 2 / np.sum(target ** 2)))
     assert out["single_db"] > out["residual_db"][3] + 3
+
+
+def test_a_copy_at_another_pitch_is_the_same_sound(noisy):
+    """A kit's copy of a snare, resampled 0.22 semitones down: found by the
+    fine search at +0.22 next to the original at 0, it is one sound, listed
+    once (at 0 semitones the two correlate far less)."""
+    lib, sounds = noisy
+    n = int(0.6 * SR)
+    copy = transpose(sounds[30], -0.22)
+    entries = np.r_[lib.audio, (fit(copy, n) / np.max(np.abs(copy)))[None].astype(np.float16)]
+    both = Library(lib.paths + ["/lib/copy.wav"], lib.roles + ["snare"], entries, lib.seconds)
+    both.build_speckle()
+    t = placed(sounds[30], 0.0, 150)
+    ranked = both.match_fine(t, "snare", top=10)
+    assert {ranked[0]["i"], ranked[1]["i"]} == {30, len(sounds)}
+    assert not both.same(30, len(sounds), len(t)) and both.same(30, len(sounds), len(t), semitones=(0.0, 0.22))
+    listed = [r["i"] for r in both.distinct(ranked, len(t))]
+    assert listed[0] in (30, len(sounds)) and (30 in listed) != (len(sounds) in listed)
