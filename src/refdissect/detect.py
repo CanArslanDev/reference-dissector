@@ -310,29 +310,41 @@ def grid_candidates(x: np.ndarray, grid: Grid, bands, min_hits: int, width_ms: f
     return [c for c in out if len(c.times)]
 
 
-def onset_share(c: Candidate, onsets: np.ndarray, top: np.ndarray) -> tuple[float, float]:
+def onset_share(c: Candidate, onsets: np.ndarray, top: np.ndarray,
+                near_ms: float = RESIDUAL_MS) -> tuple[float, float, float]:
     """(share of c's hits that sit on an onset, one of `onsets` within
-    RESIDUAL_MS; share whose hat band (`top`) rises there, within 15 ms)."""
+    near_ms; share whose hat band (`top`) rises there, within 15 ms; share
+    with an onset 15-45 ms before them)."""
     if not len(c.times):
-        return 0.0, 0.0
-    on = len(pairs(c.times, onsets, RESIDUAL_MS)[0]) / len(c.times)
+        return 0.0, 0.0, 0.0
+    on = len(pairs(c.times, onsets, near_ms)[0]) / len(c.times)
     at = np.round(c.times * SR).astype(int)
     up = np.mean([rise(top, int(t), samples(15), samples(15)) is not None for t in at])
-    return on, float(up)
+    before = np.mean(np.searchsorted(onsets, c.times - 0.015) > np.searchsorted(onsets, c.times - 0.045))
+    return on, float(up), float(before)
 
 
 def starts_something(c: Candidate, onsets: np.ndarray, top: np.ndarray, min_onsets: float = 0.3,
-                     min_top: float = 0.05) -> bool:
-    """Whether a candidate's hits start a sound: min_onsets of them on an
-    onset, and min_top with an attack that reaches the hat band. What rings
-    does not: an 808 matched once a period in the snare band, or the body
-    of a kick, which htdemucs leaves in the drum stem 20-40 ms after its
-    click. On 8 suite beats the candidates that played no true hit (10 % or
-    fewer within 20 ms) and rang had 4-28 % of their hits on an onset, or
-    0-3 % rising in the hat band; those whose hits were true (60 % or more)
-    27-100 % and 27-100 %."""
-    on, up = onset_share(c, onsets, top)
-    return on >= min_onsets and up >= min_top
+                     min_top: float = 0.05, max_before: float = 0.3) -> bool:
+    """Whether a candidate's hits start a sound (onset_share): min_onsets of
+    them on an onset, and either min_top with an attack that reaches the hat
+    band or under max_before with an onset 15-45 ms before them. What rings
+    does not: an 808 matched once a period in the snare band, or the body of
+    a kick, which htdemucs leaves in the drum stem 20-40 ms after its click.
+    On 8 suite beats the candidates that played no true hit (10 % or fewer
+    within 20 ms) and rang had 4-28 % of their hits on an onset, or 0-3 %
+    rising in the hat band; those whose hits were true (60 % or more)
+    27-100 % and 27-100 %. A clean candidate (NCC >= 0.8 on 80 % of its
+    hits) with nothing starting just before it is let 15 ms from the
+    onsets: the template starts where its role's band climbs from the floor,
+    an onset where its band reaches 30 % of its peak, and on leadin-1 the
+    snare's template started 13 ms before its hat-band onsets (0.19 within
+    10 ms): no snare was found. A kick without a click has no top either,
+    but nothing starts just before it, as a click does before a body."""
+    on, up, before = onset_share(c, onsets, top)
+    if on < min_onsets and before < max_before and np.mean(c.ncc >= 0.8) >= 0.8:
+        on = onset_share(c, onsets, top, 15)[0]
+    return on >= min_onsets and (up >= min_top or before < max_before)
 
 
 def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float, float, int]:

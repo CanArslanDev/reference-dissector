@@ -7,13 +7,14 @@ import pytest
 from conftest import burst
 
 from refdissect.audio import PRE, SR, attack_time, samples
-from refdissect.detect import Candidate, Template, count_once, detect, discover, one_per_sound, places
+from refdissect.detect import Candidate, Template, count_once, detect, discover, one_per_sound, places, starts_something
 from refdissect.evaluate import assign, onset_scores
 from refdissect.grid import Grid
 from refdissect.hits import Group
 
 ROLE = {"kick": "kick", "snare": "snare", "hat": "hat", "rim": "rim", "perc": "perc", "crash": "crash",
-        "hat2": "hat", "late": "kick", "lead": "snare", "boom": "kick", "tonal": "snare", "pickup": "hat"}
+        "hat2": "hat", "late": "kick", "lead": "snare", "boom": "kick", "tonal": "snare", "pickup": "hat",
+        "sine": "kick"}
 
 
 @pytest.fixture(scope="module")
@@ -213,6 +214,67 @@ def test_a_tonal_snares_ring_is_not_its_hits(sounds):
     x, truth = arrange({**sounds, "tonal": tonal, "pickup": pickup}, hits, 16 * 4 * 60 / 140 + 1)
     sc = scored(*found(x, grid), truth)
     assert sc["tonal"]["f1_20"] > 0.95 and abs(sc["tonal"]["error_ms"]["median"]) < 2
+
+
+def sine_kick(hz: float = 50.0, ms: float = 400, decay_ms: float = 150, drop: float = 1.5) -> np.ndarray:
+    """An 808-style kick: a sine falling `drop` octaves over its first 40
+    ms, no click."""
+    t = np.arange(samples(ms)) / SR
+    f = hz * 2 ** (drop * np.exp(-t / 0.04))
+    x = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (decay_ms / 1000)) * np.clip(t / 0.002, 0, 1)
+    return (x / np.max(np.abs(x))).astype(np.float32)
+
+
+@pytest.mark.parametrize("bpm, steps", [(140, {"sine": [3, 11], "snare": [8], "hat": [0, 2, 4, 6, 8, 10, 12, 14]}),
+                                        (90, {"sine": [0, 7, 10], "snare": [4, 12]})])
+def test_a_kick_without_a_click_is_found(sounds, bpm, steps):
+    """A clickless kick between 8th hats, or with no hats at all: nothing
+    rises in its hat band, as for a kick's body after its click, but
+    nothing starts just before it either (it was lost: F1 0)."""
+    hits, grid = pattern(bpm, 16, steps, gains={"hat": (0.3, 0.5), "sine": (0.9, 0.9)})
+    x, truth = arrange({**sounds, "sine": sine_kick()}, hits, 16 * 4 * 60 / bpm + 1)
+    sc = scored(*found(x, grid), truth)
+    assert sc["sine"]["f1_20"] > 0.95 and abs(sc["sine"]["error_ms"]["median"]) < 3
+
+
+def test_lead_ins_of_different_lengths(sounds):
+    """As on the suite's leadin beats: quiet noise (-60 dB) before every
+    sound, 11 ms before the kick, 20 before the snare, 28 before the hats,
+    so the hats on the kicks attack 17 ms after them; the snare has a weak
+    click 6 ms before its body. Nothing rises in the hat band within 15 ms
+    of a kick, and nothing starts 15-45 ms before it: the kick stays (it
+    was dropped as a kick's body: F1 0)."""
+    rng = np.random.default_rng(7)
+
+    def lead(y, ms):
+        return np.r_[rng.standard_normal(samples(ms)).astype(np.float32) * 0.001, y]
+
+    snare = np.zeros(samples(260), np.float32)
+    snare[:samples(2)] = 0.35 * burst(43, 2, 1000, 9000, 1)
+    snare[samples(6):samples(256)] += burst(41, 250, 180, 9000, 60)
+    kit = {"kick": lead(sounds["kick"], 11), "snare": lead(snare, 20), "hat": lead(sounds["hat"], 28)}
+    hits, grid = pattern(137, 16, BACKBEAT, gains={"hat": (0.25, 0.4)})
+    x, truth = arrange(kit, hits, 16 * BAR + 1)
+    sc = scored(*found(x, grid), truth)
+    assert {k: v["f1_20"] > 0.9 for k, v in sc.items()} == {"kick": True, "snare": True, "hat": True}
+    assert abs(sc["snare"]["error_ms"]["median"]) < 2 and abs(sc["hat"]["error_ms"]["median"]) < 2
+
+
+def test_a_clean_template_may_start_a_little_before_its_onsets():
+    """Hand-built hits 13 ms before the onsets, as leadin-1's snare template
+    started (where its snare band climbs from the floor) before its onsets
+    (where the hat band reached 30 %): clean (NCC 0.95) they start
+    something; at NCC 0.7 they do not."""
+    t = 0.5 + 0.5 * np.arange(16)
+    top = np.zeros(SR * 9, np.float32)
+    for a in t + 0.013:
+        top[int(a * SR):int(a * SR) + 200] = 1.0
+
+    def cand(ncc):
+        return Candidate("hat", Group(), np.zeros(10, np.float32), PRE, t, np.ones(16), np.full(16, ncc),
+                         np.zeros(100, np.float32), "snare")
+
+    assert starts_something(cand(0.95), t + 0.013, top) and not starts_something(cand(0.7), t + 0.013, top)
 
 
 def test_a_views_hits_found_again_37_ms_later_count_once():
