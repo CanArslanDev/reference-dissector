@@ -15,6 +15,7 @@ from refdissect.detect import (
     discover,
     one_per_sound,
     places,
+    starts_before,
     starts_something,
     unlocked,
 )
@@ -337,3 +338,24 @@ def test_hits_found_again_do_not_make_a_view(kit):
     kept = cand("low", t)
     assert one_per_sound([cand("snare", np.r_[t[:4], t[:4] + 0.037])], [kept]) == [kept]
     assert len(one_per_sound([cand("snare", np.r_[t[:4], 9.5, 10.5, 11.5])], [kept])) == 2
+
+
+def test_a_template_starts_where_its_hits_do():
+    """starts_before() on hand-made bands: every hit starts 19 ms before
+    where its template says (a click before a body that rises too slowly to
+    start anything, as v1orig-5's kick template did); the template's start
+    moves there. Hits that also start where the template says (a flam's
+    main hit after its grace note) do not move it."""
+    t = 0.5 + 0.25 * np.arange(12)
+    click = np.zeros(SR * 4, np.float32)
+    for a in t - 0.019:
+        click[int(a * SR):int(a * SR) + samples(3)] = 1.0
+    swell = np.zeros(SR * 4, np.float32)
+    for a in t - 0.010:
+        i = int(a * SR)
+        swell[i:i + samples(40)] = np.linspace(0.05, 1.0, samples(40))
+    assert starts_before([click, swell], t) == pytest.approx(-0.019, abs=0.001)
+    hit = np.zeros(SR * 4, np.float32)
+    for a in t:
+        hit[int(a * SR):int(a * SR) + samples(30)] = 1.0
+    assert starts_before([click, hit], t) == 0.0

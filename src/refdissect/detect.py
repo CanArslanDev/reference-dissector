@@ -56,6 +56,7 @@ SAME_MS = 15  # hits of two templates this close are one moment
 # this close to the main's are those hits
 VIEW_MS = 50
 RING_MS = 250  # how long after a hit its template's own ring is looked for (ringing())
+START_BANDS = ("hat", "snare", "kick")  # where a template's hits are seen to start (starts_before)
 ROLE_BAND = {"kick": "low", "snare": "snare", "hat": "hat"}  # where a guessed role's sound is compared
 RESIDUAL_MS = 10  # an onset this close to a template's hit is explained by it
 # How far before an onset-strength peak its start is looked for: a kick's
@@ -70,7 +71,9 @@ class Template:
     (where it was found, and where it is detected), its hits lined up
     (MAX_MS long; averaged, the median in the hat band), the grid slots of
     those hits, and attack_s: seconds from the start of `audio` to where the
-    sound starts (hits.RISE of its role), PRE unless the window is cut.
+    sound starts (hits.RISE of its role), PRE unless the window is cut, or
+    less, even below 0, where its hits start earlier (starts_before; the
+    window stays where its matched filter finds them).
     same_sound_as names the template that holds the same sound in another
     band, found says which pass of discover() found it (grid, residual)."""
     name: str
@@ -89,7 +92,9 @@ class Template:
 class Candidate:
     """A group on its way to becoming a template: its band, its detection
     template (DETECT_MS, the sound's start `attack` samples in) and what
-    that finds over the whole stem: start times (s), gains and NCCs."""
+    that finds over the whole stem: start times (s), gains and NCCs. lead
+    (s, <= 0): how much earlier its hits start than its template says
+    (starts_before)."""
     band: str
     group: Group
     audio: np.ndarray
@@ -101,6 +106,7 @@ class Candidate:
     role: str = "snare"
     found: str = "grid"
     view_of: Candidate | None = None
+    lead: float = 0.0
 
 
 def new_energy_role(x: np.ndarray, g: Group, gap_ms: float = 10, span_ms: float = 60) -> tuple[str, dict]:
@@ -459,6 +465,31 @@ def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: i
     return [c for c in out if len(c.times) >= min_hits]
 
 
+def starts_before(ys: list[np.ndarray], times: np.ndarray, near_ms: float = 2.0, least_ms: float = 3.0,
+                  least: float = 0.5, more: float = 0.2) -> float:
+    """How much earlier (s, <= 0) a template's hits start than it says: per
+    hit, where each band of ys (START_BANDS of the stem) starts (hits.rise,
+    from the quietest point in the 30 ms before the hit to 7 ms after); the
+    offset (0.5 ms steps, -30 to +2 ms) with the most hits that have a band
+    starting within near_ms, and the median of those starts; when it is
+    least_ms or more before, at least `least` of the hits start there and
+    `more` more than at the template's own start. A template can start on
+    its sound's body: on 48 suite beats this moved 10 templates 3-22 ms
+    earlier, 8 of them nearer the truth (dynamics-2's kick +16.7 -> -1.6
+    ms, v1orig-5's +4.6 -> -1.1; rare-1's crash -8.1 -> -11.4). Its own
+    start, where a flam's main hit starts after the grace note, keeps it."""
+    if len(times) < 3:
+        return 0.0
+    at = np.round(times * SR).astype(int)
+    found = np.array([[np.nan if (r := rise(y, int(t) + samples(2), samples(32), samples(5))) is None
+                       else (r - t) / SR for y in ys] for t in at])
+    offsets = np.arange(-0.030, 0.00201, 0.0005)
+    share = np.array([np.mean(np.any(np.abs(found - d) <= near_ms / 1000, axis=1)) for d in offsets])
+    k, own = int(np.argmax(share)), share[np.argmin(np.abs(offsets))]
+    d = float(np.median(found[np.abs(found - offsets[k]) <= near_ms / 1000]))  # the starts themselves
+    return d if d <= -least_ms / 1000 and share[k] >= least and share[k] >= own + more else 0.0
+
+
 def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_hits: int | None = None,
              width_ms: float = 12.0, residual: bool = True, min_residual: int = 3) -> list[Template]:
     """Templates of the sounds that repeat. grid: on the attacks' time base
@@ -477,7 +508,8 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     (residual_candidates: min_residual hits) and go through the same tests.
     Each template's role is guessed from the energy its hits add
     (new_energy_role); its audio is the hits' mean (the median in the hat
-    band), the sound's start in its role's band PRE into it (attack_s).
+    band), the sound's start in its role's band PRE into it (attack_s), or
+    earlier where most of its hits start (starts_before).
 
     Against the code before (16th slots +-12 ms, 8 hits a slot, a cross-band
     duplicate test, the full-band attack) on 32 suite beats of 14 scenarios
@@ -495,6 +527,9 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
         kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual, seeded)
                               if starts_something(c, onsets, top)], kept)
     kept = unlocked(drums, kept)
+    ys = [band(drums, b) for b in START_BANDS]
+    for c in kept:
+        c.lead = starts_before(ys, c.times)
     kept.sort(key=lambda c: -len(c.times))
     names = {id(c): f"sound_{k + 1}" for k, c in enumerate(kept)}
     out: list[Template] = []
@@ -504,7 +539,7 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
                                            median=c.band == "hat")
         slot_counts = Counter(grid.step_in_bar(np.array(c.group.starts()) / SR).tolist())
         out.append(Template(names[id(c)], main.role, c.band, audio, used, dict(sorted(slot_counts.items())), c.group,
-                            round(at / SR, 5), names[id(main)] if c.view_of else None, c.found))
+                            round(at / SR + c.lead, 5), names[id(main)] if c.view_of else None, c.found))
     return out
 
 
