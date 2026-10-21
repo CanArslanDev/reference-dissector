@@ -259,8 +259,11 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     them (and at more than two) is a sound of its own, found or not by
     another template. gain_db is the layer's level against the top
     match's (both files peak-normalized), lag_ms how much later it starts.
-    The research behind it: 10 of 12 layered snares, 0 of 12 plain ones
-    given a layer (the rule was chosen on those 24 cases)."""
+    On 12 snares with a clap at a fixed offset and 12 plain ones (hits at
+    the true times; the research chose the 3 dB rule on these 24) it finds
+    both sounds in 10 and gives no plain snare a layer. A clap that moves
+    0-8 ms from hit to hit (the suite's layers scenario) is smeared in the
+    average: found in neither of 2 beats."""
     main, n = ranked[0], len(t)
     tb = band(t, b)
     atom, _ = library.atoms(t, b, [main])
