@@ -1,6 +1,7 @@
 """The steps in order, each writing what it found to a work folder:
 
     analyze(stems)   -> analysis.json, templates/*.npy|wav    (grid, tuning, drums, 808, sections)
+    melodic()        -> melodic.json, basicpitch/             (notes per tonal stem, chords)
     match(library)   -> matches.json                          (library sound per template, verdicts)
     fit_808()        -> synth808.json, 808 one-shot .wav      (the synthesized 808)
     plan()           -> plan.json, midi/                      (what Live gets)
@@ -241,18 +242,82 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     return result
 
 
+def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float | None = None,
+            snap_ms: float | None = None, voting: bool = True, drop_below: float | None = None, log=print) -> dict:
+    """Notes per tonal stem and chords (melodic.py): Basic Pitch runs once per
+    stem in its own environment, on the stem moved onto A440 by its tuning;
+    its notes and posteriorgrams go to basicpitch/. The minimum frequency is
+    just above the 808's usual range for the stems it bleeds into
+    (melodic.FLOOR_STEMS), or min_hz (as heard) for every stem when given.
+
+    The tuning is measured here on each stem (grid.tuning, as analyze does):
+    an analysis.json written before the stable-peak estimator has other
+    values (HAYIR DEMELIYDIM's: +21 to +35 cents where the stems measure -2
+    to -5), and taking those out moved in-tune stems off A440: the other
+    stem kept 165 of its 520 notes."""
+    from . import melodic as mel
+    from .basicpitch import PRESETS, transcribe
+    work = Path(work)
+    analysis = _load(work / "analysis.json")
+    stems_dir = Path(stems_dir or analysis["source"]["stems"])
+    stems = [s for s in mel.MELODIC_STEMS if (stems_dir / f"{s}.wav").is_file()]
+    if not stems:
+        raise ValueError(f"No tonal stem ({', '.join(mel.MELODIC_STEMS)}) in {stems_dir}")
+    audio = {s: read(stems_dir / f"{s}.wav") for s in stems}
+    tunings = {s: round(float(tuning(audio[s])), 3) for s in stems}
+    stale = [f"{s} {100 * mel.stem_tuning(analysis, s):+.0f}" for s in stems
+             if abs(tunings[s] - mel.stem_tuning(analysis, s)) > 0.05]
+    if stale:
+        log(f"analysis.json has other tunings ({', '.join(stale)} cents; an older analyze?): measured on the stems")
+    floor_hz, top = (min_hz, None) if min_hz else mel.floor_above_808(analysis["notes_808"])
+    files = {}
+    for s in stems:
+        # the 808's floor is a semitone (on A440 already); a given min_hz is as heard
+        hz = min_hz * 2 ** (-tunings[s] / 12) if min_hz else (floor_hz if s in mel.FLOOR_STEMS else None)
+        files[s] = {"tuning": tunings[s], "min_hz": round(hz, 2) if hz else None}
+    floored = [s for s in stems if files[s]["min_hz"]]
+    log(f"melodic: {', '.join(stems)}; tuning taken out: "
+        + ", ".join(f"{s} {100 * files[s]['tuning']:+.0f} cents" for s in stems) + "; minimum frequency "
+        + (f"{floor_hz} Hz for {', '.join(floored)}" if floored else "none")
+        + (f" (above the 808's MIDI {top})" if top is not None and floored else ""))
+    run = transcribe([stems_dir / f"{s}.wav" for s in stems], work / "basicpitch", PRESETS, files)
+    transcribed = {s: _load(Path(run["stems"][s]["notes"])) for s in stems}
+    pgs = {}
+    for s in stems:
+        if s in mel.CHORD_STEMS:
+            with np.load(run["stems"][s]["posteriorgram"]) as z:
+                pgs[s] = z["note"].astype(np.float32)
+    out = mel.build(analysis, transcribed, audio, pgs, snap_ms, voting, drop_below, tunings)
+    floor_from = "808" if top is not None else ("parameter" if min_hz else None)
+    out["source"] = {"stems": str(stems_dir), "model": run["model"], "backend": run["backend"],
+                     "python": run["python"], "settings": {"presets": PRESETS, "files": files},
+                     "min_hz_from": floor_from}
+    for s, info in out["stems"].items():
+        changed = ", ".join(f"{r['section']}: period {r['period_bars']} bars, {r['restored']} restored "
+                            f"({r['too_quiet']} too quiet), {r['dropped']} dropped"
+                            for r in info["voting"]) or "no loop"
+        log(f"  {s:7s} {len(info['notes']):4d} notes ({changed})")
+    if "chords" in out:
+        log(f"  chords: {len(out['chords']['segments'])} segments")
+    _save(work / "melodic.json", out)
+    return out
+
+
 def plan(work: str | Path, stems_dir: str | Path | None = None, log=print) -> dict:
     from .live import make_plan, write_midi
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
     synth = _load(work / "synth808.json") if (work / "synth808.json").is_file() else None
-    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"])
+    melodic_notes = _load(work / "melodic.json") if (work / "melodic.json").is_file() else None
+    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes)
     _save(work / "plan.json", p)
     written = write_midi(p, work / "midi")
+    tonal = ", ".join(f"{len(t['notes'])} {s}" for s, t in p["tracks"].get("melodic", {}).items())
     log(f"plan: {len(p['tracks']['drums']['notes'])} drum notes on {len(p['tracks']['drums']['pads'])} pads, "
-        f"{len(p['tracks']['808']['notes'])} 808 notes; MIDI: {', '.join(str(w) for w in written)}")
+        f"{len(p['tracks']['808']['notes'])} 808 notes" + (f", notes: {tonal}" if tonal else "")
+        + f"; MIDI: {', '.join(str(w) for w in written)}")
     return p
 
 
-__all__ = ["analyze", "match", "fit_808", "plan", "Grid", "Template", "Params", "LENGTH_MS"]
+__all__ = ["analyze", "melodic", "match", "fit_808", "plan", "Grid", "Template", "Params", "LENGTH_MS"]
