@@ -54,6 +54,7 @@ from .hits import onsets as band_onsets
 from .xcorr import ncc, sliding_ncc
 
 FIT_BANDS = ("kick", "snare", "hat")
+ROW = {"low": 0, "kick": 0, "snare": 1, "hat": 2}  # the fit band a template found in a detection band is heard in
 LEAD = samples(10)  # zeros before the stem: a hit at 0 s has its window, PRE before the attack
 CLOSEST_MS = {"kick": 8, "snare": 8, "hat": 8, "low": 100}  # flams, 64th rolls; a low tone echoes itself
 CANDIDATE_NCC = 0.3  # matched-filter peaks below the threshold that are probed
@@ -263,10 +264,11 @@ def explained(t: np.ndarray, others: list[np.ndarray], lags: tuple[int, int]) ->
 
 
 def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int],
-              tones: set[int]) -> dict:
+              tones: set[int], rows: list[int]) -> dict:
     """How the templates overlap, from their weighted bands (full; n: column
-    lengths) and their own detection bands (own[k][j]: template j in k's
-    band), taking those averaged from more hits first:
+    lengths; rows: the fit band each is heard in) and their own detection
+    bands (own[k][j]: template j in k's band), taking those averaged from
+    more hits first:
     - composite: the earlier ones explain COMPOSITE of it in all bands (a
       duplicate, or a kick+hat where both have templates): left out;
     - echo: an earlier one explains ECHO of it in its own band, so its
@@ -291,15 +293,23 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
             echo[k] = round(mine, 3)
         kept.append(k)
     holds = {s: held for s in kept
-             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h not in tones]))}
+             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h not in tones], rows))}
     return {"composite": composite, "echo": echo, "kept": sorted(kept), "holds": holds}
 
 
-def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int]) -> list[tuple[int, float, int, float]]:
-    """The templates s holds, (h, c, lag, share) each: c within HOLDS[0] (an
-    accented hat under every snare is 1.4 times the average hat) and a share
-    of s over h's span within HOLDS[1] (a hat in a snare explains 1.8-8 %, a
-    near duplicate far more). Taken greedily, each in what the earlier ones
+def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int],
+          rows: list[int]) -> list[tuple[int, float, int, float]]:
+    """The templates s holds, (h, c, lag, share) each: h's least-squares
+    coefficient c within HOLDS[0] (an accented hat under every snare is 1.4
+    times the average hat) and the share of s over h's span it explains
+    within HOLDS[1] (a near duplicate explains far more), both over all
+    bands, and h there in its own band (rows[h]) too, at HOLDS[0][0] or
+    more: a hat's average carries the body of the kicks some hats sit on,
+    and over all bands that body made a kick template hold a hat it never
+    plays (full-2: c 0.61 over all bands, 3.2 in the kick band, 0.06 in the
+    hat band); its purified column held a negative hat, and a hat was found
+    under every kick. c is the smaller of the two readings, so no band loses
+    more of h than it holds. Taken greedily, each in what the earlier ones
     leave, a second one needing twice the first's least share: what the
     first leaves is mostly s itself, and a duplicate of the first or a
     noisy sound matches some of it (an open hat 2.9 % in a snare on a
@@ -309,29 +319,29 @@ def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int]) -> li
     out: list[tuple[int, float, int, float]] = []
     while others:
         least = HOLDS[1][0] * (2 if out else 1)
-        found = [(containment(rest, full[h][:, :n[h]], lags), h) for h in others]
-        found = [(f, h) for f, h in found if HOLDS[0][0] <= f[1] <= HOLDS[0][1] and least <= f[0] <= HOLDS[1][1]]
+        found = []
+        for h in others:
+            d, r = full[h][:, :n[h]].astype(np.float64), rows[h]
+            share, c, lag = containment(rest, d, lags)
+            _, mine, _ = containment(rest[r:r + 1], d[r:r + 1], (lag - samples(1), lag + samples(1)))
+            if HOLDS[0][0] <= min(c, mine) and c <= HOLDS[0][1] and least <= share <= HOLDS[1][1]:
+                found.append((share, min(c, mine), lag, h))
         if not found:
             break
-        (share, c, lag), h = max(found, key=lambda fh: fh[0][0])
+        share, c, lag, h = max(found)
         out.append((h, c, lag, share))
         rest = rest - c * _placed(full[h][:, :n[h]], lag, rest.shape[1])
         others = [o for o in others if o != h]
     return out
 
 
-def purified(s: np.ndarray, held: list[tuple[np.ndarray, int]], n: int) -> tuple[np.ndarray, np.ndarray]:
-    """s less the templates it holds ((data, lag) each), their coefficients
-    fit jointly over the span s's first n samples and the held ones cover."""
-    if not held:
-        return s, np.zeros(0)
-    span = min(s.shape[1], max([n] + [lag + d.shape[1] for d, lag in held]))
-    a = np.stack([_placed(d, lag, span).ravel() for d, lag in held], axis=1)
-    coef, _ = nnls(a, s[:, :span].astype(np.float64).ravel())
+def purified(s: np.ndarray, held: list[tuple[np.ndarray, int, float]]) -> np.ndarray:
+    """s less each template it holds, (data, lag, c) each: c as _held took
+    it, the smaller of its readings over all bands and in h's own band."""
     out = s.astype(np.float64).copy()
-    for (d, lag), c in zip(held, coef):
+    for d, lag, c in held:
         out -= c * _placed(d, lag, s.shape[1])
-    return out.astype(np.float32), coef
+    return out.astype(np.float32)
 
 
 def tonal(full: np.ndarray, n: int) -> bool:
@@ -586,15 +596,16 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     n = [samples(detect_ms[tp.band]) for tp in templates]
     inband = {b: [band(tp.audio, b)[None, :] for tp in templates] for b in {tp.band for tp in templates}}
     tones = {k for k in range(len(templates)) if tonal(full[k], n[k])}
-    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], tones)
+    rows = [ROW[tp.band] for tp in templates]
+    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], tones, rows)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
     columns, purity = [], {}
     for k in rel["kept"]:
         held = rel["holds"].get(k, [])
-        data, coef = purified(full[k], [(full[h][:, :n[h]], lag) for h, _, lag, _ in held], n[k])
+        data = purified(full[k], [(full[h][:, :n[h]], lag, c) for h, c, lag, _ in held])
         purity[names[k]] = {names[h]: {"c": round(float(c), 3), "lag_ms": round(lag / SR * 1000, 2),
-                                       "share": round(share, 3)} for (h, _, lag, share), c in zip(held, coef)}
+                                       "share": round(share, 3)} for h, c, lag, share in held}
         columns.append(Column(names[k], k, data[:, :n[k]]))
     sharp = {k: round(pitch_selectivity(templates[k].audio, templates[k].band, n[k]), 3) for k in noisy} \
         if pitched else {}
