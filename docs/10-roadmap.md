@@ -24,7 +24,7 @@ In rough order of value. Each item names how it will be measured: the calibratio
    - Instruments chosen by CLAP (`find_similar_sounds`) or synthesized.
    - **Measured by:** note F1 against hand-checked bars; chroma distance.
 6. **Layer detection.** A snare that is a library snare plus a clap. After the best match is subtracted (null test residual), search the residual again (matching pursuit).
-   - *Started:* `layers.explain` fits every moment with every template ([01](01-pipeline.md)): hats under a snare 16 → 326 of 432 on 22 suite beats. Still to do: a sound that always plays with another has no template of its own, so the layers scenario's clap is not found.
+   - *Started:* `layers.explain` fits every moment with every template ([01](01-pipeline.md)): on 22 suite beats, hats within 20 ms of a snare or clap 16 → 324 of 432 found, drums F1 at 20 ms 0.613 → 0.781 over hits (0.421 → 0.584 as the mean over sounds, which counts each of 37 pitched copies of 1–68 hits as much as a main hat). Still to do: a sound that always plays with another has no template of its own, so the layers scenario's clap is not found; kick templates that attack 20–50 ms off (v1, flams: 0 at 20 ms, 0.94–0.99 at 50 ms) need template building.
    - **Measured by:** calibration beats with layered sounds.
 7. **Style mode and profiles** (the original brief):
    - pattern statistics per artist or album (hat roll rate, kick placement, 808 glide rate, chord vocabulary, section lengths) from several songs;
