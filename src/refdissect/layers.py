@@ -55,7 +55,7 @@ CONTEXT_MS = 150
 MATCHED_GAIN, LAYER_GAIN = 0.25, 0.5  # x the template's usual gain
 NULL_SHIFTS_MS = (-47, -29, 29, 47)
 NULL_QUANTILE = 0.95
-HOLDS = ((0.3, 1.25), (0.03, 0.3))  # S holds H: LS coefficient c, share of S's energy over H's span
+HOLDS = ((0.3, 2.0), (0.015, 0.3))  # S holds H: LS coefficient c, share of S's energy over H's span
 COMPOSITE = 0.8  # share of a template the earlier ones explain: not a sound of its own
 ECHO = 0.5  # share of a template's own band an earlier one explains: its matched filter repeats that one
 SAME_SOUND = 0.6  # placed templates this alike are one sound found twice
@@ -251,7 +251,8 @@ def explained(t: np.ndarray, others: list[np.ndarray], lags: tuple[int, int]) ->
     return 1.0 - res ** 2 / (float((t.astype(np.float64) ** 2).sum()) or 1e-12), coef, best
 
 
-def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int]) -> dict:
+def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int],
+              tones: set[int]) -> dict:
     """How the templates overlap, from their weighted bands (full; n: column
     lengths) and their own detection bands (own[k][j]: template j in k's
     band), taking those averaged from more hits first:
@@ -260,7 +261,8 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
     - echo: an earlier one explains ECHO of it in its own band, so its
       matched filter repeats that one's (a kick+hat found in the hat band
       finds every hat): never probed for;
-    - holds: s holds h, another sound (_held)."""
+    - holds: s holds h, another sound that is not a tone (_held): a kick
+      template's low ring explains a little of almost anything."""
     order = sorted(range(len(full)), key=lambda k: -hits[k])
     near = (-samples(10), samples(10))
     composite: dict[int, dict] = {}
@@ -277,22 +279,27 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
         if kept and mine >= ECHO:
             echo[k] = round(mine, 3)
         kept.append(k)
-    holds = {s: held for s in kept if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo]))}
+    holds = {s: held for s in kept
+             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h not in tones]))}
     return {"composite": composite, "echo": echo, "kept": sorted(kept), "holds": holds}
 
 
 def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int]) -> list[tuple[int, float, int, float]]:
-    """The templates s holds, (h, c, lag, share) each: c within HOLDS[0] (as
-    loud as h usually is, at most) and a share of s over h's span within
-    HOLDS[1] (a hat in a snare explains 2-5 %, a near duplicate far more).
-    Taken greedily, each in what the earlier ones leave, so two templates
-    holding the same hat are not both held."""
+    """The templates s holds, (h, c, lag, share) each: c within HOLDS[0] (an
+    accented hat under every snare is 1.4 times the average hat) and a share
+    of s over h's span within HOLDS[1] (a hat in a snare explains 1.8-8 %, a
+    near duplicate far more). Taken greedily, each in what the earlier ones
+    leave, a second one needing twice the first's least share: what the
+    first leaves is mostly s itself, and a duplicate of the first or a
+    noisy sound matches some of it (an open hat 2.9 % in a snare on a
+    calibration beat, where it never plays)."""
     rest = full[s].astype(np.float64)
     lags = (samples(LAG_MS[0]), samples(LAG_MS[1]))
-    out = []
+    out: list[tuple[int, float, int, float]] = []
     while others:
+        least = HOLDS[1][0] * (2 if out else 1)
         found = [(containment(rest, full[h][:, :n[h]], lags), h) for h in others]
-        found = [(f, h) for f, h in found if HOLDS[0][0] <= f[1] <= HOLDS[0][1] and HOLDS[1][0] <= f[0] <= HOLDS[1][1]]
+        found = [(f, h) for f, h in found if HOLDS[0][0] <= f[1] <= HOLDS[0][1] and least <= f[0] <= HOLDS[1][1]]
         if not found:
             break
         (share, c, lag), h = max(found, key=lambda fh: fh[0][0])
@@ -527,8 +534,9 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
     full = [_bands(tp.audio, w) for tp in templates]
     n = [samples(detect_ms[tp.band]) for tp in templates]
     inband = {b: [band(tp.audio, b)[None, :] for tp in templates] for b in {tp.band for tp in templates}}
-    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates])
-    tones = {k for k in rel["kept"] if tonal(full[k], n[k])}
+    tones = {k for k in range(len(templates)) if tonal(full[k], n[k])}
+    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], tones)
+    tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
 
     # the columns: kept templates (purified), then pitched copies of the noisy, sharp ones
@@ -646,7 +654,14 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
     gains, _ = fit(kit, cands)
     low = {c for c, col in enumerate(columns) if templates[col.template].band == "low"}
     cands = cands.take(_tails(cands, gains, low) & (gains > 0))
-    gains, _ = fit(kit, cands)
+    for _ in range(2):  # 5. what still passes once everything is fit together
+        gains, _ = fit(kit, cands)
+        layer = np.array([s == "layer" for s in cands.source])
+        clear = cands.ncc >= thr[cands.col]
+        floor = np.where(layer & ~clear, LAYER_GAIN, min_gain) * usual[cands.col]
+        if np.all(gains >= floor):
+            break
+        cands = cands.take(gains >= floor)
     info = {"composite": {names[k]: {"share": v["share"], "by": {names[j]: c for j, (c, _) in v["by"].items()}}
                           for k, v in rel["composite"].items()},
             "merged": {columns[a].name: {"into": columns[b].name, "offset_ms": round(off / SR * 1000, 2)}
@@ -656,14 +671,17 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
             "pitched": {names[k]: v for k, v in sharp.items()},
             "usual_gain": {c.name: round(float(u), 4) for c, u in zip(columns, usual) if not c.semitones},
             "null_drop": {c.name: round(float(v), 5) for c, v in zip(columns, null) if not c.semitones}}
-    return Explained(_events(templates, columns, cands, gains), info)
+    return Explained(_events(templates, kit, cands, gains), info)
 
 
-def _events(templates: list, columns: list[Column], cands: Candidates, gains: np.ndarray) -> dict[str, list[dict]]:
+def _events(templates: list, kit: Kit, cands: Candidates, gains: np.ndarray) -> dict[str, list[dict]]:
     """{name: [{t, ncc, gain, source, under?, semitones?, flam_of?}]}: t is
     PRE after the window start (detect()'s convention), gain the least-
-    squares level in the joint fit (the velocity), under the template whose
-    hit a layer was found under (the loudest other hit within SAME_MS)."""
+    squares level in the joint fit (the velocity), ncc the matched filter's
+    (a layer's: with what the other hits leave), under the template whose hit
+    a layer was found under (the one overlapping it with the most energy)."""
+    columns = kit.columns
+    longest = max(c.n for c in columns)
     out: dict[str, list[dict]] = {tp.name: [] for tp in templates}
     t = (cands.p - LEAD + PRE) / SR
     owner = np.array([columns[c].template for c in cands.col])
@@ -672,9 +690,10 @@ def _events(templates: list, columns: list[Column], cands: Candidates, gains: np
         e = {"t": round(float(t[i]), 4), "ncc": round(float(cands.ncc[i]), 3), "gain": round(float(gains[i]), 4),
              "source": cands.source[i]}
         if cands.source[i] == "layer":
-            near = np.flatnonzero((np.abs(cands.p - cands.p[i]) <= samples(SAME_MS)) & (owner != col.template))
-            if len(near):
-                e["under"] = columns[cands.col[near[np.argmax(gains[near])]]].name
+            near = np.flatnonzero((np.abs(cands.p - cands.p[i]) < longest) & (owner != col.template))
+            masks = [abs(kit.inner(cands.col[i], cands.p[i], cands.col[j], cands.p[j])) * gains[j] for j in near]
+            if len(near) and max(masks) > 0:
+                e["under"] = columns[cands.col[near[int(np.argmax(masks))]]].name
         if col.semitones:
             e["semitones"] = col.semitones
         out[col.name].append(e)
