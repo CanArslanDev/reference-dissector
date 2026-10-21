@@ -1,6 +1,6 @@
 """The steps in order, each writing what it found to a work folder:
 
-    analyze(stems)   -> analysis.json, templates/*.npy|wav    (grid, tuning, drums, 808, sections)
+    analyze(stems)   -> analysis.json, bass808.json, templates/ (grid, tuning, drums, 808, sections)
     melodic()        -> melodic.json, basicpitch/             (notes per tonal stem, chords)
     match(library)   -> matches.json                          (library sound per template, verdicts)
     fit_808()        -> synth808.json, 808 one-shot .wav      (the synthesized 808)
@@ -18,10 +18,11 @@ from pathlib import Path
 import librosa
 import numpy as np
 
+from . import bass808
 from . import describe as describe_mod
 from .audio import SR, band, read, samples, write
 from .beats import track_stems
-from .detect import LENGTH_MS, Template, detect, discover, isolated, notes_808, peak_score_histogram, pitch_offset
+from .detect import LENGTH_MS, Template, detect, discover, isolated, peak_score_histogram, pitch_offset
 from .grid import Grid, estimate, offsets, onset_grid, tuning
 from .hits import group, template
 from .library import Library, null_test, per_hit_votes, verdict
@@ -101,10 +102,17 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                                   "members": tp.group.members if tp.group else []}
         log(f"  {tp.name:8s} ({tp.band} band, looks like a {tp.role}) {tp.hits:3d} hits in the template, "
             f"{len(events[tp.name]):3d} detected")
-    notes = notes_808(bass, consensus)
-    offset_808, agreement_808 = pitch_offset([n["midi_float"] for n in notes])
-    tuning_808 = offset_808 if agreement_808 >= 0.5 else consensus
-    log(f"808: {len(notes)} notes, tuned {100 * offset_808:+.0f} cents (agreement {agreement_808:.2f})")
+    b808 = bass808.transcribe(bass, drums, log=log)
+    _save(work / "bass808.json", b808)
+    notes = bass808.project(b808)
+    tpl = b808["template"]
+    _, agreement_808 = pitch_offset([n["midi_settled"] for n in notes])
+    tuning_808 = round(tpl["tuning_cents"] / 100, 4) if tpl else consensus
+    if tpl:
+        log(f"808: {len(notes)} notes, template {tpl['hz']:.2f} Hz = MIDI {tpl['midi']:.2f} ({tpl['method']}, "
+            f"{tpl['notes_used']} notes): tuned {tpl['tuning_cents']:+.1f} cents")
+    else:
+        log("808: no note to learn a template from")
     n_bars = int(np.ceil((duration - grid.phase) / grid.bar))
     stems = {s: read(stems_dir / f"{s}.wav") for s in ("other", "piano", "vocals")
              if (stems_dir / f"{s}.wav").is_file()}
@@ -202,33 +210,64 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     return out
 
 
+def _fit_notes(work: Path, analysis: dict) -> tuple[list[int], int, float | None, str | None, float]:
+    """The onsets (samples) of the notes the 808 is fitted on, their written
+    pitch, the settled pitch measured on them (Hz) and how, and the longest
+    window (ms) they ring alone: bass808's template notes, or (an analysis
+    without bass808.json) the isolated notes of the commonest pitch at the
+    analysis' 808 tuning."""
+    b808 = _load(work / "bass808.json") if (work / "bass808.json").is_file() else None
+    tpl = (b808 or {}).get("template")
+    if tpl:
+        return ([int(round(t * SR)) for t in tpl["onsets_s"]], int(tpl["root_midi"]), float(tpl["hz"]),
+                tpl["method"], float(min(600, int(1000 * tpl["length_s"]))))
+    notes = isolated(analysis["notes_808"])
+    if not notes:
+        return [], 0, None, None, 600.0
+    root = notes[0]["pitch"]
+    return [int(n["t"] * SR) for n in notes], root, None, None, 600.0
+
+
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
             log=print, **fit_options) -> dict:
-    """Fit the 808 on its isolated root notes (drums + bass, so the attack is
-    in) and write a one-shot at the 808's own tuning. fit_options go to
-    synth808.fit (maxiter, popsize: a smaller search for tests)."""
+    """Fit the 808 on bass808's template notes (drums + bass, so the attack
+    is in) and write a one-shot at the 808's settled pitch. fit_options go
+    to synth808.fit (maxiter, popsize: a smaller search for tests).
+
+    The pitch is the template's settled pitch as bass808 measured it (the
+    QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.7 cents,
+    where the pYIN window read +33; or the asymptote of its fitted drop when
+    no note rings that long), or the fit's f_end where the two agree within
+    2 cents, or where the template only had its unsettled tail to read
+    ("qifft_tail": the fit's drop extrapolates). synth808.json keeps both,
+    the one used (pitch_hz, pitch_from) and its cents over root_midi."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])
     mix = read(stems_dir / "drums.wav") + read(stems_dir / "bass.wav")
-    notes = isolated(analysis["notes_808"])
-    if not notes:
+    starts, root, hz, method, ms = _fit_notes(work, analysis)
+    if not starts:
         raise ValueError("No 808 note rings long enough on its own to fit")
-    root = notes[0]["pitch"]
-    g = group(band(mix, "808"), starts=[int(n["t"] * SR) for n in notes], threshold=-1.0, cluster_ms=200,
-              min_db=-90)[0]
-    ref, used = template(mix, g, 600)
+    g = group(band(mix, "808"), starts=starts, threshold=-1.0, cluster_ms=min(200, ms), min_db=-90)[0]
+    ref, used = template(mix, g, ms)
     np.save(work / "templates" / "808.npy", ref)
-    # the 808's own tuning (analyses written before it was measured: the track's)
-    f1 = float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
-    log(f"808: {used} isolated notes at MIDI {root}, {f1:.2f} Hz; fitting (1-3 min)")
+    # the template's own pitch, or the 808's tuning (analyses written before bass808: the track's)
+    f1 = hz or float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
+    log(f"808: {used} notes at MIDI {root}, {f1:.2f} Hz ({method or 'tuning'}); fitting (1-3 min)")
     params, info = fit(ref, f1, **fit_options)
-    shot = one_shot(params, f1)
+    apart = 1200 * np.log2(params.f_end_hz / f1)
+    if abs(apart) <= 2 or method == "qifft_tail":
+        pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"
+    else:
+        pitch, source = f1, "qifft" if method else "tuning"
+    shot = one_shot(params, pitch)
     name = "808 (synth).wav"
     write(work / name, shot, peak=None)
     result = {"params": params.to_dict(), "glide_semitones": round(params.glide_semitones, 2),
-              "root_midi": root, "pitch_hz": round(f1, 2), "isolated_notes": used, "fit": info,
-              "file": str(work / name), "file_name": name,
+              "root_midi": root, "pitch_hz": round(pitch, 4), "pitch_from": source,
+              "cents": round(1200 * np.log2(pitch / 440) + 6900 - 100 * root, 1),
+              "measured_hz": round(f1, 4), "measured_by": method or "tuning", "fit_vs_measured_cents": round(apart, 2),
+              "fit_notes": used, "fit": info, "file": str(work / name), "file_name": name,
               "compare": {"synth": compare(ref, laid_out(params, len(ref)), f1)}}
     if library_808 is not None:
         ranked = library_808.match(ref, "808", semitones=range(-12, 13), top=10, prefilter=60)
@@ -237,6 +276,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
         result["compare"]["best_library"] = {**compare(ref, cand, f1), "file": Path(best["path"]).name,
                                              "semitones": best["semitones"],
                                              "margin": round(best["ncc"] - ranked[1]["ncc"], 3)}
+    log(f"808: one-shot at {pitch:.3f} Hz ({source}; fit f_end {params.f_end_hz:.3f} Hz, {apart:+.1f} cents "
+        f"from the measured {f1:.3f})")
     log(json.dumps(result["compare"]))
     _save(work / "synth808.json", result)
     return result

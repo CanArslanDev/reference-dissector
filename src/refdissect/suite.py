@@ -18,8 +18,9 @@ matched, planned and scored, so a change to any step shows up per scenario.
 A beat folder after a run:
     events.json, mix*, stems_truth/   the truth (scenarios)
     stems-<model>/                    Demucs' stems and separation.json
-    runs/<tag>/                       analysis.json, melodic.json, basicpitch/, matches.json, synth808.json,
-                                      plan.json, midi/, templates/, log.txt, scores.json (run.json unscored)
+    runs/<tag>/                       analysis.json, bass808.json, melodic.json, basicpitch/, matches.json,
+                                      synth808.json, plan.json, midi/, templates/, log.txt, scores.json
+                                      (run.json unscored)
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -57,7 +58,7 @@ NEEDS = {"melodic": "analyze", "match": "analyze", "fit-808": "analyze", "plan":
 ONE_SHOT = "808 (synth).wav"  # pipeline.fit_808's
 # what each step leaves in runs/<tag>/ (templates/ is analyze's but for fit-808's 808.npy), and the file
 # whose absence means it did not run; score is never copied: a reused score would describe other outputs
-OUTPUTS = {"analyze": ("analysis.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
+OUTPUTS = {"analyze": ("analysis.json", "bass808.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
            "match": ("matches.json",), "fit-808": ("synth808.json", ONE_SHOT, "templates/808.npy"),
            "plan": ("plan.json", "midi")}
 

@@ -185,10 +185,11 @@ def test_steps_need_their_inputs_or_a_reuse():
 def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     """The melodic scenario with a perfect Basic Pitch: notes and chords
     scored at analysis level, the plan's notes at plan level, the vocals'
-    notes extra. A run that reuses everything but plan and score scores the
-    same; fit-808 found no 808 that rings alone here, an answer the reuse
-    carries. A reused run must have every output, which is checked before
-    anything runs; in place, the kept outputs stay."""
+    notes extra; the 808 fitted on bass808's template notes (before bass808,
+    none rang alone for 600 ms in these 8 bars). A run that reuses everything
+    but plan and score scores the same. A reused run must have every output,
+    which is checked before anything runs; in place, the kept outputs stay;
+    a fit-808 that found nothing to fit is an answer the reuse carries."""
     root = tmp_path / "suite"
     main(["suite", "build", str(library / "inventory.json"), "--out", str(root), "--scenarios", "melodic",
           "--seeds", "1", "--bars", "8"])
@@ -203,7 +204,7 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     assert {v["estimated_layer"] for v in m["layers"].values()} == {"other"} and m["extra"][0]["layer"] == "vocals"
     assert m["pooled"]["note_f1"] > 0.9 and rec["plan"]["melodic"]["pooled"]["note_f1"] > 0.9
     assert 0 <= rec["analysis"]["chords"]["majmin"] <= 1 and rec["plan"]["chords"] is None
-    assert "fit_808" in rec["problems"] and not rec["plan_size"]["808_one_shot"]
+    assert not rec["problems"] and rec["plan_size"]["808_one_shot"]
 
     re = suite.run(root, lib, lib808, "re", jobs=1, options=options, steps=["plan", "score"], reuse="full")
     work = beat / "runs" / "re"
@@ -230,6 +231,10 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     assert "analysed stems-htdemucs" in suite.reuse_problems(beat, "full", "htdemucs_ft", ("score",))[0]
     (beat / "runs" / "full" / "scores.json").write_text(json.dumps({"failed": "RuntimeError: no grid"}))
     assert suite.reuse_problems(beat, "full", "htdemucs", ("score",)) == ["runs/full failed (RuntimeError: no grid)"]
+    problems = {"problems": {"fit_808": "No 808 note rings long enough on its own to fit"}}
+    (beat / "runs" / "full" / "scores.json").write_text(json.dumps(problems))
+    (beat / "runs" / "full" / "synth808.json").unlink()
+    assert suite.reuse_problems(beat, "full", "htdemucs", ("plan", "score")) == []
 
 
 def test_copied_outputs_point_into_their_new_folder(tmp_path):
