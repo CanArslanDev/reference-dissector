@@ -182,6 +182,25 @@ def test_same_named_sections_with_other_music_vote_apart():
     assert len(voted) == len(notes) and sum(r["restored"] for r in report) == 0
 
 
+def test_build_counts_bars_in_the_grids_meter():
+    """A 6/8 analysis (bars of six 8ths, 1.5 s at 120 BPM) with a 2-bar loop
+    (bars alternate P and Q) played four times, one Q note missed: the loop
+    is 2 bars of 6/8 and the note comes back in its bar. In quarter notes (the
+    meter's beat_unit dropped) a bar of six held a P and a Q bar, the loop
+    came out 1 bar long over 8 such bars (4 after the audio) and nothing came
+    back."""
+    P, Q = ((0.0, 60), (0.5, 64)), ((0.0, 62), (0.75, 65))
+    played = [(1.5 * b + o, p) for b in range(8) for o, p in (P if b % 2 == 0 else Q) if (b, p) != (5, 65)]
+    raw = [{"start_s": t, "end_s": t + 0.3, "midi": p, "amplitude": 0.5, "onset": 0.8, "bend": []} for t, p in played]
+    analysis = {"grid": {"bpm": 120.0, "phase": 0.0, "beats_per_bar": 6, "beat_unit": 8},
+                "sections": [{"name": "A", "start_bar": 1, "end_bar": 8}], "notes_808": [],
+                "source": {"duration_s": 12.0}, "tuning": {"consensus": 0.0}}
+    out = M.build(analysis, {"other": {"notes": {"melodic": raw}}}, {"other": np.zeros(12 * SR, np.float32)}, {})
+    (report,) = out["stems"]["other"]["voting"]
+    assert out["grid"]["beat_unit"] == 8 and report["period_bars"] == 2 and report["restored"] == 1
+    assert [(n["t"], n["pitch"]) for n in out["stems"]["other"]["notes"] if n.get("voted")] == [(8.25, 65)]
+
+
 def test_vote_keeps_a_same_pitch_roll_apart():
     g = Grid(120.0, 0.0)
     notes = [note(2.0 * b + o, 60) for b in range(4) for o in (0.0, 0.0625)]  # two 32nds at 120 BPM

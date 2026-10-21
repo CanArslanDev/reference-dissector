@@ -581,10 +581,11 @@ def build(analysis: dict, transcribed: dict[str, dict], audio: dict[str, np.ndar
     the stems' audio and the posteriorgrams of the chord stems. tunings: per
     stem, the tuning the worker took out (default: analysis.json's)."""
     g = analysis["grid"]
-    grid = Grid(g["bpm"], g["phase"], g.get("beats_per_bar", 4))
+    # the bars sections count: from the first bar line (phase), in the meter (a 6/8 bar is 6 eighths)
+    grid = Grid(g["bpm"], g["phase"], g.get("beats_per_bar", 4), g.get("beat_unit", 4))
     sections = analysis.get("sections") or []
     _, top = floor_above_808(analysis["notes_808"])
-    out: dict = {"grid": {"bpm": grid.bpm, "phase": grid.phase}, "stems": {}}
+    out: dict = {"grid": {k: getattr(grid, k) for k in ("bpm", "phase", "beats_per_bar", "beat_unit")}, "stems": {}}
     for stem, t in transcribed.items():
         st = tunings[stem] if tunings and stem in tunings else stem_tuning(analysis, stem)
         notes, report = stem_notes(t["notes"]["melodic"], audio[stem], grid, st, sections, snap_ms, voting,
