@@ -283,13 +283,15 @@ def explains(L: dict) -> bool:
     return L["same_role"] and L["level_db_found"] >= -6.0
 
 
-def grid_candidates(x: np.ndarray, grid: Grid, bands, min_hits: int, width_ms: float) -> list[Candidate]:
+def grid_candidates(x: np.ndarray, grid: Grid, bands, min_hits: int, width_ms: float,
+                    seeded: dict[str, np.ndarray] | None = None) -> list[Candidate]:
     """Groups of the onsets that share a place in the beat (places), per
-    band, merged across places when their averages match."""
+    band, merged across places when their averages match. seeded: each
+    band's seeds(), when known already."""
     out: list[Candidate] = []
     for band_name in bands:
         xb = band(x, band_name)
-        t = seeds(x, band_name)
+        t = seeded[band_name] if seeded else seeds(x, band_name)
         where = places(t, grid, width_ms, min_hits)
         groups: list[Group] = []
         for k in sorted(set(where[where >= 0].tolist())):
@@ -402,7 +404,8 @@ def unlocked(x: np.ndarray, kept: list[Candidate]) -> list[Candidate]:
     return out
 
 
-def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: int = 3) -> list[Candidate]:
+def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: int = 3,
+                        seeded: dict[str, np.ndarray] | None = None) -> list[Candidate]:
     """Groups of the onsets in each band that no kept template of that band
     explains (none of its hits within RESIDUAL_MS), at any place: rare
     sounds, fills, sounds off the grid. A crash on a kick is explained by
@@ -411,7 +414,7 @@ def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: i
     for band_name in bands:
         mine = [c.times for c in kept if c.band == band_name]
         found = np.sort(np.concatenate(mine)) if mine else np.zeros(0)
-        t = seeds(x, band_name)
+        t = seeded[band_name] if seeded else seeds(x, band_name)
         if len(found):
             i, _ = pairs(t, found, RESIDUAL_MS)
             t = np.delete(t, i)
@@ -452,12 +455,13 @@ def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_h
     0.75, open hat 0.23 -> 0.97, crash 0 -> 0.47; plan: kick 0.17 -> 0.80,
     snare 0.58 -> 0.79. Kicks were found 22.6 ms late (median), now 0.9."""
     min_hits = min_hits or min_hits_for(len(drums), grid)
-    onsets = np.sort(np.concatenate([seeds(drums, b) for b in bands]))
+    seeded = {b: seeds(drums, b) for b in bands}
+    onsets = np.sort(np.concatenate(list(seeded.values())))
     top = band(drums, "hat")
-    kept = one_per_sound([c for c in grid_candidates(drums, grid, bands, min_hits, width_ms)
+    kept = one_per_sound([c for c in grid_candidates(drums, grid, bands, min_hits, width_ms, seeded)
                           if starts_something(c, onsets, top)])
     if residual:
-        kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual)
+        kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual, seeded)
                               if starts_something(c, onsets, top)], kept)
     kept = unlocked(drums, kept)
     kept.sort(key=lambda c: -len(c.times))
