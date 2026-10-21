@@ -59,11 +59,13 @@ def test_pitched_copies_get_transposed_pads(tmp_path):
     from refdissect import evaluate
     analysis, matches, synth = _fixture(tmp_path)
     analysis["events"]["sound_1"] += [{"t": 0.2 + 0.5 * k, "gain": 1.0, "semitones": 1 + k % 2} for k in range(6)]
+    analysis["events"]["sound_2"].append({"t": 3.9, "gain": 0.5, "semitones": 1})  # its twin's copy: the same pad
     plan = make_plan(analysis, matches, synth, tmp_path)
     pads = plan["tracks"]["drums"]["pads"]
     assert pads["38"]["transpose"] == -1 and (pads["54"]["transpose"], pads["55"]["transpose"]) == (0, 1)
+    assert len(pads) == 3
     notes = plan["tracks"]["drums"]["notes"]
-    assert sum(n["pitch"] == 54 for n in notes) == 3 and sum(n["pitch"] == 55 for n in notes) == 3
+    assert sum(n["pitch"] == 54 for n in notes) == 4 and sum(n["pitch"] == 55 for n in notes) == 3
     est = evaluate.estimate_from_plan(plan, root=tmp_path)
     assert {s: v["semitones"] for s, v in est["sounds"].items() if s != "808"} == {"38": -1, "54": 0, "55": 1}
 
