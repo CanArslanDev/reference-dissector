@@ -42,6 +42,9 @@ GENERATED = Path("Samples") / "AbletonMCP Generated"
 # are built muted, so the reference stems still play as before
 MELODIC_INSTRUMENT = "Drift"
 LEGATO_S = 0.01  # a legato 808 note's predecessor is held this long past its start (overlapping notes glide)
+# heard_808: notes that disagree by more than this (interquartile range, cents) get no correction;
+# 0.1-20 on 18 of the suite's 23 beats (htdemucs), 26-262 on the other 5 (a sliding line among them)
+HEARD_IQR = 25.0
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -81,6 +84,28 @@ def tune_808(own_midi: float, cents: float) -> tuple[int, int]:
     return transpose, int(np.floor(100 * (exact - transpose) + 0.5))
 
 
+def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | None:
+    """How many cents the one-shot, tuned to settle where the 808 settled,
+    sounds below the 808 as analysed: per note (legato notes aside), the
+    drop the analysis heard (midi_float over midi_settled) less the
+    one-shot's own drop heard at the note's pitch (shift0 + pitch semitones
+    over its own) and length, both by the truth's rule (scenarios.sounding);
+    the median, or None where the notes disagree by more than HEARD_IQR.
+    The fitted one-shot falls as one exponential, faster than the songs'
+    808s after about 100 ms (v1-1: 42 cents over its settled pitch at
+    150 ms, the beat's 808 117): tuned to settle where the 808 settled, the
+    plan's 808 sounded 6.8 cents flat (mean over 23 suite beats, htdemucs);
+    the correction is -11 to +22 cents on the 18 where the notes agree."""
+    from .scenarios import drop, sounding, tuning
+    curve = tuning(shot)[1]
+    d = [100 * (n["midi_float"] - n["midi_settled"] - sounding(
+            lambda t, r=2 ** ((n["pitch"] + shift0) / 12): drop(curve, t * r) / 100, n["end"] - n["t"]))
+         for n in notes if n.get("midi_settled") is not None and (n.get("glide") or {}).get("kind") != "legato"]
+    if not d or np.subtract(*np.percentile(d, [75, 25])) > HEARD_IQR:
+        return None
+    return float(np.median(d))
+
+
 def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_per_second: float) -> dict:
     """The 808 track: the notes at their written pitches (notes_808 pitch),
     lasting until they end (no floor: a quarter-beat floor over the next
@@ -90,6 +115,8 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     note moved so that the one-shot's attack, as Simpler plays it at the
     note's pitch, lands on the note's t_attack (it lands t_attack - t after
     t otherwise: 0.3-13 ms, the drop's own attack against the template's).
+    Detune also takes heard_808's correction where the notes agree on it
+    (heard_cents; the long notes' tails then settle that much sharp).
     cents is the one-shot's own pitch over root_midi (metadata).
 
     A legato note (notes_808 glide kind "legato": no attack of its own)
@@ -112,16 +139,19 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
         tuning = 100 * (own - root if synth.get("pitch_from") == "fit"
                         else (analysis.get("tuning") or {}).get("808", own - root))
         semis, detune = tune_808(own, tuning)
-        # named after the song: the User Library keeps one file per name
-        song = Path(stems_dir).resolve().parent.name
-        track.update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"], transpose=semis,
-                     detune_cents=detune, root_midi=root, cents=round(100 * (own - root), 1),
-                     tuning_cents=round(tuning, 1))
-        shift0 = semis + detune / 100 - 60
         try:
             shot = read(synth["file"])
         except (OSError, RuntimeError):
             shot = None
+        heard = None if shot is None else heard_808(notes, shot, semis + detune / 100 - 60)
+        if heard is not None:  # sound as the notes were heard, not only settle where they settled
+            semis, detune = tune_808(own, tuning + heard)
+        # named after the song: the User Library keeps one file per name
+        song = Path(stems_dir).resolve().parent.name
+        track.update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"], transpose=semis,
+                     detune_cents=detune, root_midi=root, cents=round(100 * (own - root), 1),
+                     tuning_cents=round(tuning, 1), heard_cents=None if heard is None else round(heard, 1))
+        shift0 = semis + detune / 100 - 60
     leads: dict[float, float] = {}
 
     def lead(pitch: int) -> float:
