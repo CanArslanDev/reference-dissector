@@ -5,6 +5,7 @@
     refdissect index-library work/inventory.json --808 --out work/library_808.npz
     refdissect separate song.mp3 --out work/song/stems
     refdissect analyze work/song/stems --work work/song
+    refdissect melodic work/song                 (Basic Pitch in its own uv environment)
     refdissect match work/song --library work/library.npz
     refdissect fit-808 work/song --library-808 work/library_808.npz
     refdissect plan work/song
@@ -88,6 +89,11 @@ def _match_kwargs(a) -> dict:
 def _analyze(a):
     from .pipeline import analyze
     analyze(a.stems, a.work, **_analyze_kwargs(a))
+
+
+def _melodic(a):
+    from .pipeline import melodic
+    melodic(a.work, a.stems, a.min_hz, a.snap_ms, not a.no_vote, a.drop_below)
 
 
 def _match(a):
@@ -293,6 +299,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--work", required=True)
     _analyze_options(s)
     s.set_defaults(run=_analyze)
+    s = sub.add_parser("melodic", help="notes per tonal stem and chords, with Basic Pitch (after analyze)")
+    s.add_argument("work")
+    s.add_argument("--stems", default=None, help="stems folder (default: the one analyze used)")
+    s.add_argument("--min-hz", type=float, default=None,
+                   help="lowest note frequency for every stem (default: just above the 808's usual range, "
+                        "for other, piano and guitar)")
+    s.add_argument("--snap-ms", type=float, default=None, help="snap onsets to the 16th grid within this many ms")
+    s.add_argument("--no-vote", action="store_true", help="no voting across loop repeats")
+    s.add_argument("--drop-below", type=float, default=None,
+                   help="drop notes heard in fewer than half of a loop's repeats when their onset posterior is "
+                        "under this (off by default: it cost F1 on synthetic loops)")
+    s.set_defaults(run=_melodic)
     s = sub.add_parser("match", help="the library's closest sound for each template")
     s.add_argument("work")
     s.add_argument("--library", required=True)
