@@ -67,7 +67,7 @@ COMPOSITE = 0.8  # share of a template the earlier ones explain: not a sound of 
 ECHO = 0.5  # share of a template's own band an earlier one explains: its matched filter repeats that one
 SAME_SOUND = 0.6  # placed templates this alike are one sound found twice
 DUPLICATE = 0.5  # share of a template's hits that are another's found twice: one sound
-TONAL = (0.25, 0.5)  # a template with this share in the kick band, ringing this much, is a tone
+TONAL = (0.5, 0.25, 0.5)  # a tone: this share in the kick band, or this one ringing this much (tonal)
 SHARP = 0.5  # NCC with its copy 1 semitone off under which a template is noisy enough for pitched copies
 SEMITONES = (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5)
 # Where a held template may sit in the one holding it. Either window may start
@@ -264,7 +264,7 @@ def explained(t: np.ndarray, others: list[np.ndarray], lags: tuple[int, int]) ->
 
 
 def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int],
-              tones: set[int], rows: list[int]) -> dict:
+              holdable: set[int], rows: list[int]) -> dict:
     """How the templates overlap, from their weighted bands (full; n: column
     lengths; rows: the fit band each is heard in) and their own detection
     bands (own[k][j]: template j in k's band), taking those averaged from
@@ -274,8 +274,7 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
     - echo: an earlier one explains ECHO of it in its own band, so its
       matched filter repeats that one's (a kick+hat found in the hat band
       finds every hat): never probed for;
-    - holds: s holds h, another sound that is not a tone (_held): a kick
-      template's low ring explains a little of almost anything."""
+    - holds: s holds h, another sound that may be held (holdable, _held)."""
     order = sorted(range(len(full)), key=lambda k: -hits[k])
     near = (-samples(10), samples(10))
     composite: dict[int, dict] = {}
@@ -293,7 +292,7 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
             echo[k] = round(mine, 3)
         kept.append(k)
     holds = {s: held for s in kept
-             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h not in tones], rows))}
+             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h in holdable], rows))}
     return {"composite": composite, "echo": echo, "kept": sorted(kept), "holds": holds}
 
 
@@ -344,24 +343,34 @@ def purified(s: np.ndarray, held: list[tuple[np.ndarray, int, float]]) -> np.nda
     return out.astype(np.float32)
 
 
-def tonal(full: np.ndarray, n: int) -> bool:
-    """Whether a template (weighted bands) is a tone: TONAL[0] of its first n
-    samples' energy in the kick band, and that band as alike to itself 8-35
-    ms later as TONAL[1] (NCC). On 7 calibration beats the kick-like
-    templates hold 31-98 % of their energy there and ring 0.53-0.87; hats
-    and snares hold 3-20 %, though an 808 under them can make that band ring
-    up to 0.56."""
-    e = (full[:, :n].astype(np.float64) ** 2).sum(axis=1)
-    if e[0] < TONAL[0] * e.sum():
-        return False
-    x = full[0].astype(np.float64)
+def ring(x: np.ndarray, n: int) -> float:
+    """How alike x's first n samples are to x 8-35 ms later (best NCC): a
+    tone repeats itself, a burst of noise does not."""
+    x = np.asarray(x, dtype=np.float64)
     t = x[:n]
     best = 0.0
     for lag in range(samples(8), samples(35), samples(0.5)):
         seg = x[lag:lag + n]
         if len(seg) == n:
             best = max(best, float(seg @ t / ((np.linalg.norm(seg) * np.linalg.norm(t)) or 1.0)))
-    return best >= TONAL[1]
+    return best
+
+
+def low_share(full: np.ndarray, n: int) -> float:
+    """The share of a template's first n samples' energy (weighted bands) in
+    the kick band."""
+    e = (full[:, :n].astype(np.float64) ** 2).sum(axis=1)
+    return float(e[0] / (e.sum() or 1.0))
+
+
+def tonal(full: np.ndarray, n: int) -> bool:
+    """Whether a template (weighted bands) is a tone: TONAL[0] of its first n
+    samples' energy in the kick band, or TONAL[1] of it there and that band
+    as alike to itself 8-35 ms later as TONAL[2] (NCC). A kick may ring
+    little and still be one (0.29 with 59 % there, leadin-2: probed as a
+    noisy sound, it was found 36 times where no drum plays)."""
+    share = low_share(full, n)
+    return share >= TONAL[0] or (share >= TONAL[1] and ring(full[0], n) >= TONAL[2])
 
 
 def pitch_selectivity(audio: np.ndarray, role_band: str, n: int) -> float:
@@ -597,7 +606,15 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     inband = {b: [band(tp.audio, b)[None, :] for tp in templates] for b in {tp.band for tp in templates}}
     tones = {k for k in range(len(templates)) if tonal(full[k], n[k])}
     rows = [ROW[tp.band] for tp in templates]
-    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], tones, rows)
+    # A tone is never held (a kick template's low ring explains a little of
+    # almost anything), unless it was found in the hat band with less than
+    # TONAL[0] of its energy in the kick band: a hat whose average carries
+    # the body of the kicks under some of its hits rings there, and is held
+    # as a hat (24 of 24 hats under the snares, kicks at half level on 2 of
+    # every 8 hats, against 0)
+    holdable = {k for k in range(len(templates)) if k not in tones
+                or (rows[k] == ROW["hat"] and low_share(full[k], n[k]) < TONAL[0])}
+    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
     columns, purity = [], {}
@@ -710,8 +727,6 @@ def _probes(sc: Scene, cands: Candidates, gains: np.ndarray, merged: dict, weak:
     layers, offsets = Candidates(), {}
     for s_tp, held in sc.rel["holds"].items():
         for h_tp, _, held_lag, _ in held:
-            if h_tp in sc.tones:
-                continue
             (s, s_off), (h, h_off) = _root(merged, col_of[s_tp]), _root(merged, col_of[h_tp])
             sp, hp = cands.p[cands.col == s], cands.p[cands.col == h]
             if s == h or not len(sp):
