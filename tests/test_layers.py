@@ -98,15 +98,21 @@ def test_hats_under_every_snare(sounds):
                if np.min(np.abs(snares - e["t"])) < 0.003)
 
 
-def test_a_clap_layered_on_a_snare_0_to_8_ms_late(sounds):
-    """Clap alone on 6, snare alone on 12, both on 4 (the clap 0-8 ms late)."""
+@pytest.mark.parametrize("late", ["0-8 ms", "0 ms"])
+def test_a_clap_layered_on_a_snare(sounds, late):
+    """Clap alone on 6, snare alone on 12, both on 4, the clap 0-8 ms late
+    or exactly on the snare. On it, the clap's and the snare's templates
+    each hold half the other: the clap lost its moments under the snare as
+    one sound found twice, half its hits, was merged into the snare, and its
+    solo hits went too (0 of 32). Half no longer merges: every solo clap is
+    found; the 16 under the snare are not."""
     rng = np.random.default_rng(7)
     hits = []
     for b in range(16):
         o = 0.05 + b * 16 * STEP
         hits += [("kick", o, 0.9), ("kick", o + 10 * STEP, 0.9), ("clap", o + 6 * STEP, 0.7),
                  ("snare", o + 12 * STEP, 0.8), ("snare", o + 4 * STEP, 0.8),
-                 ("clap", o + 4 * STEP + rng.uniform(0, 0.008), 0.7)]
+                 ("clap", o + 4 * STEP + (rng.uniform(0, 0.008) if late == "0-8 ms" else 0.0), 0.7)]
         hits += [("hat", o + s * STEP, 0.3) for s in range(0, 16, 2)]
     x = render(sounds, hits, 0.05 + 16 * 16 * STEP + 1)
     templates = [oracle(x, hits, n, b) for n, b in (("hat", "hat"), ("kick", "low"), ("snare", "snare"),
@@ -114,7 +120,8 @@ def test_a_clap_layered_on_a_snare_0_to_8_ms_late(sounds):
     events = explain(x, templates)
     for name in ("clap", "snare", "hat"):
         times = [t for n, t, _ in hits if n == name]
-        assert found(events, name, times).all(), name  # the clap on the snare: recall 0.5 before
+        solo = [t for t in times if name != "clap" or late == "0-8 ms" or abs((t - 0.05) / STEP % 16 - 6) < 0.01]
+        assert found(events, name, solo).all(), name  # the clap on the snare: recall 0.5 before, 0 at 0 ms
         assert extra(events, name, times) == 0, name
 
 
@@ -266,6 +273,36 @@ def test_hats_under_the_snare_when_kicks_land_on_hats(sounds, kick_gain):
     t = np.array([e["t"] for e in events[hat]]) + off
     assert all(np.min(np.abs(t - u)) <= 0.003 for u in under)
     assert heard[hat][2].all()  # every hit of the hat template on a hat
+
+
+def test_merges_until_a_round_merges_none(sounds, monkeypatch):
+    """explain() merges until a round merges nothing, so the hits it keeps
+    index the list it merged last: with three rounds at most, a third round
+    that still merged left them indexing the list before it (IndexError on
+    this beat). Forced here: the column with the fewest candidates into the
+    one with the most, in each of three rounds."""
+    hits = []
+    for b in range(16):
+        o = 0.05 + b * 16 * STEP
+        hits += [("kick", o, 0.9), ("kick", o + 10 * STEP, 0.9), ("clap", o + 6 * STEP, 0.7),
+                 ("snare", o + 12 * STEP, 0.8), ("snare", o + 4 * STEP, 0.8), ("clap", o + 4 * STEP, 0.7)]
+        hits += [("hat", o + s * STEP, 0.3) for s in range(0, 16, 2) if s != 6]
+    x = render(sounds, hits, 0.05 + 16 * 16 * STEP + 1)
+    templates = [oracle(x, hits, n, b) for n, b in (("hat", "hat"), ("kick", "low"), ("snare", "snare"),
+                                                    ("clap", "snare"))]
+    rounds = []
+
+    def three_rounds(cands, pairs, first, kind):
+        rounds.append(1)
+        cols = np.unique(cands.col)
+        if len(rounds) > 3 or len(cols) < 2:
+            return {}
+        count = {int(c): int(np.sum(cands.col == c)) for c in cols}
+        return {min(count, key=count.get): (max(count, key=count.get), 0)}
+
+    monkeypatch.setattr(layers, "duplicates", three_rounds)
+    events = explain(x, templates)
+    assert len(rounds) == 4 and sum(len(v) for v in events.values()) > 0
 
 
 @pytest.mark.parametrize("found_in", ["low", "snare"])
