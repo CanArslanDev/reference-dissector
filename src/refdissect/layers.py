@@ -525,6 +525,25 @@ class Explained:
     info: dict
 
 
+@dataclass
+class Scene:
+    """What the steps of explain() share: the templates, their attack lengths
+    (n) and how they overlap (relations); the columns (kit.columns: kept
+    templates purified, then pitched copies) with the padded stem's bands;
+    the column of each kept template; and per column its threshold, usual
+    gain and null, as the steps set them."""
+    templates: list
+    n: list[int]
+    rel: dict
+    tones: set[int]
+    noisy: list[int]
+    col_of: dict[int, int]
+    kit: Kit
+    thr: np.ndarray
+    usual: np.ndarray | None = None
+    null: np.ndarray | None = None
+
+
 def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, closest_ms: dict | None = None,
             min_gain: float = MATCHED_GAIN, onsets: bool = True, pitched: bool = True) -> Explained:
     """Every hit of every template (detect.Template), as the module
@@ -536,6 +555,27 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
     closest_ms = {**CLOSEST_MS, **(closest_ms or {})}
     xp = np.r_[np.zeros(LEAD, np.float32), np.asarray(x, np.float32),
                np.zeros(max(len(tp.audio) for tp in templates), np.float32)]
+    sc, decided = _scene(xp, templates, detect_ms, thresholds, pitched)
+    cands, weak = _matched(sc, xp, thresholds, closest_ms)
+    cands, merged = _one_each(sc, cands)
+    cands, gains = _significant(sc, cands, min_gain)
+    layers, offsets = _probes(sc, cands, gains, merged, weak, xp, min_gain, onsets)
+    cands, gains = _settle(sc, cands, layers, min_gain)
+    columns = sc.kit.columns
+    info = {"composite": decided["composite"],
+            "merged": {columns[a].name: {"into": columns[b].name, "offset_ms": round(off / SR * 1000, 2)}
+                       for a, (b, off) in merged.items()},
+            "echo": decided["echo"], "tonal": decided["tonal"], "purified": decided["purified"],
+            "pair_offsets": offsets, "pitched": decided["pitched"],
+            "usual_gain": {c.name: round(float(u), 4) for c, u in zip(columns, sc.usual) if not c.semitones},
+            "null_drop": {c.name: round(float(v), 5) for c, v in zip(columns, sc.null) if not c.semitones}}
+    return Explained(_events(templates, sc.kit, cands, gains), info)
+
+
+def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, pitched: bool) -> tuple[Scene, dict]:
+    """The columns: kept templates (relations) purified of what they hold,
+    then pitched copies of the noisy ones a semitone changes (SHARP); and
+    what decided them (composites, echoes, tones, purities, sharpness)."""
     w = _weights(xp)
     names = [tp.name for tp in templates]
     full = [_bands(tp.audio, w) for tp in templates]
@@ -545,8 +585,6 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
     rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], tones)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
-
-    # the columns: kept templates (purified), then pitched copies of the noisy, sharp ones
     columns, purity = [], {}
     for k in rel["kept"]:
         held = rel["holds"].get(k, [])
@@ -554,46 +592,61 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
         purity[names[k]] = {names[h]: {"c": round(float(c), 3), "lag_ms": round(lag / SR * 1000, 2),
                                        "share": round(share, 3)} for (h, _, lag, share), c in zip(held, coef)}
         columns.append(Column(names[k], k, data[:, :n[k]]))
-    col_of = {k: c for c, k in enumerate(rel["kept"])}
     sharp = {k: round(pitch_selectivity(templates[k].audio, templates[k].band, n[k]), 3) for k in noisy} \
         if pitched else {}
     for k in [k for k, v in sharp.items() if v < SHARP]:
         for st in SEMITONES:
             columns.append(Column(names[k], k, _bands(transpose(templates[k].audio, st), w)[:, :n[k]], st))
     kit = Kit(_bands(xp, w), columns)
+    thr = np.array([thresholds[templates[col.template].band] for col in columns])
+    sc = Scene(templates, n, rel, tones, noisy, {k: c for c, k in enumerate(rel["kept"])}, kit, thr)
+    decided = {"composite": {names[k]: {"share": v["share"], "by": {names[j]: c for j, (c, _) in v["by"].items()}}
+                             for k, v in rel["composite"].items()},
+               "echo": {names[k]: v for k, v in rel["echo"].items()}, "tonal": sorted(names[k] for k in tones),
+               "purified": {k: v for k, v in purity.items() if v}, "pitched": {names[k]: v for k, v in sharp.items()}}
+    return sc, decided
 
-    # 1. matched-filter hits of every column (a left-out template's go to the templates explaining it)
+
+def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> tuple[Candidates, dict]:
+    """1. Each column's matched-filter hits (its own band and attack, NCC at
+    the threshold, closest_ms apart) and its weak peaks (CANDIDATE_NCC up to
+    the threshold); a left-out template's hits go to the templates that
+    explain it. Sets the usual gains: the median of a template's hits."""
+    templates, n, columns = sc.templates, sc.n, sc.kit.columns
     cands, weak, usual = Candidates(), {}, np.ones(len(columns))
     for c, col in enumerate(columns):
         tp = templates[col.template]
         audio = tp.audio if not col.semitones else transpose(tp.audio, col.semitones)
         score, gain = sliding_ncc(xp, audio[:n[col.template]], tp.band)
         p, props = find_peaks(score, height=CANDIDATE_NCC, distance=samples(closest_ms[tp.band]))
-        sure = props["peak_heights"] >= thresholds[tp.band]
+        sure = props["peak_heights"] >= sc.thr[c]
         cands.add(c, p[sure], props["peak_heights"][sure], "matched")
         weak[c] = p[~sure]
         if not col.semitones and np.any(sure):
             usual[c] = float(np.median(gain[p[sure]]))
-    for c, col in enumerate(columns):
-        usual[c] = usual[col_of[col.template]]
-    thr = np.array([thresholds[templates[col.template].band] for col in columns])
-    for k, v in rel["composite"].items():
+    sc.usual = np.array([usual[sc.col_of[col.template]] for col in columns])
+    for k, v in sc.rel["composite"].items():
         tp = templates[k]
         score, _ = sliding_ncc(xp, tp.audio[:n[k]], tp.band)
         p, props = find_peaks(score, height=thresholds[tp.band], distance=samples(closest_ms[tp.band]))
         for j, (_, lag) in v["by"].items():
-            new = _far(p + lag, cands.p[cands.col == col_of[j]], 2)
-            cands.add(col_of[j], (p + lag)[new], props["peak_heights"][new], "matched")
-    cands = cands.sorted()
+            new = _far(p + lag, cands.p[cands.col == sc.col_of[j]], 2)
+            cands.add(sc.col_of[j], (p + lag)[new], props["peak_heights"][new], "matched")
+    return cands.sorted(), weak
 
-    # 2. one column per sound and moment; columns that keep losing to another one are merged into it
-    order = [col_of[k] for k in sorted(rel["kept"], key=lambda k: -templates[k].hits)]
+
+def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple[int, int]]]:
+    """2. One column per sound and moment (distinct); columns that keep
+    losing to another one are merged into it (duplicates), their hits moved
+    to it. Returns the hits and {merged column: (into, offset)}."""
+    kit, columns = sc.kit, sc.kit.columns
+    order = [sc.col_of[k] for k in sorted(sc.rel["kept"], key=lambda k: -sc.templates[k].hits)]
     order += [c for c in range(len(columns)) if c not in order]
+    kind = [None if c.semitones else c.template in sc.tones for c in columns]  # pitched copies are never merged
     merged: dict[int, tuple[int, int]] = {}
     for _ in range(3):
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
-        kind = [None if c.semitones else c.template in tones for c in columns]  # pitched copies are never merged
         dup = duplicates(cands, pairs, order, kind)
         if not dup:
             break
@@ -604,33 +657,47 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
             cands = cands.take(cands.col != a)
             cands.add(b, (mine.p + off)[new], mine.ncc[new], "matched")
         cands = cands.sorted()
-    cands = cands.take(kept)
+    return cands.take(kept), merged
+
+
+def _significant(sc: Scene, cands: Candidates, min_gain: float) -> tuple[Candidates, np.ndarray]:
+    """3. The hits at min_gain of their template's usual gain whose drop
+    beats the null (what the template takes where it does not play). Sets
+    the nulls; returns the hits and their gains."""
+    kit, usual = sc.kit, sc.usual
     gains, _ = fit(kit, cands)
     cands = cands.take(gains >= min_gain * usual[cands.col])
-
-    # 3. again, with the null
     gains, drops = fit(kit, cands, drops=True)
-    null = np.array([_null(kit, cands, gains, c) if not columns[c].semitones else 0.0
-                     for c in range(len(columns))])
-    for c, col in enumerate(columns):
-        null[c] = null[col_of[col.template]]
-    cands = cands.take((gains >= min_gain * usual[cands.col]) & (drops >= null[cands.col]))
+    null = np.array([_null(kit, cands, gains, c) if not col.semitones else 0.0 for c, col in enumerate(kit.columns)])
+    sc.null = np.array([null[sc.col_of[col.template]] for col in kit.columns])
+    cands = cands.take((gains >= min_gain * usual[cands.col]) & (drops >= sc.null[cands.col]))
     gains, _ = fit(kit, cands)
+    return cands, gains
 
-    # 4. probes: held templates under their holders, weak matched-filter peaks, onsets of the band
-    def root(c: int) -> tuple[int, int]:
-        off = 0
-        while c in merged:
-            c, o = merged[c]
-            off += o
-        return c, off
 
+def _root(merged: dict[int, tuple[int, int]], c: int) -> tuple[int, int]:
+    """The column c's hits went to, and the offset they moved by."""
+    off = 0
+    while c in merged:
+        c, o = merged[c]
+        off += o
+    return c, off
+
+
+def _probes(sc: Scene, cands: Candidates, gains: np.ndarray, merged: dict, weak: dict, xp: np.ndarray,
+            min_gain: float, onsets: bool) -> tuple[Candidates, dict]:
+    """4. Where the kept hits leave something out: a held template at its
+    offset under the hits of the one holding it (the co-detections' offset,
+    else the containment lag), and each noisy template at its weak
+    matched-filter peaks and the onsets of its band. Returns the probe hits
+    that pass and the offsets used."""
+    kit, columns, col_of = sc.kit, sc.kit.columns, sc.col_of
     layers, offsets = Candidates(), {}
-    for s_tp, held in rel["holds"].items():
+    for s_tp, held in sc.rel["holds"].items():
         for h_tp, _, held_lag, _ in held:
-            if h_tp in tones:
+            if h_tp in sc.tones:
                 continue
-            (s, s_off), (h, h_off) = root(col_of[s_tp]), root(col_of[h_tp])
+            (s, s_off), (h, h_off) = _root(merged, col_of[s_tp]), _root(merged, col_of[h_tp])
             sp, hp = cands.p[cands.col == s], cands.p[cands.col == h]
             if s == h or not len(sp):
                 continue
@@ -638,19 +705,28 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
             lag = held_lag + h_off - s_off if lag is None else lag
             offsets[f"{columns[s].name}>{columns[h].name}"] = {"ms": round(lag / SR * 1000, 2), "pairs": agree}
             got = probe(kit, cands, gains, h, _free(sp + lag, hp), samples(SEARCH_MS))
-            ok = passes(got, usual[h], null[h], thr[h], min_gain)
+            ok = passes(got, sc.usual[h], sc.null[h], sc.thr[h], min_gain)
             layers.add(h, got["p"][ok], got["ncc"][ok], "layer")
-    for k in noisy:
+    for k in sc.noisy:
         c = col_of[k]
         if c in merged:
             continue
         centers = [(weak[c], SEARCH_MS)]
         if onsets:
-            centers.append((band_onsets(band(xp, templates[k].band)) - PRE, ONSET_MS))
+            centers.append((band_onsets(band(xp, sc.templates[k].band)) - PRE, ONSET_MS))
         for q, ms in centers:
             got = probe(kit, cands, gains, c, _free(q, cands.p[cands.col == c]), samples(ms))
-            ok = passes(got, usual[c], null[c], thr[c], min_gain)
+            ok = passes(got, sc.usual[c], sc.null[c], sc.thr[c], min_gain)
             layers.add(c, got["p"][ok], got["ncc"][ok], "layer")
+    return layers, offsets
+
+
+def _settle(sc: Scene, cands: Candidates, layers: Candidates, min_gain: float) -> tuple[Candidates, np.ndarray]:
+    """5. The probe hits joined to the others (one sound per moment again,
+    the hits already kept win), a low template's ringing dropped (_tails),
+    and the floors checked again once everything is fit together. Returns
+    the hits and their gains."""
+    kit, columns = sc.kit, sc.kit.columns
     if len(layers):
         joined = cands.join(layers)
         lg, _ = fit(kit, joined)
@@ -659,26 +735,17 @@ def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, c
         mask[keep] = True
         cands = joined.take(mask | np.array([s != "layer" for s in joined.source], dtype=bool))
     gains, _ = fit(kit, cands)
-    low = {c for c, col in enumerate(columns) if templates[col.template].band == "low"}
+    low = {c for c, col in enumerate(columns) if sc.templates[col.template].band == "low"}
     cands = cands.take(_tails(cands, gains, low) & (gains > 0))
-    for _ in range(2):  # 5. what still passes once everything is fit together
+    for _ in range(2):
         gains, _ = fit(kit, cands)
         layer = np.array([s == "layer" for s in cands.source], dtype=bool)
-        clear = cands.ncc >= thr[cands.col]
-        floor = np.where(layer & ~clear, LAYER_GAIN, min_gain) * usual[cands.col]
+        clear = cands.ncc >= sc.thr[cands.col]
+        floor = np.where(layer & ~clear, LAYER_GAIN, min_gain) * sc.usual[cands.col]
         if np.all(gains >= floor):
             break
         cands = cands.take(gains >= floor)
-    info = {"composite": {names[k]: {"share": v["share"], "by": {names[j]: c for j, (c, _) in v["by"].items()}}
-                          for k, v in rel["composite"].items()},
-            "merged": {columns[a].name: {"into": columns[b].name, "offset_ms": round(off / SR * 1000, 2)}
-                       for a, (b, off) in merged.items()},
-            "echo": {names[k]: v for k, v in rel["echo"].items()}, "tonal": sorted(names[k] for k in tones),
-            "purified": {k: v for k, v in purity.items() if v}, "pair_offsets": offsets,
-            "pitched": {names[k]: v for k, v in sharp.items()},
-            "usual_gain": {c.name: round(float(u), 4) for c, u in zip(columns, usual) if not c.semitones},
-            "null_drop": {c.name: round(float(v), 5) for c, v in zip(columns, null) if not c.semitones}}
-    return Explained(_events(templates, kit, cands, gains), info)
+    return cands, gains
 
 
 def _events(templates: list, kit: Kit, cands: Candidates, gains: np.ndarray) -> dict[str, list[dict]]:
