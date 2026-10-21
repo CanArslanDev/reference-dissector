@@ -37,6 +37,9 @@ FAMILY = {"clap": "snare", "rim": "snare", "open_hat": "hat", "crash/ride": "hat
 # search gave 3 of 24 research-beat kicks a layer, none of them true (and found no true one)
 TONAL_LAYERS = "kick band: not searched (any sine-like file takes energy off a kick)"
 SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligned, in the band) is that sound
+# a "layer" this much louder than the top match means the top match is not the template's sound (a kick
+# template's snare-band match got a kick 15 dB louder as its layer); a clap on a snare sits -6..0 dB
+LOUDER_DB = 10.0
 
 
 def _save(path: Path, obj) -> Path:
@@ -250,11 +253,12 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     that leaves the least is a layer when it takes the residual down by
     min_db or more and is not a sound another template was given (`taken`)
     or a copy of one: a plain snare's best partner is the hat that always
-    plays with it. With the drum stem and the template's hit times, a
-    partner heard at more moments away from those hits than at them (and
-    at more than two) is a sound of its own, found or not by another
-    template. gain_db is the layer's level against the top match's (both
-    files peak-normalized), lag_ms how much later it starts.
+    plays with it. A partner more than LOUDER_DB louder than the top match
+    is not its layer either. With the drum stem and the template's hit
+    times, a partner heard at more moments away from those hits than at
+    them (and at more than two) is a sound of its own, found or not by
+    another template. gain_db is the layer's level against the top
+    match's (both files peak-normalized), lag_ms how much later it starts.
     The research behind it: 10 of 12 layered snares, 0 of 12 plain ones
     given a layer (the rule was chosen on those 24 cases)."""
     main, n = ranked[0], len(t)
@@ -285,6 +289,9 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
                 "better_db": better, "partner": layer["file"]}
     if any(library.same(r["i"], i, n) for i in taken):
         return [], {**evidence, "accepted": False, "why": "the partner is another template's sound"}
+    if layer["gain_db"] > LOUDER_DB:
+        why = f"the partner is {layer['gain_db']:.0f} dB louder than the top match"
+        return [], {**evidence, "accepted": False, "why": why}
     if drums is not None:
         at, away = _elsewhere(library, r, b, drums, hits)
         evidence["heard"] = {"at_hits": at, "elsewhere": away}
