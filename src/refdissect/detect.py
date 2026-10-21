@@ -2,10 +2,14 @@
 
 Drums, in two passes:
 
-1. discover(): in each band (kick, snare, hat), the strong onsets that sit on
-   the sixteenth grid are grouped per grid slot by waveform; groups of at
-   least `min_hits` become templates (the averaged hits). Groups that are the
-   same sound (in any slot or band) are merged.
+1. discover(): in each band (low, snare, hat), the onsets, at where they
+   start, that share a place in the beat (a 16th, swung or not, a triplet,
+   a 32nd) are grouped by waveform; groups with enough hits become
+   candidates. A sound found in several bands, or a template of two sounds
+   that play together, is kept once (one_per_sound); then the onsets no
+   template explains are grouped wherever they sit (rare sounds, fills).
+   Templates are aligned on where the sound starts in its role's band
+   (hits.RISE), so a hit's time is its attack: t_attack.
 2. detect(): each template slides over the whole stem (matched filter); its
    peaks above a threshold are its hits, with a level. Where two templates of
    one band claim the same moment, the better match keeps it.
@@ -27,7 +31,7 @@ from scipy.signal import find_peaks
 
 from .audio import PRE, SR, band, samples
 from .grid import Grid
-from .hits import Group, group, merge, onset_template, onsets, strength_peaks, template
+from .hits import RISE, Group, aligned_template, group, merge, onsets, rise, starts, strength_peaks
 from .xcorr import ncc, sliding_ncc
 
 CLUSTER_MS = {"kick": 80, "snare": 60, "hat": 40, "low": 80}
@@ -44,12 +48,24 @@ THRESHOLD = {"kick": 0.6, "snare": 0.6, "hat": 0.65, "low": 0.6}
 MIN_GAP_MS = {"kick": 35, "snare": 35, "hat": 35, "low": 100}
 
 
+SAME_MS = 15  # hits of two templates this close are one moment
+ROLE_BAND = {"kick": "low", "snare": "snare", "hat": "hat"}  # where a guessed role's sound is compared
+RESIDUAL_MS = 10  # an onset this close to a template's hit is explained by it
+# How far before an onset-strength peak its start is looked for: a kick's
+# body peaks in the low band 30-32 ms after its click when it comes late
+LOOK_BACK_MS = {"low": 45, "kick": 45, "snare": 30, "hat": 30}
+
+
 @dataclass
 class Template:
     """A sound that repeats: name (sound_1 has the most hits), role (a guess
     from the energy its hits add; matching against a library decides), band
-    (where it was found, and where it is detected), the averaged hits
-    (MAX_MS long) and the grid slots of those hits."""
+    (where it was found, and where it is detected), its hits lined up
+    (MAX_MS long; averaged, the median in the hat band), the grid slots of
+    those hits, and attack_s: seconds from the start of `audio` to where the
+    sound starts (hits.RISE of its role), PRE unless the window is cut.
+    same_sound_as names the template that holds the same sound in another
+    band, found says which pass of discover() found it (grid, residual)."""
     name: str
     role: str
     band: str
@@ -57,27 +73,54 @@ class Template:
     hits: int
     slots: dict[int, int] = field(default_factory=dict)
     group: Group | None = None
+    attack_s: float = PRE / SR
+    same_sound_as: str | None = None
+    found: str = "grid"
+
+
+@dataclass
+class Candidate:
+    """A group on its way to becoming a template: its band, its detection
+    template (DETECT_MS, the sound's start `attack` samples in) and what
+    that finds over the whole stem: start times (s), gains and NCCs."""
+    band: str
+    group: Group
+    audio: np.ndarray
+    attack: int
+    times: np.ndarray
+    gains: np.ndarray
+    ncc: np.ndarray
+    short: np.ndarray
+    role: str = "snare"
+    found: str = "grid"
+    view_of: Candidate | None = None
 
 
 def new_energy_role(x: np.ndarray, g: Group, gap_ms: float = 10, span_ms: float = 60) -> tuple[str, dict]:
     """A first guess at kick / snare / hat from the energy the hits add: the
     spectrum of the span after each onset minus the span before it (an 808
-    ringing under a snare is there before the snare too, so it cancels out).
-    Only a guess: bright snares and dull hats overlap; the library decides."""
+    ringing under a snare is there before the snare too, so it cancels out),
+    as the median over the hits of the share each adds below 150 Hz and
+    above 5 kHz. Summed over the hits instead, the kicks under a third of
+    the hats decided: a hat template of a v1 beat read as a kick (0.87 of
+    the energy below 150 Hz, 0.00 for the median hit). Only a guess: bright
+    snares and dull hats overlap; the library decides."""
     span, gap = samples(span_ms), samples(gap_ms)
     n = 1 << (span - 1).bit_length()
     f = np.fft.rfftfreq(n, 1 / SR)
     win = np.hanning(span)
-    added = np.zeros(len(f))
-    for s, lag, _sign, gain, _ in g.members:
+    low, high = [], []
+    for s, lag, _sign, _gain, _ in g.members:
         a = s - lag
         if a - gap - span < 0 or a + span > len(x):
             continue
         after = np.abs(np.fft.rfft(x[a:a + span] * win, n)) ** 2
         before = np.abs(np.fft.rfft(x[a - gap - span:a - gap] * win, n)) ** 2
-        added += np.maximum(after - before, 0) * gain ** 2
-    total = added.sum() or 1.0
-    shares = {"low": float(added[f < 150].sum() / total), "high": float(added[f > 5000].sum() / total)}
+        added = np.maximum(after - before, 0)
+        total = added.sum() or 1.0
+        low.append(added[f < 150].sum() / total)
+        high.append(added[f > 5000].sum() / total)
+    shares = {"low": float(np.median(low)) if low else 0.0, "high": float(np.median(high)) if high else 0.0}
     if shares["low"] > 0.35:
         role = "kick"
     elif shares["high"] > 0.35:
@@ -87,80 +130,324 @@ def new_energy_role(x: np.ndarray, g: Group, gap_ms: float = 10, span_ms: float 
     return role, {k: round(v, 3) for k, v in shares.items()}
 
 
-def _times(x: np.ndarray, audio: np.ndarray, band_name: str, threshold: float) -> np.ndarray:
-    score, _ = sliding_ncc(x, audio, band_name)
-    peaks, _ = find_peaks(score, height=threshold, distance=samples(MIN_GAP_MS[band_name]))
-    return (peaks + PRE) / SR
+def min_hits_for(n_samples: int, grid: Grid) -> int:
+    """How many hits a sound needs at one place of the beat to be seeded: 3,
+    or one per 4 bars in a longer song."""
+    bars = max(1.0, (n_samples / SR - max(grid.phase, 0.0)) / grid.bar)
+    return max(3, int(np.ceil(bars / 4)))
 
 
-def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_hits: int = 8,
-             tolerance_ms: float = 12, same_sound: float = 0.6) -> list[Template]:
-    """Templates of the sounds that repeat on the grid.
+def seeds(x: np.ndarray, band_name: str) -> np.ndarray:
+    """Where the band's onsets start (s): hits.starts of its onset-strength
+    peaks, in RISE[band_name], up to LOOK_BACK_MS before them; a peak without
+    a clean rise is left out, and two peaks of one hit (a click and the body
+    after it) count once."""
+    t, _ = strength_peaks(x, band_name)
+    s = starts(x, np.round(t * SR).astype(int), RISE[band_name], before_ms=LOOK_BACK_MS[band_name], after_ms=20)
+    s = np.unique(s[s >= 0])
+    if len(s) > 1:
+        s = s[np.r_[True, np.diff(s) > samples(5)]]
+    return s / SR
 
-    In each band, strong onsets on the sixteenth grid are grouped per slot by
-    waveform; groups of min_hits or more are merged when their averages
-    match. A sound usually shows up in more than one band (a snare's top end
-    in the hat band): candidates whose hits mostly coincide with an earlier,
-    larger candidate's are the same sound and are dropped. Each survivor's
-    role comes from the energy its hits add (new_energy_role)."""
-    candidates: list[tuple[str, Group]] = []
-    tol = tolerance_ms / 1000
-    for band_name in bands:
-        xb = band(drums, band_name)
-        t, _strength = strength_peaks(drums, band_name)
-        rel = (t - grid.phase) / grid.step
-        on_grid = np.abs(rel - np.round(rel)) * grid.step < tol
-        slots = np.round(rel).astype(int) % (4 * grid.beats_per_bar)
-        groups: list[Group] = []
-        for slot in sorted(set(slots[on_grid].tolist())):
-            starts = (t[on_grid & (slots == slot)] * SR).astype(int)
-            if len(starts) < min_hits:
-                continue
-            groups += [g for g in group(xb, starts=starts, threshold=0.6, cluster_ms=CLUSTER_MS[band_name])
-                       if g.count >= min_hits]
-        candidates += [(band_name, g) for g in merge(xb, groups, threshold=0.8, length_ms=100,
-                                                     min_count=min_hits)]
-    candidates.sort(key=lambda bg: -bg[1].count)
-    kept: list[tuple[str, Group, np.ndarray, np.ndarray]] = []
-    for band_name, g in candidates:
-        audio = onset_template(drums, g, DETECT_MS[band_name])[0]
-        times = _times(drums, audio, band_name, THRESHOLD[band_name])
-        if not len(times):
+
+def places(t: np.ndarray, grid: Grid, width_ms: float = 12.0, min_hits: int = 3) -> np.ndarray:
+    """Which place in the beat each time falls on: clusters of the times
+    modulo a quarter note, each up to width_ms either side of its median,
+    taken densest first; -1 for times in clusters of fewer than min_hits.
+    Swung 16ths, triplets and 32nds are places of their own wherever the
+    song puts them, and the meter does not matter."""
+    beat, w = grid.beat, width_ms / 1000
+    pos = (np.asarray(t, dtype=float) - grid.phase) % beat
+
+    def dist(a, b):
+        return np.abs((a - b + beat / 2) % beat - beat / 2)
+    near = dist(pos[:, None], pos[None, :]) <= w
+    out = np.full(len(pos), -1)
+    seen = np.zeros(len(pos), bool)
+    k = 0
+    for i in np.argsort(-near.sum(axis=1), kind="stable"):
+        if out[i] >= 0 or seen[i]:
             continue
-        short = template(drums, g, 100)[0]
-        duplicate = False
-        for other_band, _g, other_times, other_short in kept:
-            # the same moments AND the same waveform: two sounds that always
-            # play together (a hat on every kick) share moments, not waveforms
-            shared = np.sum(np.min(np.abs(times[:, None] - other_times[None, :]), axis=1) < 0.015)
-            # alike in both bands: a snare that always lands on a hat looks
-            # like the hat in the hat band, but not in its own
-            alike = min(abs(ncc(band(short, b), band(other_short, b), samples(4))[0])
-                        for b in {band_name, other_band})
-            if shared >= same_sound * min(len(times), len(other_times)) and alike >= 0.6:
-                duplicate = True
-                break
-        if not duplicate:
-            kept.append((band_name, g, times, short))
+        seen[i] = True
+        free = near[i] & (out < 0)
+        centre = pos[i] + float(np.median((pos[free] - pos[i] + beat / 2) % beat - beat / 2))
+        mine = (dist(pos, centre) <= w) & (out < 0)
+        if mine.sum() >= min_hits:
+            out[mine] = k
+            k += 1
+    return out
+
+
+def found_by(x: np.ndarray, audio: np.ndarray, band_name: str, attack: int,
+             min_gain: float = 0.25) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """What a detection template finds over the whole stem, as detect()
+    finds it: (start times in s, gains, NCC), hits far below the usual gain
+    left out."""
+    score, gain = sliding_ncc(x, audio, band_name)
+    p, props = find_peaks(score, height=THRESHOLD[band_name], distance=samples(MIN_GAP_MS[band_name]))
+    g, h = gain[p], props["peak_heights"]
+    keep = g >= min_gain * np.median(g) if len(g) else np.zeros(0, bool)
+    return (p[keep] + attack) / SR, g[keep], h[keep]
+
+
+def candidate(x: np.ndarray, g: Group, band_name: str, found: str = "grid", median: bool = False) -> Candidate:
+    """A group's detection template, its start in the band of the role its
+    hits guess (new_energy_role, hits.RISE), and what it finds."""
+    role = new_energy_role(x, g)[0]
+    short, _, at = aligned_template(x, g, 100, LOOK_BACK_MS[role], bands=RISE[role], median=median)
+    audio = short[:samples(DETECT_MS[band_name])]
+    return Candidate(band_name, g, audio, at, *found_by(x, audio, band_name, at), short, role, found)
+
+
+def refined(x: np.ndarray, c: Candidate, median: bool | None = None, more: float = 2.0) -> Candidate:
+    """A hat-band candidate rebuilt from the hits it finds instead of the
+    onsets that seeded it, when it finds `more` times as many: each brought
+    to the template's level (1 / its gain), their median. A template is then
+    what it detects: seeded on the kick's places, a group in the hat band
+    held the kick under its hats, found every hat, and guessed itself a
+    kick; rebuilt, it is the hat. In the other bands rebuilding made things
+    worse: a few seeds that found the kick's body and more grew into a
+    template that held the kick (suite kick F1 0.82 -> 0.75)."""
+    if c.band != "hat" or len(c.times) < max(3, more * c.group.count):
+        return c
+    hits = np.round(c.times * SR).astype(int) - c.attack + PRE
+    g = Group(members=[(int(s), 0, 1.0, float(1 / max(gain, 1e-3)), float(h))
+                       for s, gain, h in zip(hits, c.gains, c.ncc)])
+    out = candidate(x, g, c.band, c.found, c.band == "hat" if median is None else median)
+    return out if len(out.times) >= 3 else c
+
+
+def pairs(a: np.ndarray, b: np.ndarray, ms: float = SAME_MS) -> tuple[np.ndarray, np.ndarray]:
+    """Indices (i, j) of the times a[i] whose nearest time in b, b[j], is
+    within ms."""
+    if not len(a) or not len(b):
+        return np.zeros(0, int), np.zeros(0, int)
+    j = np.clip(np.searchsorted(b, a), 1, len(b) - 1) if len(b) > 1 else np.zeros(len(a), int)
+    j = np.where(np.abs(b[j - 1] - a) < np.abs(b[j] - a), j - 1, j) if len(b) > 1 else j
+    ok = np.abs(b[j] - a) < ms / 1000
+    return np.flatnonzero(ok), j[ok]
+
+
+def likeness(a: Candidate, b: Candidate) -> dict:
+    """How alike two candidates are: the share of each one's hits the other
+    finds within SAME_MS (cover_a, cover_b), the correlation of their gains
+    (in dB) on the shared hits (r; None with fewer than 6, or gains that
+    hardly vary), and in the band of a's role (ROLE_BAND) their templates'
+    NCC (alike) and b's level against a's (level_db); the same in the band a
+    was found in (alike_found, level_db_found)."""
+    i, j = pairs(a.times, b.times)
+    out = {"shared": len(i), "cover_a": len(i) / max(1, len(a.times)), "cover_b": len(set(j)) / max(1, len(b.times)),
+           "r": None, "same_role": a.role == b.role}
+    if len(i) >= 6:
+        ga, gb = 20 * np.log10(np.maximum(a.gains[i], 1e-6)), 20 * np.log10(np.maximum(b.gains[j], 1e-6))
+        if min(np.std(ga), np.std(gb)) >= 0.5:
+            out["r"] = float(np.corrcoef(ga, gb)[0, 1])
+    for key, b_name in (("", ROLE_BAND[a.role]), ("_found", a.band)):
+        sa, sb = band(a.short, b_name), band(b.short, b_name)
+        out["alike" + key] = abs(ncc(sa, sb, samples(15))[0])
+        out["level_db" + key] = float(20 * np.log10((np.linalg.norm(sb) + 1e-12) / (np.linalg.norm(sa) + 1e-12)))
+    return out
+
+
+def explains(L: dict) -> bool:
+    """Whether likeness() says b holds a's sound on the hits they share: the
+    gains move together (r >= 0.6); or in a's role's band b's template has
+    a's shape (NCC >= 0.6) at a's level or louder (within 6 dB), and either
+    the two find each other's hits (cover >= 0.8 both ways), or they guess
+    the same role and b holds a's level in the band a was found in too.
+    A kick under some of the hats is not held by the hat: the hat templates
+    of v1 beats held it 5.9-10.9 dB down in the low band (2.9 dB on a slow
+    beat where htdemucs had left little of the kick's body in the drum
+    stem), but each guessed its own role and the kick was on a third of the
+    hats or less. A crash on every kick it plays with guesses kick too, and
+    the kick holds its low band, but not the crash in the hat band it was
+    found in. Views of one hit found in the low band hold its top 14 dB
+    down (low-band onsets line the hits up too loosely for it)."""
+    if L["r"] is not None and L["r"] >= 0.6:
+        return True
+    if L["alike"] < 0.6 or L["level_db"] < -6.0:
+        return False
+    if L["cover_a"] >= 0.8 and L["cover_b"] >= 0.8:
+        return True
+    return L["same_role"] and L["level_db_found"] >= -6.0
+
+
+def grid_candidates(x: np.ndarray, grid: Grid, bands, min_hits: int, width_ms: float) -> list[Candidate]:
+    """Groups of the onsets that share a place in the beat (places), per
+    band, merged across places when their averages match."""
+    out: list[Candidate] = []
+    for band_name in bands:
+        xb = band(x, band_name)
+        t = seeds(x, band_name)
+        where = places(t, grid, width_ms, min_hits)
+        groups: list[Group] = []
+        for k in sorted(set(where[where >= 0].tolist())):
+            starts_k = np.round(t[where == k] * SR).astype(int)
+            groups += [g for g in group(xb, starts=starts_k, threshold=0.6, cluster_ms=CLUSTER_MS[band_name])
+                       if g.count >= min_hits]
+        out += [refined(x, candidate(x, g, band_name)) for g in merge(xb, groups, threshold=0.8, length_ms=100,
+                                                                      min_count=min_hits)]
+    return [c for c in out if len(c.times)]
+
+
+def onset_share(c: Candidate, onsets: np.ndarray, top: np.ndarray) -> tuple[float, float]:
+    """(share of c's hits that sit on an onset, one of `onsets` within
+    RESIDUAL_MS; share whose hat band (`top`) rises there, within 15 ms)."""
+    if not len(c.times):
+        return 0.0, 0.0
+    on = len(pairs(c.times, onsets, RESIDUAL_MS)[0]) / len(c.times)
+    at = np.round(c.times * SR).astype(int)
+    up = np.mean([rise(top, int(t), samples(15), samples(15)) is not None for t in at])
+    return on, float(up)
+
+
+def starts_something(c: Candidate, onsets: np.ndarray, top: np.ndarray, min_onsets: float = 0.3,
+                     min_top: float = 0.05) -> bool:
+    """Whether a candidate's hits start a sound: min_onsets of them on an
+    onset, and min_top with an attack that reaches the hat band. What rings
+    does not: an 808 matched once a period in the snare band, or the body
+    of a kick, which htdemucs leaves in the drum stem 20-40 ms after its
+    click. On 8 suite beats the candidates that played no true hit (10 % or
+    fewer within 20 ms) and rang had 4-28 % of their hits on an onset, or
+    0-3 % rising in the hat band; those whose hits were true (60 % or more)
+    27-100 % and 27-100 %."""
+    on, up = onset_share(c, onsets, top)
+    return on >= min_onsets and up >= min_top
+
+
+def holder(a: Candidate, kept: list[Candidate]) -> tuple[Candidate | None, float, float]:
+    """(the kept candidate that explains the most of a's hits (explains()),
+    the share of a's hits it holds, the share any kept one finds)."""
+    covered = np.zeros(len(a.times), bool)
+    best, held = None, 0.0
+    for k in kept:
+        i, _ = pairs(a.times, k.times)
+        if not len(i):
+            continue
+        covered[i] = True
+        if len(i) / len(a.times) > held and len(i) >= 3 and explains(likeness(a, k)):
+            best, held = k, len(i) / len(a.times)
+    return best, held, float(covered.mean()) if len(a.times) else 0.0
+
+
+def one_per_sound(cands: list[Candidate], kept: list[Candidate] | None = None, alone: float = 0.6,
+                  share: float = 0.8, view: float = 0.3, min_new: int = 3) -> list[Candidate]:
+    """The candidates that are sounds of their own, those with more clean
+    hits (NCC >= 0.8) first. One the kept ones already hold is left out: a
+    kept one that explains it (holder) holds `alone` of its hits, or kept
+    ones find `share` of them and one of those explains it (a template of a
+    kick and the hat on it, found in the snare band, has the kick's hits and
+    some of the hat's). One that its holder explains on `view` of its hits
+    but that finds min_new hits nobody else does is kept as a view of the
+    same sound (view_of: the kick in the hat band, where the low band missed
+    it under an 808)."""
+    kept = list(kept or [])
+    for c in sorted(cands, key=lambda c: (-int(np.sum(c.ncc >= 0.8)), -float(np.median(c.ncc)), -len(c.times))):
+        k, held, covered = holder(c, kept)
+        if held >= alone or (k is not None and covered >= share):
+            continue
+        if k is not None and held >= view and (1 - covered) * len(c.times) >= min_new:
+            c.view_of = k.view_of or k
+        kept.append(c)
+    return kept
+
+
+def residual_candidates(x: np.ndarray, kept: list[Candidate], bands, min_hits: int = 3) -> list[Candidate]:
+    """Groups of the onsets in each band that no kept template of that band
+    explains (none of its hits within RESIDUAL_MS), at any place: rare
+    sounds, fills, sounds off the grid. A crash on a kick is explained by
+    the kick in the low band, not in the hat band."""
+    out: list[Candidate] = []
+    for band_name in bands:
+        mine = [c.times for c in kept if c.band == band_name]
+        found = np.sort(np.concatenate(mine)) if mine else np.zeros(0)
+        t = seeds(x, band_name)
+        if len(found):
+            i, _ = pairs(t, found, RESIDUAL_MS)
+            t = np.delete(t, i)
+        if len(t) < min_hits:
+            continue
+        xb = band(x, band_name)
+        groups = [g for g in group(xb, starts=np.round(t * SR).astype(int), threshold=0.6,
+                                   cluster_ms=CLUSTER_MS[band_name]) if g.count >= min_hits]
+        out += [candidate(x, g, band_name, "residual") for g in merge(xb, groups, threshold=0.8, length_ms=100,
+                                                                      min_count=min_hits)]
+    return [c for c in out if len(c.times) >= min_hits]
+
+
+def discover(drums: np.ndarray, grid: Grid, bands=("snare", "hat", "low"), min_hits: int | None = None,
+             width_ms: float = 12.0, residual: bool = True, min_residual: int = 3) -> list[Template]:
+    """Templates of the sounds that repeat. grid: on the attacks' time base
+    (grid.estimate's; only its tempo and phase are used).
+
+    In each band, the onsets, at where they start (seeds), that share a
+    place in the beat (places: 16ths swung or not, triplets, 32nds, any
+    meter) are grouped by waveform; groups of min_hits or more (min_hits_for:
+    3, or one per 4 bars) are merged when their averages match. Candidates
+    whose hits do not start a sound (starts_something: an 808 ringing, the
+    body of a kick after its click) are left out, and a sound found in more
+    than one band, or a template of two sounds that play together, is kept
+    once (one_per_sound; a partial view that finds hits the others miss is
+    kept as same_sound_as, its shared hits counted once: count_once). Then
+    the onsets none of them explains are grouped wherever they sit
+    (residual_candidates: min_residual hits) and go through the same tests.
+    Each template's role is guessed from the energy its hits add
+    (new_energy_role); its audio is the hits' mean (the median in the hat
+    band), the sound's start in its role's band PRE into it (attack_s).
+
+    Against the code before (16th slots +-12 ms, 8 hits a slot, a cross-band
+    duplicate test, the full-band attack) on 30 suite beats of 14 scenarios
+    (htdemucs stems, the same grids; detect() and the scorer unchanged),
+    strict F1@20 of the analysis per role, mean over scenarios: kick 0.26 ->
+    0.83, snare 0.85 -> 0.90, hat 0.45 -> 0.75, open hat 0.23 -> 0.97, clap
+    0.61 -> 0.83, crash 0 -> 0.47 (templates scored with their guessed roles,
+    the code before with the library's)."""
+    min_hits = min_hits or min_hits_for(len(drums), grid)
+    onsets = np.sort(np.concatenate([seeds(drums, b) for b in bands]))
+    top = band(drums, "hat")
+    kept = one_per_sound([c for c in grid_candidates(drums, grid, bands, min_hits, width_ms)
+                          if starts_something(c, onsets, top)])
+    if residual:
+        kept = one_per_sound([c for c in residual_candidates(drums, kept, bands, min_residual)
+                              if starts_something(c, onsets, top)], kept)
+    kept.sort(key=lambda c: -len(c.times))
+    names = {id(c): f"sound_{k + 1}" for k, c in enumerate(kept)}
     out: list[Template] = []
-    for k, (band_name, g, _times_found, _short) in enumerate(sorted(kept, key=lambda c: -len(c[2]))):
-        role, _shares = new_energy_role(drums, g)
-        audio, used = onset_template(drums, g, MAX_MS)
-        slot_counts = Counter(grid.step_in_bar(np.array(g.starts()) / SR).tolist())
-        out.append(Template(f"sound_{k + 1}", role, band_name, audio, used, dict(sorted(slot_counts.items())), g))
+    for c in kept:
+        main = c.view_of or c
+        audio, used, at = aligned_template(drums, c.group, MAX_MS, LOOK_BACK_MS[main.role], bands=RISE[main.role],
+                                           median=c.band == "hat")
+        slot_counts = Counter(grid.step_in_bar(np.array(c.group.starts()) / SR).tolist())
+        out.append(Template(names[id(c)], main.role, c.band, audio, used, dict(sorted(slot_counts.items())), c.group,
+                            round(at / SR, 5), names[id(main)] if c.view_of else None, c.found))
+    return out
+
+
+def count_once(events: dict[str, list[dict]], templates: list[Template]) -> dict[str, list[dict]]:
+    """The events of a template that holds the same sound as another one
+    (same_sound_as) without those within SAME_MS of that one's: a hit found
+    in two bands is one hit."""
+    out = dict(events)
+    for tp in templates:
+        if tp.same_sound_as and tp.same_sound_as in events:
+            main = np.sort(np.array([e.get("t_attack", e["t"]) for e in events[tp.same_sound_as]]))
+            shared = set(pairs(np.array([e.get("t_attack", e["t"]) for e in events[tp.name]]), main)[0].tolist())
+            out[tp.name] = [e for k, e in enumerate(events[tp.name]) if k not in shared]
     return out
 
 
 def detect(drums: np.ndarray, templates: list[Template], thresholds: dict | None = None,
            same_hit_ms: float = 15, min_gain: float = 0.25) -> dict[str, list[dict]]:
-    """Every hit of every template: {name: [{t, ncc, gain}]} (t in seconds)."""
+    """Every hit of every template: {name: [{t, t_attack, ncc, gain}]} (t in
+    seconds, PRE after the template's window starts; t_attack where the
+    sound starts, attack_s in)."""
     thresholds = {**THRESHOLD, **(thresholds or {})}
     raw: dict[str, list[dict]] = {}
     for tp in templates:
         score, gain = sliding_ncc(drums, tp.audio[: samples(DETECT_MS[tp.band])], tp.band)
         peaks, props = find_peaks(score, height=thresholds[tp.band], distance=samples(MIN_GAP_MS[tp.band]))
-        found = [{"t": round((p + PRE) / SR, 4), "ncc": round(float(h), 3), "gain": round(float(gain[p]), 4)}
-                 for p, h in zip(peaks, props["peak_heights"])]
+        found = [{"t": round((p + PRE) / SR, 4), "t_attack": round(p / SR + tp.attack_s, 4), "ncc": round(float(h), 3),
+                  "gain": round(float(gain[p]), 4)} for p, h in zip(peaks, props["peak_heights"])]
         # NCC ignores level: the quiet ringing tail of a low hit matches its own
         # template too. Hits far below the template's usual level are dropped.
         if found:
