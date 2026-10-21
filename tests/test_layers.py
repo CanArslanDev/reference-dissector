@@ -41,6 +41,14 @@ def oracle(x: np.ndarray, hits: list[tuple[str, float, float]], name: str, role_
     return Template(name, "kick" if role_band == "low" else role_band, role_band, audio, used, {}, g)
 
 
+def averaged(x: np.ndarray, hits: list[tuple[str, float, float]], name: str, role_band: str) -> Template:
+    """The template of `name` averaged over all its hits, as discover()
+    averages a grid slot's: whatever plays with some of them is in it."""
+    g = Group(members=[(int(round(t * SR)), 0, 1.0, 1.0, 1.0) for n, t, _ in hits if n == name])
+    audio, used = template(x, g, MAX_MS)
+    return Template(name, "kick" if role_band == "low" else role_band, role_band, audio, used, {}, g)
+
+
 def found(events: dict, name: str, times, tol: float = 0.003) -> np.ndarray:
     """Which of times have a hit of name within tol (its t is the attack:
     onset_template puts the attack PRE into the window)."""
@@ -212,6 +220,25 @@ def test_the_conftest_beat_with_discovered_templates(beat):
         if any(e["source"] == "layer" for e in evs):
             at = heard[name][2]
             assert all(ok for e, ok in zip(evs, at) if e["source"] == "layer"), name
+
+
+def test_no_hat_under_a_kick_that_has_none(sounds):
+    """Kicks 2 +- 4 ms after the hats of steps 0 and 10, and alone on 7, with
+    templates averaged over every hit: the hat's carries the kicks' body,
+    the kick's blurs the hats. Read over all bands, the kick template held
+    the hat through that body (c 0.41), its purified column held a negative
+    hat, and a hat was found on 10 of the 16 lone kicks."""
+    rng = np.random.default_rng(3)
+    hits = []
+    for b in range(16):
+        o = 0.05 + b * 16 * STEP
+        hits += [("hat", o + s * STEP, float(rng.uniform(0.25, 0.4))) for s in range(0, 16, 2)]
+        hits += [("kick", o + s * STEP + (2 + rng.uniform(-4, 4)) / 1000, 0.9) for s in (0, 10)]
+        hits += [("kick", o + 7 * STEP, 0.9)] + [("snare", o + s * STEP, 0.8) for s in (4, 12)]
+    x = render(sounds, hits, 0.05 + 16 * 16 * STEP + 1)
+    events = explain(x, [averaged(x, hits, n, b) for n, b in (("hat", "hat"), ("kick", "low"), ("snare", "snare"))])
+    hats = [t for n, t, _ in hits if n == "hat"]
+    assert found(events, "hat", hats).all() and extra(events, "hat", hats) == 0
 
 
 def test_one_hit_per_strike_of_a_ringing_sound(sounds):
