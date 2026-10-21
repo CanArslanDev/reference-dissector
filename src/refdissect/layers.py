@@ -36,6 +36,7 @@ out, its hits handed to the templates that explain it.
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -429,19 +430,19 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
     explains = gains ** 2 * energy[cands.col]
     longest = max(c.n for c in kit.columns)
     kept: list[int] = []
+    at: list[int] = []  # the kept ones' window starts, sorted
     pairs: list[tuple[int, int]] = []
     for i in np.argsort(-explains, kind="stable"):
-        rival = None
-        for j in kept:
-            if abs(cands.p[j] - cands.p[i]) < longest:
-                rho = kit.inner(cands.col[i], cands.p[i], cands.col[j], cands.p[j])
-                if abs(rho) >= SAME_SOUND * np.sqrt(energy[cands.col[i]] * energy[cands.col[j]]):
-                    rival = j
-                    break
+        near = kept[bisect.bisect_left(at, cands.p[i] - longest + 1):bisect.bisect_right(at, cands.p[i] + longest - 1)]
+        same = [j for j in near if abs(kit.inner(cands.col[i], cands.p[i], cands.col[j], cands.p[j]))
+                >= SAME_SOUND * np.sqrt(energy[cands.col[i]] * energy[cands.col[j]])]
+        rival = max(same, key=lambda j: explains[j]) if same else None
         if rival is not None:  # also a hit the fit gave nothing: its template repeats the other's
             pairs.append((int(i), rival))
         elif gains[i] > 0:
-            kept.append(int(i))
+            k = bisect.bisect_right(at, cands.p[i])
+            at.insert(k, int(cands.p[i]))
+            kept.insert(k, int(i))
     return np.array(sorted(kept), dtype=int), pairs
 
 
