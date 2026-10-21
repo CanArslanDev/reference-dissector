@@ -247,6 +247,69 @@ def test_the_analysis_grid_swing_flags_and_tempo_map():
     assert eighths[j + 1] == pytest.approx((tempo_map[0] + tempo_map[1]) / 2, abs=1e-5)
 
 
+def melodic_json(stems: dict, segments=None) -> dict:
+    """melodic.json as pipeline.melodic writes it: {stem: (cents, [(t, end, pitch, voted)])}."""
+    out = {"stems": {s: {"tuning_cents": c, "notes": [
+        {"t": t, "end": e, "pitch": p, "cents": c, "velocity": 90, **({"voted": "restored"} if v else {})}
+        for t, e, p, v in notes]} for s, (c, notes) in stems.items()}}
+    if segments is not None:
+        out["chords"] = {"segments": [{"start": a, "end": b, "start_time": 2 * a, "label": label, "bass_from": None}
+                                      for a, b, label in segments]}
+    return out
+
+
+def test_melodic_json_scored_per_stem_with_the_other_stems_extra(tmp_path):
+    """Truth layers pad and lead, both in the other stem (cents: its tuning,
+    on top of Basic Pitch's semitone); the vocals stem's notes belong to a
+    sound the truth lists none for: extra, not false notes (pooled with
+    them, note F1 would be 0.667). Without melodic.json, neither notes nor
+    chords are scored."""
+    pad = [{"layer": "pad", "t": 2.0 * k, "end": 2.0 * k + 1.9, "midi": 60, "cents": 0.0, "velocity": 90,
+            "flags": []} for k in range(4)]
+    lead = [{**n, "layer": "lead", "t": n["t"] + 0.5, "end": n["t"] + 0.8, "midi": 72} for n in pad]
+    chords = [{"t": 0.0, "end": 4.0, "label": "C:maj"}, {"t": 4.0, "end": 8.0, "label": "A:min"}]
+    t = events("truth", notes=pad + lead, chords=chords)
+    played = [(n["t"], n["end"], n["midi"], k == 3) for k, n in enumerate(pad + lead)]
+    vocal = [(1.0 + k, 1.5 + k, 64, False) for k in range(8)]
+    analysis = {"source": {"duration_s": 8.0}, "grid": {"bpm": 120.0, "phase": 0.0}, "templates": {}, "events": {},
+                "notes_808": []}
+    (tmp_path / "analysis.json").write_text(json.dumps(analysis))
+    (tmp_path / "melodic.json").write_text(json.dumps(melodic_json(
+        {"other": (20, played), "vocals": (-5, vocal)}, [(0.0, 4.0, "C:maj"), (4.0, 8.0, "A:min")])))
+    est = validate(evaluate.estimate_from_analysis(tmp_path))
+    first = est["notes"][0]
+    assert (first["layer"], first["midi"], first["cents"], first["velocity"]) == ("other", 60, 20.0, 90)
+    assert [n["flags"] for n in est["notes"] if n["layer"] == "other"].count(["restored"]) == 1
+    s = score(t, est)
+    m = s["melodic"]
+    assert {k: v["estimated_layer"] for k, v in m["layers"].items()} == {"lead": "other", "pad": "other"}
+    assert m["pooled"]["note_f1"] == 1.0 and m["extra"] == [{"layer": "vocals", "notes": 8}]
+    assert evaluate._note_block(pad + lead, est["notes"])["note_f1"] == pytest.approx(0.6667, abs=1e-4)
+    assert s["chords"]["majmin"] == 1.0
+    (tmp_path / "melodic.json").unlink()
+    bare = score(t, evaluate.estimate_from_analysis(tmp_path))
+    assert bare["melodic"] is None and bare["chords"] is None
+
+
+def test_the_plans_melodic_tracks_are_its_notes():
+    """The plan's melodic notes at their beats (120 BPM) and the track's
+    cents; a plan holds no chords, so they are not scored at plan level."""
+    notes = [{"pitch": 60, "start_time": 4.0 * k, "duration": 3.8, "velocity": 90} for k in range(4)]
+    plan = {"tempo": 120.0, "length_beats": 16.0,
+            "tracks": {"drums": {"pads": {}, "notes": []}, "808": {"notes": []},
+                       "melodic": {"other": {"instrument": "Drift", "cents": -12, "notes": notes}}}}
+    est = validate(evaluate.estimate_from_plan(plan))
+    assert [(n["t"], n["end"], n["midi"], n["cents"]) for n in est["notes"][:2]] == [(0.0, 1.9, 60, -12.0),
+                                                                                       (2.0, 3.9, 60, -12.0)]
+    t = events("truth", notes=[{"layer": "pad", "t": 2.0 * k, "end": 2.0 * k + 1.9, "midi": 60, "cents": 0.0,
+                                "velocity": 90, "flags": []} for k in range(4)],
+               chords=[{"t": 0.0, "end": 8.0, "label": "C:maj"}])
+    s = score(t, est)
+    assert s["melodic"]["pooled"]["note_f1"] == 1.0 and s["chords"] is None and "chords" not in est
+    del plan["tracks"]["melodic"]
+    assert "notes" not in evaluate.estimate_from_plan(plan)
+
+
 def test_validate_names_the_problems():
     assert validate(truth()) is not None
     bad = truth() | {"schema": "other"}

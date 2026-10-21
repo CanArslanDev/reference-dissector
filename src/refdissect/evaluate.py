@@ -218,21 +218,45 @@ def _with_kick(bass: list[dict], drums: list[dict], window: float = 0.02) -> Non
 
 # ── Estimates ──
 
-def _melodic(path: Path) -> tuple[list[dict], list[dict]]:
-    """Notes and chords from melodic.json ({"notes": [...], "chords": [...]}
-    with the events fields; a fractional midi is split into midi and cents)."""
+def _note(layer: str, t: float, end: float, pitch: float, velocity, flags=()) -> dict:
+    """A melodic note of the events schema: a fractional pitch split into midi and cents."""
+    midi = int(round(pitch))
+    return {"layer": layer, "t": round(float(t), 5), "end": round(float(end), 5), "midi": midi,
+            "cents": round((pitch - midi) * 100, 1), "velocity": int(velocity), "flags": list(flags)}
+
+
+def _melodic(path: Path) -> dict:
+    """Notes and chords from melodic.json (pipeline.melodic): each tonal
+    stem's notes as a layer named after the stem, sounding at pitch +
+    cents/100 (Basic Pitch's semitone on the stem moved onto A440, and the
+    stem's tuning), restored ones flagged; the chord segments when it has
+    them. {} without the file: the step did not run, so there is nothing to
+    score (not nothing heard)."""
     if not path.is_file():
-        return [], []
+        return {}
     m = _load(path)
-    notes = []
-    for n in m.get("notes", []):
-        pitch = float(n["midi"]) + float(n.get("cents", 0.0)) / 100
-        midi = int(round(pitch))
-        notes.append({"layer": str(n.get("layer", "melodic")), "t": float(n["t"]), "end": float(n["end"]),
-                      "midi": midi, "cents": round((pitch - midi) * 100, 1), "velocity": int(n.get("velocity", 100)),
-                      "flags": list(n.get("flags", []))})
-    chords = [{"t": float(c["t"]), "end": float(c["end"]), "label": str(c["label"])} for c in m.get("chords", [])]
-    return notes, chords
+    notes = [_note(stem, n["t"], n["end"], n["pitch"] + n.get("cents", 0) / 100, n.get("velocity", 100),
+                   ["restored"] if n.get("voted") == "restored" else [])
+             for stem, info in m.get("stems", {}).items() for n in info["notes"]]
+    out: dict = {"notes": sorted(notes, key=lambda n: (n["t"], n["layer"], n["midi"]))}
+    if m.get("chords"):
+        out["chords"] = [{"t": float(c["start"]), "end": float(c["end"]), "label": str(c["label"])}
+                         for c in m["chords"]["segments"]]
+    return out
+
+
+def _plan_melodic(plan: dict, bps: float) -> dict:
+    """The plan's melodic tracks, as notes at pitch + the track's cents; {}
+    when it has none. They are built muted, with a placeholder instrument:
+    what Live holds, not what it plays (the reference stem plays). A plan
+    holds no chords."""
+    tracks = plan["tracks"].get("melodic")
+    if tracks is None:
+        return {}
+    return {"notes": sorted((_note(stem, n["start_time"] / bps, (n["start_time"] + n["duration"]) / bps,
+                                   n["pitch"] + t.get("cents", 0) / 100, n["velocity"])
+                             for stem, t in tracks.items() for n in t["notes"]),
+                            key=lambda n: (n["t"], n["layer"], n["midi"]))}
 
 
 def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dict:
@@ -249,8 +273,8 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     band, 12 analyses). 808: notes_808 (t, end, midi_float; t is an onset
     backtracked in the 808 band, taken as the attack). Rhythm: the grid as
     grid.estimate left it (_analysis_time): tempo, meter, first bar line,
-    swing and tempo map. Melodic notes and chords: melodic.json when it
-    exists."""
+    swing and tempo map. Melodic notes and chords: melodic.json (_melodic);
+    without it the estimate carries neither, and they are not scored."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
@@ -276,12 +300,11 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
                          "attack_s": 0.0}
     drums.sort(key=lambda e: e["t_attack"])
     _with_kick(bass, drums)
-    notes, chords = _melodic(work / "melodic.json")
     duration = analysis["source"]["duration_s"]
     return _events(scenario or work.name, {"from": "analysis", "work": str(work)},
                    audio={"sr": SR, "n_samples": int(round(duration * SR))},
                    time=_analysis_time(analysis["grid"], duration),
-                   sounds=sounds, drums=drums, bass808=bass, notes=notes, chords=chords)
+                   sounds=sounds, drums=drums, bass808=bass, **_melodic(work / "melodic.json"))
 
 
 def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> list[dict]:
@@ -336,9 +359,10 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     x the velocity law.
     Notes on a pad without a readable sample, and 808 notes without a
     one-shot, play nothing and are left out (their files under "missing").
-    Rhythm: Live's own grid, bar 1 at 0 s at the plan's tempo; the plan puts
-    notes at their seconds, so the song's bars fall on it only when the
-    song's first bar line is at 0 s."""
+    Melodic notes: the plan's melodic tracks (_plan_melodic). Rhythm: Live's
+    own grid, bar 1 at 0 s at the plan's tempo; the plan puts notes at their
+    seconds, so the song's bars fall on it only when the song's first bar
+    line is at 0 s."""
     bps = plan["tempo"] / 60
     track = plan["tracks"]["drums"]
     g_drums = 10 ** (fader_db(plan, "drums") / 20)
@@ -372,7 +396,7 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     return _events(scenario, {"from": "plan", "velocity_curve": str(velocity_curve), "missing": missing},
                    audio={"sr": SR, "n_samples": int(round(length * SR))},
                    time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length),
-                   sounds=sounds, drums=drums, bass808=bass, notes=[], chords=[])
+                   sounds=sounds, drums=drums, bass808=bass, **_plan_melodic(plan, bps))
 
 
 # ── Drums ──
@@ -569,20 +593,29 @@ def melodic_scores(truth: dict, est: dict) -> dict | None:
     """Note F1 (onset 50 ms, pitch 50 cents, offsets ignored) and onset-only
     F1, pooled and per truth layer. A truth layer is scored against the
     estimate's layer of the same name, else against the one that scores best
-    on it (named in estimated_layer)."""
+    on it (named in estimated_layer; none when no layer scores above 0).
+    pooled: the truth's notes against those of the layers picked. A layer
+    no truth layer picks is extra, listed with its note count and scored
+    nowhere, as a drum sound assigned to no truth sound: the estimate's
+    layers are the separated stems, and a scenario's vocal is a library
+    sample whose notes its truth does not list."""
     ref = truth.get("notes") or []
     if not ref:
         return None
-    mine = est.get("notes") or []
     named: dict[str, list[dict]] = {}
-    for n in mine:
+    for n in est.get("notes") or []:
         named.setdefault(n["layer"], []).append(n)
     layers = {}
     for layer in sorted({n["layer"] for n in ref}):
         r = [n for n in ref if n["layer"] == layer]
         pick = layer if layer in named else max(named, key=lambda k, r=r: note_f1(r, named[k]), default=None)
+        if pick not in (None, layer) and note_f1(r, named[pick]) == 0:
+            pick = None
         layers[layer] = {"estimated_layer": pick, **_note_block(r, named.get(pick, []))}
-    return {"pooled": _note_block(ref, mine), "layers": layers}
+    picked = {v["estimated_layer"] for v in layers.values()}
+    played = [n for k in sorted(picked - {None}) for n in named[k]]
+    return {"pooled": _note_block(ref, played), "layers": layers,
+            "extra": [{"layer": k, "notes": len(v)} for k, v in sorted(named.items()) if k not in picked]}
 
 
 def _chord_track(chords: list[dict]) -> tuple[np.ndarray, list[str]]:
@@ -793,9 +826,11 @@ def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str
     events files: a truth file's audio paths are read from its folder).
     levels needs render_dir, render_plan's output for the plan the estimate
     came from (and reference, the stems its faders were set against, for
-    the kit levels). summary: the strict macro F1 at 20 ms over the truth's
-    drum sounds and the 808 onsets, the end-to-end replica number, and the
-    same macro by v1's rule."""
+    the kit levels). Melodic notes and chords are scored only when the
+    estimate carries them: without them the step did not run, and zeros
+    would read as notes it missed. summary: the strict macro F1 at 20 ms over
+    the truth's drum sounds and the 808 onsets, the end-to-end replica
+    number, and the same macro by v1's rule."""
     if isinstance(truth, str | Path):
         truth_dir = truth_dir or Path(truth).parent
         truth = load_events(truth)
@@ -806,7 +841,8 @@ def score(truth: dict | str | Path, estimate: dict | str | Path, render_dir: str
     out: dict = {"scenario": truth.get("scenario"),
                  "estimate_from": ((estimate.get("generator") or {}).get("switches") or {}).get("from"),
                  "drums": drum_scores(truth, estimate), "808": bass_scores(truth, estimate),
-                 "melodic": melodic_scores(truth, estimate), "chords": chord_scores(truth, estimate),
+                 "melodic": melodic_scores(truth, estimate) if "notes" in estimate else None,
+                 "chords": chord_scores(truth, estimate) if "chords" in estimate else None,
                  "rhythm": rhythm_scores(truth, estimate)}
     if render_dir is not None:
         out["levels"] = level_scores(truth, estimate, render_dir, truth_dir, render_gain, reference=reference)
