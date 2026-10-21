@@ -141,3 +141,18 @@ def test_kick_sources_take_the_808_out(tmp_path):
     assert np.max(np.abs(r808[int(0.75 * SR):b])) == 0  # cut at its end
     up3 = r808[b:b + int(0.4 * SR)] / 0.5
     assert abs(np.argmax(np.abs(np.fft.rfft(up3))) * SR / len(up3) - 46.25 * 2 ** (3 / 12)) < 3
+
+
+def test_a_same_recording_names_the_role():
+    """A hat found at NCC 0.99 is a hat, whatever the other four names say
+    and however the template's energy guessed it; below 0.95 the vote and
+    the guess decide as before."""
+    from collections import Counter
+    top = [{"role": "hat", "ncc": 0.994}, {"role": "kick", "ncc": 0.4}, {"role": "perc", "ncc": 0.38},
+           {"role": "other", "ncc": 0.37}, {"role": "other", "ncc": 0.35}]
+    named = Counter(pipeline.FAMILY.get(r["role"], r["role"]) for r in top)
+    assert pipeline._role(top, named, "kick") == "hat"
+    assert pipeline._role([{"role": "open_hat", "ncc": 0.97}], Counter({"hat": 1}), "kick") == "hat"
+    assert pipeline._role([dict(top[0], ncc=0.9)] + top[1:], named, "kick") == "kick"
+    votes = Counter({"snare": 3, "hat": 2})
+    assert pipeline._role([{"role": "hat", "ncc": 0.8}], votes, "kick") == "snare"
