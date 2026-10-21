@@ -4,18 +4,22 @@ matched, planned and scored, so a change to any step shows up per scenario.
     build()   the scenario beats (scenarios.build) and the v1 rebuilds
               (scenarios.convert_beat) as root/<scenario>-<seed>/
     run()     per beat: Demucs once per model (stems-<model>/, kept), then
-              analyze, match, fit-808 and plan into runs/<tag>/, scored by
-              evaluate against the truth at analysis level (what the pipeline
-              heard) and at plan level (what Live would play): scores.json.
-              Their means per scenario go to root/scores-<tag>.json.
+              analyze, melodic (where the stems hold a tonal one), match,
+              fit-808 and plan into runs/<tag>/, scored by evaluate against
+              the truth at analysis level (what the pipeline heard) and at
+              plan level (what Live would play): scores.json. Their means
+              per scenario go to root/scores-<tag>.json. steps runs a subset
+              (STEPS); reuse copies the outputs of the others from
+              runs/<reuse>/ of the same beat, so a change to one step does
+              not wait on the slow ones (fit-808: 50-140 s a beat).
     report()  markdown tables of those means per scenario, with the deltas
               between tags.
 
 A beat folder after a run:
     events.json, mix*, stems_truth/   the truth (scenarios)
     stems-<model>/                    Demucs' stems and separation.json
-    runs/<tag>/                       analysis.json, matches.json, synth808.json, plan.json, midi/,
-                                      templates/, log.txt, scores.json
+    runs/<tag>/                       analysis.json, melodic.json, basicpitch/, matches.json, synth808.json,
+                                      plan.json, midi/, templates/, log.txt, scores.json (run.json unscored)
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -46,6 +50,16 @@ from .separate import DEFAULT_MODEL, separate_many
 SEP_SEED, SEP_SHIFTS = 0, 1  # every suite separation: one seeded shift, Demucs' own default count
 ORDER = [*S.SCENARIOS, "v1orig"]
 REFERENCE = {"drums": "drums", "bass": "bass"}  # truth group -> the plan's stem its track fader is matched to
+
+# --steps, in the order they run; each needs the step named in NEEDS (its outputs) unless --reuse brings them
+STEPS = ("analyze", "melodic", "match", "fit-808", "plan", "score")
+NEEDS = {"melodic": "analyze", "match": "analyze", "fit-808": "analyze", "plan": "analyze", "score": "plan"}
+ONE_SHOT = "808 (synth).wav"  # pipeline.fit_808's
+# what each step leaves in runs/<tag>/ (templates/ is analyze's but for fit-808's 808.npy), and the file
+# whose absence means it did not run; score is never copied: a reused score would describe other outputs
+OUTPUTS = {"analyze": ("analysis.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
+           "match": ("matches.json",), "fit-808": ("synth808.json", ONE_SHOT, "templates/808.npy"),
+           "plan": ("plan.json", "midi")}
 
 
 # ── Beats ──
@@ -185,29 +199,154 @@ def _stopwatch(seconds: dict):
     return lap
 
 
-def _pipeline(beat: Path, work: Path, model: str, library, library_808, options: dict, lap) -> tuple[dict, dict]:
-    """analyze, match, fit-808 and plan, as the commands run them. A beat
-    whose 808 never rings alone gets no fitted one-shot (fit_808's
-    ValueError), so its plan has no 808 track, as with the CLI."""
+# ── Steps, and the outputs of the others ──
+
+def check_steps(steps=None, reuse: str | None = None) -> tuple[str, ...]:
+    """The steps to run, in STEPS' order (all of them when None). Without
+    reuse, a step whose input no step makes is an error before anything
+    runs: every step after analyze reads analysis.json, score plan.json."""
+    names = list(STEPS if steps is None else steps)
+    unknown = [n for n in names if n not in STEPS]
+    if unknown or not names:
+        raise ValueError(f"Unknown steps: {', '.join(unknown) or '(none given)'} (known: {', '.join(STEPS)})")
+    picked = tuple(n for n in STEPS if n in names)
+    missing = sorted({NEEDS[n] for n in picked if n in NEEDS and NEEDS[n] not in picked})
+    if missing and not reuse:
+        raise ValueError(f"steps {','.join(picked)} need the outputs of {', '.join(missing)}: run it too, or reuse "
+                         "a tag that has them")
+    return picked
+
+
+def tonal(stems: Path) -> bool:
+    """Whether a stems folder holds a stem pipeline.melodic transcribes."""
+    from .melodic import MELODIC_STEMS
+    return any((Path(stems) / f"{s}.wav").is_file() for s in MELODIC_STEMS)
+
+
+def _record(work: Path) -> dict:
+    """A run folder's record (scores.json, else run.json), or {}."""
+    for name in ("scores.json", "run.json"):
+        if (work / name).is_file():
+            return json.loads((work / name).read_text(encoding="utf-8"))
+    return {}
+
+
+def _kept(steps, has_tonal: bool) -> list[str]:
+    """The steps whose outputs a reused run gives: those not run (melodic only
+    where the stems hold a tonal one; score never)."""
+    return [s for s in OUTPUTS if s not in steps and (s != "melodic" or has_tonal)]
+
+
+def reuse_problems(beat: str | Path, reuse: str, model: str, steps) -> list[str]:
+    """What runs/<reuse>/ of this beat lacks for the steps not run: the file
+    a kept step writes (fit-808 may have found no 808 that rings alone: its
+    record says so, and that is its answer), or it failed, or it read
+    another model's stems. Empty: it can be reused."""
+    beat = Path(beat)
+    src = beat / "runs" / reuse
+    rec = _record(src)
+    if "failed" in rec:
+        return [f"runs/{reuse} failed ({rec['failed'][:100]})"]
+    if (src / "analysis.json").is_file():
+        stems = Path(json.loads((src / "analysis.json").read_text(encoding="utf-8"))["source"]["stems"]).name
+        if stems != stems_dir(beat, model).name:
+            return [f"runs/{reuse} analysed {stems}, not {stems_dir(beat, model).name}"]
+    return [f"{OUTPUTS[s][0]} ({s})" for s in _kept(steps, tonal(stems_dir(beat, model)))
+            if not (src / OUTPUTS[s][0]).is_file()
+            and not (s == "fit-808" and "fit_808" in (rec.get("problems") or {}))]
+
+
+def _copy(src: Path, dst: Path, rel: str) -> None:
+    """src/rel (a file or a folder; analyze's templates without fit-808's
+    808.npy) to dst/rel. The paths into src that its JSON files hold now
+    point into dst (synth808.json and plan.json name the 808 one-shot)."""
+    a, b = src / rel, dst / rel
+    if a.is_dir():
+        shutil.copytree(a, b, ignore=shutil.ignore_patterns("808.npy") if rel == "templates" else None,
+                        dirs_exist_ok=True)
+    elif a.is_file():
+        b.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(a, b)
+    for f in [b] if b.is_file() else sorted(b.rglob("*.json")) if b.is_dir() else []:
+        if f.suffix == ".json":
+            f.write_text(f.read_text(encoding="utf-8").replace(f"{src}/", f"{dst}/"), encoding="utf-8")
+
+
+def _clear(work: Path, steps) -> None:
+    """In place (the tag reused by itself): the outputs of the steps that
+    run go, with the record and a render left over; the others stay."""
+    for rel in [r for s in steps for r in OUTPUTS.get(s, ())] + ["scores.json", "run.json", "render"]:
+        path = work / rel
+        if rel == "templates":
+            for f in path.glob("*"):
+                if f.name != "808.npy":
+                    f.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+
+
+def _prepare(beat: Path, work: Path, tag: str, model: str, steps, reuse: str | None) -> tuple[dict, dict]:
+    """runs/<tag>/ ready for the steps: emptied and given the outputs of the
+    others from runs/<reuse>/, or in place when reuse is tag. Returns each
+    step's status (run, reused, skipped, no_tonal_stem) and the problems
+    the reused steps recorded."""
+    has_tonal = tonal(stems_dir(beat, model))
+    kept = _kept(steps, has_tonal) if reuse else []
+    old = {}
+    if reuse:
+        missing = reuse_problems(beat, reuse, model, steps)
+        if missing:
+            raise ValueError(f"runs/{reuse} cannot be reused: {'; '.join(missing)}")
+        old = _record(beat / "runs" / reuse)
+    if reuse == tag:
+        _clear(work, steps)
+    else:
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(parents=True)
+        for step in kept:
+            for rel in OUTPUTS[step]:
+                _copy(beat / "runs" / reuse, work, rel)
+    status = {s: "run" if s in steps else "reused" if s in kept else "skipped" for s in STEPS}
+    if not has_tonal:
+        status["melodic"] = "no_tonal_stem"
+    carried = {k: v for k, v in (old.get("problems") or {}).items() if k.replace("_", "-") in kept}
+    return status, carried
+
+
+def _pipeline(beat: Path, work: Path, model: str, library, library_808, options: dict, lap, status: dict,
+              reuse: str | None) -> dict:
+    """The steps whose status is run, as the commands run them; returns the
+    problems. A beat whose 808 never rings alone gets no fitted one-shot
+    (fit_808's ValueError), so its plan has no 808 track, as with the CLI."""
     problems = {}
-    with open(work / "log.txt", "w", encoding="utf-8", buffering=1) as f:  # line by line, to follow a run
+    with open(work / "log.txt", "a", encoding="utf-8", buffering=1) as f:  # line by line, to follow a run
         def log(msg) -> None:
             f.write(f"{msg}\n")
-        pipeline.analyze(stems_dir(beat, model), work, log=log, **options.get("analyze", {}))
-        lap("analyze")
-        lib = _library(str(library))
-        lap("library_load")
-        pipeline.match(work, lib, log=log, **options.get("match", {}))
-        lap("match")
-        try:
-            pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
-                             **options.get("fit_808", {}))
-        except ValueError as e:
-            problems["fit_808"] = str(e)
-        lap("fit_808")
-        plan = pipeline.plan(work, log=log)
-        lap("plan")
-    return plan, problems
+        log("steps: " + ", ".join(f"{s} {v}" for s, v in status.items()) + (f" (runs/{reuse})" if reuse else ""))
+        if status["analyze"] == "run":
+            pipeline.analyze(stems_dir(beat, model), work, log=log, **options.get("analyze", {}))
+            lap("analyze")
+        if status["melodic"] == "run":
+            pipeline.melodic(work, log=log, **options.get("melodic", {}))
+            lap("melodic")
+        if status["match"] == "run":
+            lib = _library(str(library))
+            lap("library_load")
+            pipeline.match(work, lib, log=log, **options.get("match", {}))
+            lap("match")
+        if status["fit-808"] == "run":
+            try:
+                pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
+                                 **options.get("fit_808", {}))
+            except ValueError as e:
+                problems["fit_808"] = str(e)
+            lap("fit_808")
+        if status["plan"] == "run":
+            pipeline.plan(work, log=log)
+            lap("plan")
+    return problems
 
 
 def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, lap) -> tuple[dict, list]:
@@ -231,37 +370,47 @@ def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, l
 
 
 def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, library_808: str | Path | None = None,
-             render: bool = False, options: dict | None = None) -> dict:
-    """The pipeline on one beat's stems for model (separated already) into
-    runs/<tag>/ (cleared first), scored at analysis and plan level; the record
-    is written to runs/<tag>/scores.json and returned. options: keyword
-    arguments for the steps, {"analyze": {...}, "match": {...},
-    "fit_808": {...}}, passed on unchanged."""
+             render: bool = False, options: dict | None = None, steps=None, reuse: str | None = None) -> dict:
+    """The steps (check_steps: all by default) on one beat's stems for model
+    (separated already) into runs/<tag>/, and with score, scored at analysis
+    and plan level. runs/<tag>/ is emptied first and given the other steps'
+    outputs from runs/<reuse>/ of this beat (in place when reuse is tag;
+    _prepare). The record is written to runs/<tag>/scores.json (run.json
+    without score) and returned. options: keyword arguments for the steps,
+    {"analyze": {...}, "melodic": {...}, "match": {...}, "fit_808": {...}},
+    passed on unchanged."""
     beat = Path(beat).resolve()
     work = beat / "runs" / tag
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
+    steps = check_steps(steps, reuse)
     options = options or {}
     truth = evaluate.load_events(beat / "events.json")
     sep = json.loads((stems_dir(beat, model) / "separation.json").read_text(encoding="utf-8"))
     seconds: dict = {"separate": sep.get("seconds")}
     lap = _stopwatch(seconds)
-    plan, problems = _pipeline(beat, work, model, library, library_808, options, lap)
-    analysis = evaluate.score(truth, evaluate.estimate_from_analysis(work, truth["scenario"]), truth_dir=beat)
-    lap("score_analysis")
-    planned, missing = _plan_score(truth, beat, work, plan, render, lap)
-    lap("score_plan")
+    status, problems = _prepare(beat, work, tag, model, steps, reuse)
+    lap("prepare")
+    problems |= _pipeline(beat, work, model, library, library_808, options, lap, status, reuse)
+    plan = json.loads((work / "plan.json").read_text(encoding="utf-8")) if (work / "plan.json").is_file() else None
+    scores = {}
+    if "score" in steps:
+        analysis = evaluate.score(truth, evaluate.estimate_from_analysis(work, truth["scenario"]), truth_dir=beat)
+        lap("score_analysis")
+        planned, missing = _plan_score(truth, beat, work, plan, render, lap)
+        lap("score_plan")
+        scores = {"missing": missing, "analysis": analysis, "plan": planned}
     seconds["total"] = round(sum(v for k, v in seconds.items() if k != "separate" and v is not None), 2)
     record = {"beat": beat.name, "scenario": truth["scenario"], "seed": truth["seed"], "tag": tag, "model": model,
               "separation": {k: sep.get(k) for k in ("model", "seed", "shifts", "device", "versions")},
-              "options": options, "refdissect": SOURCE, "render": render, "seconds": seconds,
-              "problems": problems, "missing": missing,
-              "plan_size": {"pads": len(plan["tracks"]["drums"]["pads"]),
-                            "drum_notes": len(plan["tracks"]["drums"]["notes"]),
-                            "808_notes": len(plan["tracks"]["808"]["notes"]),
-                            "808_one_shot": "sample_path" in plan["tracks"]["808"]},
-              "analysis": analysis, "plan": planned}
-    (work / "scores.json").write_text(json.dumps(record, indent=1, default=float), encoding="utf-8")
+              "options": options, "steps": status, "reuse": reuse, "refdissect": SOURCE, "render": render,
+              "seconds": seconds, "problems": problems}
+    if plan is not None:
+        tracks = plan["tracks"]
+        record["plan_size"] = {"pads": len(tracks["drums"]["pads"]), "drum_notes": len(tracks["drums"]["notes"]),
+                               "808_notes": len(tracks["808"]["notes"]), "808_one_shot": "sample_path" in tracks["808"],
+                               "melodic_notes": {s: len(t["notes"]) for s, t in tracks.get("melodic", {}).items()}}
+    record |= scores
+    name = "scores.json" if "score" in steps else "run.json"
+    (work / name).write_text(json.dumps(record, indent=1, default=float), encoding="utf-8")
     return record
 
 
@@ -283,26 +432,39 @@ def _done(record: dict, log) -> None:
     if "failed" in record:
         log(f"{record['beat']}: FAILED {record['failed']}")
         return
+    if "analysis" not in record:
+        ran = ", ".join(s for s, v in record["steps"].items() if v == "run")
+        log(f"{record['beat']}: {ran} run, not scored ({record['seconds']['total']:.0f} s)")
+        return
     a, p = record["analysis"]["summary"]["strict_f1_20"], record["plan"]["summary"]["strict_f1_20"]
     log(f"{record['beat']}: strict F1@20 analysis {_fmt(a)}, plan {_fmt(p)} ({record['seconds']['total']:.0f} s)")
 
 
 def run(root: str | Path, library: str | Path, library_808: str | Path | None = None, tag: str = "base",
         model: str = DEFAULT_MODEL, scenarios=None, jobs: int = 3, render: bool = False,
-        options: dict | None = None, resume: bool = False, log=print) -> dict:
+        options: dict | None = None, resume: bool = False, steps=None, reuse: str | None = None,
+        log=print) -> dict:
     """Separate what is not separated yet (one Demucs process), then
     run_beat over the beats, `jobs` at a time in their own processes (each
-    loads the library once, about 0.5 GB), and write the means per scenario
-    to root/scores-<tag>.json (also returned). resume skips beats this tag
-    has scored already."""
+    loads the library once, about 0.5 GB, if match runs), and write the
+    means per scenario to root/scores-<tag>.json (also returned). resume
+    skips beats this tag has scored already. steps and reuse: run_beat's,
+    checked for every beat before any runs (check_steps, reuse_problems)."""
+    steps = check_steps(steps, reuse)
     root = Path(root).resolve()
     beats = beat_dirs(root, scenarios)
     if resume:
         beats = [b for b in beats if not (b / "runs" / tag / "scores.json").is_file()]
     t0 = time.perf_counter()
     separate_beats(beats, model, log)
-    args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {})
-            for b in beats]
+    if reuse:
+        bad = {b.name: p for b in beats if (p := reuse_problems(b, reuse, model, steps))}
+        if bad:
+            shown = "; ".join(f"{name}: {', '.join(p)}" for name, p in list(bad.items())[:4])
+            raise ValueError(f"runs/{reuse} cannot be reused in {len(bad)} of {len(beats)} beats: {shown}"
+                             + (" ..." if len(bad) > 4 else ""))
+    args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {}, steps,
+             reuse) for b in beats]
     if jobs > 1 and len(args) > 1:
         with ProcessPoolExecutor(min(jobs, len(args)), mp_context=multiprocessing.get_context("spawn")) as pool:
             for future in as_completed([pool.submit(_run_job, a) for a in args]):
@@ -438,9 +600,10 @@ def _scenario_means(records: list[dict]) -> dict:
 def aggregate(root: str | Path, tag: str) -> dict:
     """Means per scenario over the beats this tag has scored (a key over the
     beats that have it), and overall: the mean over scenarios, so each
-    scenario counts once whatever its number of beats. options, render and
-    refdissect (the code) list every value the records hold: one, unless a
-    resumed run mixed them."""
+    scenario counts once whatever its number of beats. options, render,
+    steps, reuse and refdissect (the code) list every value the records
+    hold: one, unless a resumed run mixed them (steps also differ where a
+    beat has no tonal stem)."""
     records = [json.loads(p.read_text(encoding="utf-8")) for p in Path(root).glob(f"*/runs/{tag}/scores.json")]
     ok = [r for r in records if "failed" not in r]
     groups: dict[str, list[dict]] = {}
@@ -453,6 +616,7 @@ def aggregate(root: str | Path, tag: str) -> dict:
             "separation": {**(first.get("separation") or {}),
                            "devices": sorted({str(r["separation"].get("device")) for r in ok})},
             "options": _distinct(r.get("options") for r in ok), "render": _distinct(r.get("render") for r in ok),
+            "steps": _distinct(r.get("steps") for r in ok), "reuse": _distinct(r.get("reuse") for r in ok),
             "refdissect": _distinct(r.get("refdissect") for r in ok),
             "beats": len(ok), "failed": sorted(r["beat"] for r in records if "failed" in r),
             "scenarios": per, "overall": {"scenarios": len(per), **overall}}
@@ -481,7 +645,11 @@ TABLES = (  # (part, key, title, digits)
     ("analysis", "rhythm.octave_x1", "Tempo in the right octave (share of beats)", 2),
     ("analysis", "rhythm.downbeat_error_ms_abs", "First downbeat, |error| modulo a bar (ms)", 1),
     ("analysis", "rhythm.beat_f", "Beat F (70 ms)", 3),
+    ("analysis", "rhythm.meter_equal", "Meter right (share of beats)", 2),
+    ("analysis", "rhythm.downbeat_unsure", "First bar line flagged unsure (share of beats)", 2),
+    ("analysis", "rhythm.swing_ratio_error", "Swing ratio, estimate minus truth (where both have one)", 3),
     ("analysis", "melodic.note_f1", "Melodic note F1 (where the truth has notes)", 3),
+    ("plan", "melodic.note_f1", "Melodic note F1, plan (its muted MIDI tracks)", 3),
     ("analysis", "chords.majmin", "Chord accuracy, majmin (where the truth has chords)", 3),
     ("plan", "levels.kit.drums_db", "Levels: a perfect kit's drums under the plan's faders, re the truth (dB)", 2),
     ("plan", "levels.vs_kit_abs_db", "Levels: median |level against a perfect kit| over sounds, plan render (dB)", 2),
@@ -538,6 +706,13 @@ def _role_table(aggs: dict, part: str, metric: str, title: str, digits: int) -> 
     return out + [""]
 
 
+def _reused(agg: dict) -> str:
+    """'; fit-808 reused from base' for a tag whose runs reused steps."""
+    kept = sorted({s for st in agg.get("steps") or [] for s, v in st.items() if v == "reused"}, key=STEPS.index)
+    tags = [r for r in agg.get("reuse") or [] if r]
+    return f"; {', '.join(kept)} reused from {', '.join(tags)}" if kept and tags else ""
+
+
 def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> str:
     """Markdown: per scenario, each headline number for every tag (from
     root/scores-<tag>.json) and the change from the first tag to the last."""
@@ -548,8 +723,8 @@ def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> 
         sep = a.get("separation") or {}
         lines.append(f"- **{t}**: {a['beats']} beats in {len(a['scenarios'])} scenarios, model {a.get('model')} "
                      f"(seed {sep.get('seed')}, shifts {sep.get('shifts')}, {', '.join(sep.get('devices', []))}), "
-                     f"options {json.dumps(a.get('options'))}" + (f"; failed: {', '.join(a['failed'])}"
-                                                                    if a.get("failed") else ""))
+                     f"options {json.dumps(a.get('options'))}" + _reused(a)
+                     + (f"; failed: {', '.join(a['failed'])}" if a.get("failed") else ""))
     lines.append("")
     for part, key, title, digits in TABLES:
         lines += _table(aggs, part, key, title, digits)

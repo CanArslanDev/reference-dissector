@@ -16,6 +16,8 @@
     refdissect suite build work/inventory.json --out work/calibration-v2 --v1-truth calib-truth
     refdissect suite run work/calibration-v2 --library work/library.npz --library-808 work/library_808.npz \
         --tag base --render                                         (scores-<tag>.json: means per scenario)
+    refdissect suite run work/calibration-v2 --library work/library.npz --library-808 work/library_808.npz \
+        --tag new --steps analyze,match,plan,score --reuse base     (melodic and fit-808 copied from base)
     refdissect suite report work/calibration-v2 --tags base,new --out report.md
 
   comparing and choosing (docs/11):
@@ -164,7 +166,7 @@ def _suite_build(a):
 def _suite_run(a):
     from .suite import run
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
-            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, log=_say)
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, _list(a.steps), a.reuse, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
@@ -262,6 +264,12 @@ def _suite_parser(sub) -> None:
     s.add_argument("--jobs", type=int, default=3, help="beats in parallel processes (each loads the library, 0.5 GB)")
     s.add_argument("--render", action="store_true", help="render each plan offline for the level scores (deleted)")
     s.add_argument("--resume", action="store_true", help="skip the beats this tag has scored already")
+    s.add_argument("--steps", default=None,
+                   help="comma-separated, of analyze,melodic,match,fit-808,plan,score (default: all; melodic runs "
+                        "where the stems hold a tonal one, score writes scores.json)")
+    s.add_argument("--reuse", default=None, metavar="TAG",
+                   help="copy the outputs of the steps not run from runs/TAG/ of each beat (TAG itself: in place); "
+                        "fails before running when one is missing")
     _analyze_options(s)
     _match_options(s)
     s.set_defaults(run=_suite_run)
