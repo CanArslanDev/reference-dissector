@@ -53,27 +53,6 @@ def test_plan(tmp_path):
     assert "drums_track_db" in plan["levels"] and "808_track_db" in plan["levels"]
 
 
-def test_a_match_between_semitones_is_played_with_detune(tmp_path):
-    """A snare found 0.70 semitones down (match v2: transpose -1, +30 cents)
-    gets Transpose -1 and Detune +30 on its pad and in the build, and the
-    plan plays it at -0.70; a match from before match v2 (whole semitones
-    only) plays with Detune 0."""
-    from refdissect import evaluate
-    from refdissect.live import build_spec
-    analysis, matches, synth = _fixture(tmp_path)
-    for m in matches.values():
-        m["top"][0] = {**m["top"][0], "semitones": -0.7, "transpose": -1, "cents": 30.0, "detune_cents": 30.0}
-    plan = make_plan(analysis, matches, synth, tmp_path)
-    pad = plan["tracks"]["drums"]["pads"]["38"]
-    assert (pad["transpose"], pad["detune_cents"]) == (-1, 30)
-    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
-    assert (rack["38"]["settings"]["Transpose"], rack["38"]["settings"]["Detune"]) == (-1.0, 30.0)
-    est = evaluate.estimate_from_plan(plan, root=tmp_path)
-    assert est["sounds"]["38"]["semitones"] + est["sounds"]["38"]["cents"] / 100 == pytest.approx(-0.7)
-    old = make_plan(*_fixture(tmp_path), tmp_path)["tracks"]["drums"]["pads"]["38"]
-    assert (old["transpose"], old["detune_cents"]) == (-1, 0)
-
-
 def test_locators_on_the_bar_lines(tmp_path):
     """Bar 1 starts at the grid's phase (here 1 s = 2 beats), bars of 3 beats in 3/4."""
     analysis, matches, synth = _fixture(tmp_path)
@@ -110,6 +89,27 @@ def test_build_spec_for_build_tracks(tmp_path):
     ref = spec["REF drums"]
     assert ref["kind"] == "audio" and ref["mute"] and ref["audio_clips"][0]["warping"] is False
     assert not spec["REF other"]["mute"]
+
+
+def test_a_match_between_semitones_is_played_with_detune(tmp_path):
+    """A snare found 0.70 semitones down (match v2: transpose -1, +30 cents)
+    gets Transpose -1 and Detune +30 on its pad and in the build, and the
+    plan plays it at -0.70; a match from before match v2 (whole semitones
+    only) plays with Detune 0."""
+    from refdissect import evaluate
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    for m in matches.values():
+        m["top"][0] = {**m["top"][0], "semitones": -0.7, "transpose": -1, "cents": 30.0, "detune_cents": 30.0}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    pad = plan["tracks"]["drums"]["pads"]["38"]
+    assert (pad["transpose"], pad["detune_cents"]) == (-1, 30)
+    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert (rack["38"]["settings"]["Transpose"], rack["38"]["settings"]["Detune"]) == (-1.0, 30.0)
+    est = evaluate.estimate_from_plan(plan, root=tmp_path)
+    assert est["sounds"]["38"]["semitones"] + est["sounds"]["38"]["cents"] / 100 == pytest.approx(-0.7)
+    old = make_plan(*_fixture(tmp_path), tmp_path)["tracks"]["drums"]["pads"]["38"]
+    assert (old["transpose"], old["detune_cents"]) == (-1, 0)
 
 
 def test_melodic_tracks_in_the_plan(tmp_path):
