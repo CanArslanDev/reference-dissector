@@ -44,12 +44,12 @@ before them, the template is learnt again that much earlier.
 transcribe() returns what bass808.json holds; project() turns it into
 analysis.json's notes_808 (t, t_attack, end, pitch, midi_float,
 midi_settled, cents, slide, peak, glide, flags), so structure, groove and
-make_plan read it as before. It costs 15-50 s on a suite beat (30 s of
-stems, one core), where the pYIN reader it replaced took about 5: that
-reader (librosa onsets and a pYIN median over 60-450 ms) found 1,413
-onsets for 336 notes on the calibration stems, dropped every note under
-140 ms and read pitches 14-27 cents sharp under 50 Hz (+33 cents on
-PIRAMIT, whose 808 sits at +11.8).
+make_plan read it as before. It costs 9-50 s on a suite beat (about 30 s
+of stems, one core: analyze takes 36 s a beat, 6.6 s with the pYIN reader
+it replaced) and 159 s on PIRAMIT's 126 s. That reader (librosa onsets
+and a pYIN median over 60-450 ms) found 1,413 onsets for 336 notes on the
+calibration stems, dropped every note under 140 ms and read pitches 14-27
+cents sharp under 50 Hz (+33 cents on PIRAMIT, whose 808 sits at +11.8).
 """
 
 from __future__ import annotations
@@ -1032,7 +1032,8 @@ def kick_splits(notes: list[dict], kicks: np.ndarray, longest: float = 0.08, edg
     off that note, which starts there instead (flag "split"). On PIRAMIT 13
     notes read as C#2 (+1256 to +1310 cents, 60-90 ms, 10 on a kick, each
     followed at once by a C1 note, with an autocorrelation of 0.40-0.51 at
-    their own period); none of the suite's beats has one (not verified:
+    their own period): the 10 on a kick are joined to their C1 notes, which
+    start 60 ms earlier. None of the suite's beats has one (not verified:
     PIRAMIT has no truth)."""
     out: list[dict] = []
     for n, nxt in zip(notes, notes[1:] + [None]):
