@@ -61,6 +61,6 @@ They are made from your own library and stay local.
 - **v2** (`refdissect suite`, 48 beats). A beat keeps everything that makes it a test:
   - its mixes and truth stems, and `events.json`, every hit and note with its time;
   - its Demucs stems per model;
-  - each run's outputs and scores (`runs/<tag>/`, `scores-<tag>.json`), which name files and hold note times.
+  - each run's outputs (`runs/<tag>/`), which name files and hold note times. Its scores (`runs/<tag>/scores.json`, and the suite's `scores-<tag>.json`) hold scores, timings and run settings, no note time and no library file name (checked on m2g's 49 score files).
 
   `scripts/export_results.py --suite DIR TAG` publishes `results/calibration/suite-<tag>.json`. It holds the means per scenario and overall, and the run's model, seed, versions, options and steps. The export refuses a run description that is not numbers or short identifiers. It also refuses an output that looks like a local path or an audio, MIDI, array or Live file name.

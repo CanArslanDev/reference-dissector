@@ -180,7 +180,7 @@ Each step is described in [01](01-pipeline.md), the 808 voice in [05](05-808-syn
   - `evaluate.estimate_from_analysis` and `evaluate.estimate_from_plan` build estimates (`kind: "estimate"`) in the same form. `evaluate.validate` checks a file, and `evaluate.save_events` writes one.
 - **scores.json**, per beat and tag: the analysis's and the plan's scores, each step's status (`run`, `reused`, `reused_stale`, `skipped`), the seconds per step and the problems. `scores-<tag>.json` holds the means per scenario.
 
-All of these hold note times or library file names: they stay in the work folder ([09](09-data-and-copyright.md)).
+All of these but the scores hold note times or library file names, and all of them stay in the work folder ([09](09-data-and-copyright.md)). The scores' means per scenario are what `scripts/export_results.py --suite` publishes.
 
 ## How it is scored
 

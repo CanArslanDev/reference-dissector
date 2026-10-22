@@ -29,7 +29,7 @@ Strong snare-band onsets per beat of the bar sit within these offsets of the gri
 
 Before replica mode the medians were within 0.4 ms of these and the p90s within 0.6 ms.
 
-**At 136.36 BPM**, the same onsets start at +29 ms and end at −49 ms. An average inter-beat interval hides a drift that a fitted grid shows at once: a line through the same tracker's beats gives 68.50 BPM, not 68.18.
+**At 136.36 BPM**, from the same first bar line, the beat-3 onsets sit 2.0 ms early in bar 1 and 49.5 ms early in bar 7: 8.0 ms more each bar. `grid.offsets` looks within 50 ms of each grid line, so from bar 8 on it loses them. By the end of the song the grid is 0.59 s off, more than a beat (computed from the two tempi). This page said before that the onsets "start at +29 ms and end at −49 ms"; measured again on 2026-10-22, −49 ms is where they leave that window, in bar 7, not the end of the song. An average inter-beat interval hides a drift that a fitted grid shows at once: a line through the same tracker's beats gives 68.50 BPM, not 68.18.
 
 **Lesson.** Fit the grid; then check that the *last* bars still land on it.
 
@@ -146,7 +146,7 @@ See [05](05-808-synthesis.md) for why a fit on waveform alone loses the grit ent
 
 ## Melodic parts
 
-`melodic` runs Basic Pitch on the other, piano and vocal stems, each moved onto A440 first (−2, +2 and −38 cents taken out). Other and piano start at 34.65 Hz, a semitone over the 808's commonest note, so the 808 bleeding into them is not transcribed.
+`melodic` runs Basic Pitch on the other, piano and vocal stems, each moved onto A440 first (−2, +2 and −38 cents taken out). Other and piano start at 34.65 Hz, a semitone over C1, at or under which the 808 sounds 95 % of its time ([01](01-pipeline.md#melodic)), so the 808 bleeding into them is not transcribed.
 - other: 330 notes; one loop found (section B, a 1-bar period), nothing restored or dropped;
 - piano: 311 notes; vocals: 509;
 - chords: 141 segments.
