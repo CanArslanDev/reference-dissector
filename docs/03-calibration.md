@@ -2,6 +2,10 @@
 
 A similarity score means nothing until you know what it does when the answer is known. `refdissect calibrate` builds that answer key from your own library and scores the pipeline against it.
 
+There are two sets:
+- **v1**: six beats of one recipe, scored after removing a constant offset per sound. It comes first below.
+- **Calibration v2**: a suite of 48 beats in 22 scenarios, with every answer kept and strict scores. It is what replica mode is measured on ([Calibration v2](#calibration-v2-the-suite)).
+
 ## The beats
 
 `calibrate.build_beat(seed)` picks, at random from the library inventory:
@@ -103,3 +107,200 @@ Beats already built and separated are reused. `results/calibration/summary.json`
 **Limits:**
 - Six beats and one genre: thresholds from 30 sounds are a starting point, not a law.
 - The beats have no per-track processing (EQ, reverb, saturation on the snare), which real mixes do. Expect real NCCs a little lower for the same sample: PIRAMIT's snare matched at 0.953.
+
+## Calibration v2: the suite
+
+v1 has one recipe, and it removes a constant offset per sound before scoring. That rule scored the snares of the v1 plans F1 1.00 while 11 of 12 plans put them 21–24 ms early (htdemucs and htdemucs_ft stems): strict F1 at 20 ms 0. Calibration v2 keeps every answer and scores where each sound attacks, with no offset removed. `refdissect suite` builds it, runs the pipeline on it and scores it ([12](12-replica-mode.md) has the commands and options).
+
+### The beats
+
+`refdissect suite build` (`scenarios.py`) renders 21 scenarios at seeds 1 and 2, and converts the six v1 beats rebuilt from their truth stems (`v1orig-1` to `v1orig-6`): 48 beats.
+- A seed draws its kit as v1 does, so scenario `v1` is v1's beat. Every other scenario changes one thing against it, with the same sounds. `full` combines several; `producer` plays producer MIDI.
+- Each beat is mastered as v1 is (−12 dBFS RMS, +5 dB into a tanh clipper) and encoded to mp3 at 256 kb/s. The decoded mp3, lined back up (`mix_mp3.wav`), is what the pipeline gets.
+- Demucs separates each beat once per model, with seed 0 and one shift: the same stems every time on one device.
+- A beat's folder holds its truth (`events.json`), the mix files, `stems_truth/` (every sound on its own track, and the four groups Demucs separates), `stems-<model>/` and `runs/<tag>/`.
+
+| scenario | what changes against v1 |
+|---|---|
+| `v1` | Nothing: 136 BPM, 16 bars, the pattern above, a melodic loop and a vocal as bleed. |
+| `tempo72`, `tempo95` | 72 and 95 BPM, 8 bars. Neither 95 BPM nor its double lies in the 100–180 BPM grid search range. |
+| `tempo160` | 160 BPM. |
+| `meter34`, `meter68` | 3/4 and 6/8. |
+| `swing58`, `swing66` | The second 16th of each 8th at 58 % and 66 % of it (66 %: nearly triplets). |
+| `rolls` | Two hat rolls per two bars (32nds, 16th and 32nd triplets, 64ths); 40 % of them climb or fall 1–5 semitones. Open hats are cut by the next closed hat. |
+| `layers` | A clap on every snare, 0–8 ms behind it at −6 to 0 dB. A second kick under half the kicks, 3–8 dB down. |
+| `kick808` | 30 % of the 808 notes lose their kick and 30 % of the kicks lose their 808. The 808s that keep their kick start 0–20 ms after it. |
+| `bass_low` | An 808 line on roots of 20.6–29.1 Hz (E0 to A#0), in 16th notes and same-pitch retriggers, tuned +11 or −20 cents. |
+| `glides` | A quarter of the 808 notes glide in from 1–12 semitones away over 50–300 ms, a sixth slide out at their end, and a sixth slide in from the note before without an attack (legato). |
+| `drum_pitch` | Kick +2 semitones (seed 1) or −2 (seed 2), snare −0.70 (−1 and +30 cents), hat +0.25, open hat −2. |
+| `leadin` | 5–30 ms of noise at −60 dB before each drum sound's attack, as untrimmed files have. |
+| `rare` | Perc, tom, crash and rim, 1–12 hits each, where they usually play. |
+| `flams` | Every backbeat hit is a flam: the same sound 10–30 ms before it, at −6 dB. |
+| `dynamics` | Accents on the beat, the other hats at 0.3–0.9, three ghost snares per two bars at −18 to −12 dB. |
+| `melodic` | Pad, pluck arpeggio and lead over chords that change inside the bar (maj, min, 7, maj7, min7, sus2, sus4, dim, add9, slash chords). The 808 plays the chord roots. No loop. |
+| `producer` | Single-role producer MIDI patterns from your library (`--midi-dir`): pitched hat copies, chokes, and an 808 that slides where its notes overlap. Without such patterns the scenario is left out. |
+| `full` | 54 % swing, a hat roll per two bars, chokes, the clap layer, 808 pickups into the kicks, pad and lead, and the first bar line 0.4 s in. |
+| `v1orig` | The six v1 beats, rebuilt from their truth stems (6 beats). |
+
+### The answer
+
+`events.json` (schema `refdissect.events/1`, kind `truth`) holds:
+- the grid: tempo, meter, beats, downbeats, swing;
+- every drum hit, with its gain, its velocity and what it is layered on;
+- every 808 note, with the pitch it sounds at and the pitch it settles to (cents included), its cut and its glide;
+- the melodic notes and the chords;
+- each sound's file, hash, transposition and attack.
+
+A hit's time is where its file starts. Its attack (`t_attack`) adds `audio.attack_time` of the file as played (lead-in, transposition and cut included), read in the band of its role. That is the one definition of when a sound happens, for the truth and for every estimate.
+
+### Scoring
+
+`evaluate.score` compares an estimate in the same schema with the truth. There are two estimates per beat:
+- **Analysis level** (`estimate_from_analysis`): what the pipeline heard, from `analysis.json`, `matches.json` and `melodic.json`.
+- **Plan level** (`estimate_from_plan`): what Live would play, from `plan.json` as `render.py` plays it. Each pad plays its sample at its Transpose and Detune, and the 808 its one-shot per note. Live itself is not in the loop yet ([12](12-replica-mode.md)).
+
+The rules:
+- **Strict.** No offset is removed. Both sides time a hit at its attack, and a hit counts within 20 ms (50 ms is reported too). Pairs come from a maximum one-to-one matching (mir_eval).
+- **Drum sounds.** Each estimated sound plays the truth sound it scores the best F1 at 50 ms on. One whose distinct moments match that sound less than half the time is extra: it is counted, and scored nowhere.
+  - A truth sound's F1 pools the hits of every estimated sound that plays it, so a hit played twice is a false hit.
+  - A pitched copy or a layer is a sound of its own.
+  - Per role, the mean over the truth's sounds of that role.
+- **Headline.** "Drum hits and 808 onsets, F1@20" is the mean over the truth's drum sounds and the 808's onsets.
+- **808.** Notes count within 50 ms (or 20 ms) and 50 cents, with offsets ignored.
+  - The pitch error of the notes matched within 50 ms, in cents.
+  - The settled pitch, and the written note: the MIDI note an estimate writes, against the truth's settled pitch less its tuning.
+  - Legato notes: precision and recall.
+- **Melodic notes**: F1 at 50 ms and 50 cents, with offsets ignored. **Chords**: mir_eval's duration-weighted accuracy (root, majmin, sevenths, tetrads, mirex).
+- **Rhythm**: beat and downbeat F at 70 ms (mir_eval), the first bar line's error modulo a bar, the meter, the tempo octave and the swing ratio.
+- **Levels** (plan level, with `--render`): per truth sound, the energy in its role's band over 50 ms from each side's attack, rebuild over truth stem, median over its hits.
+  - The plan's faders match the separated stems' RMS. A perfect kit would therefore play every drum at the drums' `kit_db`: the separated stem's RMS minus the truth's drum group's. On the htdemucs baseline that is −5.5 dB (mean over scenarios), because Demucs separates the clipped mix while the truth is before the clipper.
+  - The headline is the median, over sounds, of each sound's distance from that kit level.
+- **Pads** (plan level): the share of truth drum sounds that a pad plays with their own file (the same sha256), and how far off its pitch such a pad plays (Transpose + Detune/100 against the truth's semitones + cents/100).
+- **Means.** Over a scenario's beats, then over the 22 scenarios, so each scenario counts once.
+
+v1's rule, one constant offset removed per sound, is reported beside the strict scores for continuity.
+
+### Results
+
+Means over the 22 scenarios. Every tag ran every step on all 48 beats, rendered:
+- `base-htdemucs`: before replica mode (471fd70);
+- `m1`: with the beat_this grid and the melodic step (e1bd9ce);
+- `m2g`: with the four lanes merged and five merge fixes (9ccc759). htdemucs stays the default model;
+- `m2g-ft`: the same code on htdemucs_ft stems.
+
+m2 and m2-ft measured the first merge (ba7b69d), before those five fixes. Each tag's means per scenario are in `results/calibration/suite-<tag>.json`.
+
+**Per drum role, strict F1@20, analysis / plan** (in brackets: the scenarios that have the role):
+
+| role | base-htdemucs | m1 | m2g | m2g-ft |
+|---|---|---|---|---|
+| kick (22) | 0.247 / 0.182 | 0.305 / 0.201 | 0.872 / 0.845 | 0.927 / 0.919 |
+| snare (22) | 0.695 / 0.493 | 0.801 / 0.600 | 0.961 / 0.813 | 0.891 / 0.816 |
+| clap (4) | 0.458 / 0.208 | 0.458 / 0.208 | 0.500 / 0.500 | 0.625 / 0.625 |
+| hat, pitched copies included (22) | 0.508 / 0.549 | 0.504 / 0.569 | 0.859 / 0.845 | 0.913 / 0.916 |
+| open hat (22) | 0.326 / 0 | 0.303 / 0 | 0.979 / 0.043 | 0.993 / 0.022 |
+| tom (`rare`) | 0 / 0 | 0 / 0 | 0.500 / 0 | 0.450 / 0 |
+| crash (`rare`) | 0 / 0 | 0 / 0 | 0.500 / 0 | 0.500 / 0 |
+| rim (`rare`) | 0 / 0 | 0 / 0 | 0.500 / 0 | 0 / 0 |
+| perc (`rare`) | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| all drum sounds | 0.397 / 0.283 | 0.431 / 0.319 | 0.880 / 0.612 | 0.893 / 0.648 |
+
+**Timing, signed median error (p90 of its size), ms, analysis / plan:**
+
+| | base-htdemucs | m1 | m2g | m2g-ft |
+|---|---|---|---|---|
+| kick | +16.6 (20.9) / +9.6 (12.7) | +17.7 (22.0) / +9.8 (12.6) | 0.0 (6.1) / +2.1 (7.9) | −0.5 (3.4) / +1.9 (3.4) |
+| snare | −6.4 (8.3) / −14.6 (15.9) | −6.0 (7.7) / −13.5 (14.7) | +0.8 (3.2) / +1.1 (3.0) | +0.3 (3.8) / −0.1 (2.9) |
+| hat | +1.1 (3.4) / −1.3 (7.7) | −0.5 (2.9) / −3.9 (7.2) | −0.4 (3.3) / +0.6 (4.2) | −0.3 (1.7) / +1.9 (2.5) |
+| 808 onsets | −4.1 (37.1) / −2.2 (32.9) | −4.1 (37.1) / −2.2 (32.9) | +1.4 (8.0) / +1.4 (8.0) | +1.4 (7.0) / +1.4 (7.0) |
+
+**Per area, analysis / plan** ("–": that tag's scorer had no such score, or the step did not run):
+
+| | base-htdemucs | m1 | m2g | m2g-ft |
+|---|---|---|---|---|
+| drum hits and 808 onsets, F1@20 | 0.368 / 0.282 | 0.396 / 0.311 | 0.886 / 0.667 | 0.898 / 0.700 |
+| drums, F1@50 | 0.472 / 0.328 | 0.517 / 0.359 | 0.892 / 0.627 | 0.895 / 0.650 |
+| sounds that play no truth sound, per beat | 0.16 / 0.05 | 0.16 / 0.05 | 1.96 / 0.71 | 1.95 / 0.32 |
+| 808 onsets, F1@20 | 0.270 / 0.303 | 0.270 / 0.303 | 0.935 / 0.935 | 0.944 / 0.944 |
+| 808 notes, F1 (50 ms, 50 cents) | 0.278 / 0.229 | 0.278 / 0.229 | 0.936 / 0.926 | 0.924 / 0.910 |
+| 808 notes, F1 (20 ms, 50 cents) | 0.160 / 0.159 | 0.160 / 0.158 | 0.911 / 0.901 | 0.913 / 0.896 |
+| 808 pitch, median abs error (cents) | 55.3 / 69.8 | 55.3 / 69.8 | 6.0 / 7.7 | 12.1 / 13.9 |
+| 808 settled pitch within 50 cents | – | – | 0.940 / 0.925 | 0.964 / 0.958 |
+| 808 written note right | – | – | 0.947 / 0.947 | 0.937 / 0.937 |
+| 808 legato notes written (the truth: 24 on 5 beats) | – | – | 0 | 0 |
+| beats, F (70 ms) | 0.715 / 0.920 | 0.962 / 0.962 | 0.962 / 0.962 | 0.962 / 0.962 |
+| downbeats, F | 0.637 / 0.823 | 0.939 / 0.892 | 0.939 / 0.892 | 0.939 / 0.892 |
+| first bar line, abs error (ms) | 81.0 / 18.2 | 40.7 / 18.2 | 40.7 / 18.2 | 40.1 / 18.2 |
+| meter right | 0.91 / 0.91 | 0.95 / 0.91 | 0.95 / 0.91 | 0.95 / 0.91 |
+| tempo in the right octave | 0.89 | 0.91 | 0.91 | 0.91 |
+| swing ratio, estimate minus truth | – | −0.040 | −0.040 | −0.040 |
+| melodic notes, F1 (4 beats; the plan's are the same notes) | – | 0.630 | 0.630 | 0.635 |
+| chords, majmin / sevenths (analysis) | – | 0.888 / 0.862 | 0.977 / 0.929 | 0.979 / 0.912 |
+| levels: median abs distance from a perfect kit (plan) | 7.18 dB | 7.19 dB | 3.67 dB | 3.21 dB |
+| levels: median abs balance (plan) | 4.15 dB | 3.82 dB | 2.25 dB | 1.98 dB |
+| truth sounds a pad plays with their own file (plan) | – | – | 0.574 | 0.641 |
+| largest pitch error of such a pad (plan) | – | – | 0 cents | 0 cents |
+| seconds per beat after separation (jobs) | 190 (3) | 90 (2) | 142 (2) | 141 (2) |
+
+base-htdemucs_ft, the before of the m2g-ft column: drums 0.470 / 0.354; kick 0.581 / 0.637, snare 0.556 / 0.319, hat 0.626 / 0.589, open hat 0.324 / 0.006; 808 notes 0.173 / 0.146; levels 3.81 dB.
+
+**What changed what:**
+- **The grid** moved in m1 (beat_this) and not since.
+- **The 808's numbers** are the 808 lane's. The 808 reader does not read the drum templates, so m2 and m2g are identical there.
+- **Chords** rose from m1 to m2g (majmin 0.888 → 0.977) because melodic now reads the new 808 notes as the chords' bass.
+- **The drum numbers** come from the discovery and joint-fit lanes and the merge's fixes ([12](12-replica-mode.md) gives each lane alone).
+
+**Still weak:**
+- **layers** (drums F1@20 0.614): its clap always plays with the snare and gets no template of its own.
+- **full** (0.651): its hats (0.617), copied at several pitches with few hits each.
+- **rare** (0.672): sounds of 1–12 hits each. Perc scores 0; tom, crash and rim 0.5 each.
+- **bass_low**: its hats (F1@20 0.006) and its 808's written pitch (right for 0.487 of the notes).
+- **The plan's open hats** (0.043), and **tempo72's and tempo95's snares** (0): they have 4–8 hits, under the plan's 12-hit pad gate.
+- **Timing outliers.** Means over scenarios stay under 10 ms, but single scenarios do not.
+  - Kick p90 at analysis level: 27.1 ms on melodic, 13.4 ms on glides.
+  - Snare: 24.0 ms on flams, 21.1 ms on producer.
+  - Hat: 32.0 ms on bass_low.
+
+**htdemucs or htdemucs_ft.** On the final code (m2g against m2g-ft), htdemucs_ft's drums are better:
+- 0.880 → 0.893 at analysis, 0.612 → 0.648 in the plan (plan +0.039 [+0.017, +0.062], a paired 95 % bootstrap over the 48 beats);
+- kick 0.872 → 0.927, hat 0.859 → 0.913.
+
+But its 808 notes are worse (0.936 → 0.924 and 0.926 → 0.910), and so are its snares (0.961 → 0.891).
+- bass_low's 808 falls 0.949 → 0.338: its template's pitch was read from a 217 ms tail, 2.4 semitones sharp.
+- producer's falls 0.821 → 0.667.
+
+The first merge gives the same picture (m2 against m2-ft). htdemucs stays the default.
+
+**The 808 reader**, on the 10 scenarios with an 808 to read (24 beats), m1 → m2g. The merge left the 808's numbers as its lane left them.
+- note F1@50: 0.289 → 0.918 at analysis, 0.230 → 0.902 in the plan;
+- note F1@20: 0.181 → 0.903 and 0.167 → 0.887;
+- onset F1@20: 0.282 → 0.937;
+- median abs cents: 49.4 → 7.6 and 74.9 → 8.4;
+- settled pitch 9.5 cents off (median), within 50 cents for 0.897 of the notes;
+- the written note right for 0.912 of the notes. bass_low is at 0.487: bass_low-1's template settles 59.7 cents sharp, from a drop fitted on 110–220 ms notes, and each note is written a semitone high.
+
+Legato notes are off by default: none are written, against the truth's 24 on 5 beats. The earlier rule wrote 79, and 6 of them were right.
+
+**Drum pitch** (plan level): drum_pitch's snare (−0.70 semitones) and hat (+0.25) now play 0 cents off. With whole semitones they were 30 and 25 cents off.
+
+**Time and memory** (m2g, 2 jobs, Apple M4): a beat takes 142 s after separation.
+- analyze 39 s: the 808 reader is about 30 s of it, by its lane's measure;
+- match 49 s, fit-808 51 s, melodic 3 s.
+
+The 48 beats take 56 minutes, and a job peaked at 1.7 GB. In m1, fit-808 was 56 of 90 s a beat.
+
+### Running it
+
+```bash
+uv run refdissect suite build "$W/work/inventory.json" --out "$W/work/calibration-v2" --v1-truth "$V1_TRUTH"
+uv run refdissect suite run "$W/work/calibration-v2" --library "$W/work/library.npz" \
+    --library-808 "$W/work/library_808.npz" --tag mine --jobs 2 --render
+uv run refdissect suite report "$W/work/calibration-v2" --tags base-htdemucs,mine
+```
+
+`$V1_TRUTH` holds the v1 beats rebuilt with truth stems (`beatN` folders). No command in this repository makes them; without them the suite has the 42 scenario beats. `--steps`, `--reuse`, `--resume`, `--model` and `--scenarios` are in [12](12-replica-mode.md). `scripts/export_results.py --suite` publishes a tag's means per scenario, and nothing else: the beats are made from your library and stay local ([09](09-data-and-copyright.md)).
+
+**Limits:**
+- The beats are synthetic, mastered alike, without per-track processing.
+- Most scenarios have two seeds, so one beat moves a scenario's mean by half its change.
+- Thresholds tuned on these beats are measured on the same beats: the suite has no held-out part yet.
