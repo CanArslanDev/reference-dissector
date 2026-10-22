@@ -381,7 +381,7 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
         heard = own + semis + S.drop(curve, pos / SR) / 100
         heard[pos >= len(shot)] = np.nan  # the one-shot has ended
         a0 = first["start_time"] / bps
-        v = velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve)
+        v = velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve, s["vol_vel"])
         for k, n in enumerate(chain):
             t = n["start_time"] / bps
             stop = chain[k + 1]["start_time"] / bps if k + 1 < len(chain) else t + n["duration"] / bps
@@ -406,7 +406,7 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
 
 
 def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str = "",
-                       velocity_curve="linear") -> dict:
+                       velocity_curve="live") -> dict:
     """What Live would play, as an estimate (render.py's assumptions).
 
     Drum note: t = start_time * 60 / tempo; t_attack = t + attack_time(the
@@ -425,8 +425,8 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     starts while the one before is held (render.chains_808) is a legato
     note: no attack (t_attack = t), the voice sliding to its pitch over the
     Glide Time with the one-shot read on, its glide in the schema's form.
-    gain = track fader x volume_db x the velocity law (a chain's first
-    note's).
+    gain = track fader x volume_db x the velocity's level (render's law at
+    the pad's or the 808's vol_vel; a chain's first note's).
     Notes on a pad without a readable sample, and 808 notes without a
     one-shot, play nothing and are left out (their files under "missing");
     so is a legato note that starts after the voice has read past the
@@ -457,7 +457,7 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
             continue
         s, t = settings[key], n["start_time"] / bps
         curve = s["velocity_curve"] or velocity_curve
-        gain = g_drums * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve)
+        gain = g_drums * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve, s["vol_vel"])
         drums.append({"sound": key, "role": sounds[key]["role"], "t": round(t, 5),
                       "t_attack": round(t + sounds[key]["attack_s"], 5), "gain": round(gain, 5),
                       "velocity": int(n["velocity"]), "layer_of": None, "flags": []})
