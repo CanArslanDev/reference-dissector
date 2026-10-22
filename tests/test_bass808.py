@@ -137,21 +137,22 @@ def test_a_low_root_with_a_flat_808():
     assert abs(b["template"]["tuning_cents"] + 20.0) < 5
 
 
-def test_a_slide_without_an_attack_is_a_legato_note():
+def test_a_slide_without_an_attack_is_a_legato_note_on_request():
     """A note that slides in over 120 ms from the one before (no attack: the
-    sample goes on) is a legato note starting within 50 ms of where the
-    slide starts, at its pitch, gliding linearly; not a few short restarts.
-    Measured on this line: 4 of 4 slides, 24 notes for 24 (with 60 ms
-    slides, none of 4 and 28 notes: the notes either side keep the slide)."""
+    sample goes on) is, with slides, a legato note starting within 50 ms of
+    where the slide starts, at its pitch, gliding linearly; not a few short
+    restarts. By default it is the note before going on: no legato note."""
     notes = [(0, 3, 0), (3, 1, 0), (4, 4, 5, "legato"), (8, 2, 0), (10, 2, 7), (12, 4, 0)]
     bass, drums, truth = line(notes, cents=11.0, slide_ms=120.0)
-    b = B.transcribe(bass, drums)
+    b = B.transcribe(bass, drums, slides=True)
     legato = [n for n in b["notes"] if "legato" in n["flags"]]
     slides = [m for m in truth if m["legato"]]
     right = [m for m in slides if any(abs(n["t"] - m["t"]) <= 0.05 and abs(n["midi_settled"] - m["midi"]) < 0.5
                                       for n in legato)]
     assert len(right) >= 3 and len(b["notes"]) <= 1.2 * len(truth)
     assert all(n["t"] == n["t_attack"] and n["glide"]["shape"] == "lin" for n in legato)
+    plain = B.transcribe(bass, drums)["notes"]
+    assert not any("legato" in n["flags"] for n in plain) and len(plain) <= len(truth)
 
 
 def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
@@ -175,13 +176,92 @@ def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
         lo = band(np.sin(2 * np.pi * np.cumsum(f) / SR).astype(np.float32), "808")
         notes = [{"t": 0.0, "t_attack": 0.0, "end": t, "midi_settled": tpl.midi, "ncc": 0.95, "flags": []},
                  {"t": t, "t_attack": t, "end": end, "midi_settled": tpl.midi + moved, "ncc": 0.6, "flags": []}]
-        out = B.legato(notes, lo, tpl, np.array([0.0]), np.zeros(0))
+        out = B.legato(notes, lo, tpl, np.array([0.0]), np.zeros(0), slides=True)
         assert len(out) == notes_out
+        assert len(B.legato(notes, lo, tpl, np.array([0.0]), np.zeros(0))) == 1  # slides off: merged
         if notes_out == 1:
             assert out[0]["end"] == end
         else:
             assert out[1]["flags"] == ["legato"] and out[1]["midi_settled"] == pytest.approx(tpl.midi + moved, abs=0.01)
             assert out[0]["end"] == out[1]["t"] == pytest.approx(start, abs=0.035)
+
+
+def test_a_kick_inside_a_held_note_is_the_note_going_on():
+    """kick808-2's failure: a note held at MIDI 22.1, a kick leaking into
+    the bass stem read as a 70 ms note at 17.1 (attacked: a drum attack),
+    then the held note's sustain found again with no attack. The pitch,
+    period by period, is back at 22.1: the kick and the follower are the
+    held note going on. Where the pitch moved to the kick note's own, the
+    kick note stays (the follower is it going on)."""
+    from refdissect.audio import band
+    hz = 440 * 2 ** ((22.1 - 69) / 12)
+    tpl = B.Template(np.zeros(1), np.zeros(1), [], 32.70, "qifft_300_600ms", [[0.0, 0.0], [2.0, 0.0]])
+    for after, kept in ((22.1, 1), (17.1, 2)):
+        f = np.full(int(1.6 * SR), hz)
+        f[int(0.6 * SR):] = 440 * 2 ** ((after - 69) / 12)
+        f[int(0.53 * SR):int(0.6 * SR)] = 440 * 2 ** ((17.1 - 69) / 12)
+        lo = band(np.sin(2 * np.pi * np.cumsum(f) / SR).astype(np.float32), "808")
+        notes = [{"t": 0.0, "t_attack": 0.005, "end": 0.53, "midi_settled": 22.1, "ncc": 0.97, "flags": []},
+                 {"t": 0.53, "t_attack": 0.535, "end": 0.6, "midi_settled": 17.1, "ncc": 0.8, "flags": []},
+                 {"t": 0.6, "t_attack": 0.6, "end": 1.5, "midi_settled": 14.0, "ncc": 0.6, "flags": []}]
+        out = B.legato(notes, lo, tpl, np.array([0.0]), np.array([0.53]))
+        assert len(out) == kept and out[-1]["end"] == 1.5
+        assert [n["midi_settled"] for n in out] == [22.1, 17.1][:kept]
+
+
+def test_a_kick_split_off_the_next_note_at_the_edge_of_the_search():
+    """PIRAMIT's C#2 notes: 60 ms on a kick at +1310 cents (past the
+    search's whole semitones), followed at once by a C1 note: the C1 note
+    starts on the kick. A short note inside the search, or off any kick,
+    stays."""
+    def notes(c, kick_at):
+        return ([{"t": 1.0, "t_attack": 1.006, "end": 1.06, "transposition": c, "flags": []},
+                 {"t": 1.06, "t_attack": 1.064, "end": 1.6, "transposition": 0.0, "flags": []}],
+                np.array([kick_at]))
+    out = B.kick_splits(*notes(1310.0, 0.995))
+    assert len(out) == 1 and (out[0]["t"], out[0]["t_attack"], out[0]["flags"]) == (1.0, 1.004, ["split"])
+    assert len(B.kick_splits(*notes(1100.0, 0.995))) == 2 and len(B.kick_splits(*notes(1310.0, 0.5))) == 2
+
+
+def test_sixteenths_at_one_pitch_at_160_bpm():
+    """The bar at 160 BPM: its pair of 16th notes a fifth up (94 ms each)
+    came out as one note a semitone sharp (24 notes for 28, 20 found within
+    20 ms and 50 cents); split where the 808 starts again (retriggers), 26
+    notes, 24 found."""
+    bass, drums, truth = line(BAR, cents=11.0, bpm=160.0)
+    b = B.transcribe(bass, drums)
+    assert found(truth, b["notes"]) >= 0.85 and len(b["notes"]) >= 26
+
+
+def test_sparse_reattacks_learn_from_the_kicks():
+    """At 170 BPM the envelope re-attacks find 6-10 of the 28 notes (a
+    driven 33 Hz tone's notch at a cut is 0.5-2.3 dB), too few to learn a
+    template from, and the line came out empty; with the kicks as onsets
+    too, 28 of 28 notes and the tuning within 3 cents (-1.3 measured)."""
+    bass, drums, truth = line(BAR, cents=11.0, bpm=170.0)
+    b = B.transcribe(bass, drums)
+    assert b["template"]["learnt_from"].endswith("+kicks")
+    assert found(truth, b["notes"]) >= 0.95 and abs(b["template"]["tuning_cents"] - 11.0) < 3
+
+
+def test_a_line_with_no_long_note_still_has_its_notes():
+    """16th notes of 107 ms only (no note rings 200 ms): a template of short
+    notes still places every note (attacks within 20 ms); their settled
+    pitch cannot be read where they never settle."""
+    bass, drums, truth = line([(s, 1, st) for s, _, st in BAR], cents=11.0)
+    b = B.transcribe(bass, drums)
+    t = np.array([n["t_attack"] for n in b["notes"]])
+    assert b["notes"] and np.mean([np.min(np.abs(t - m["t_attack"])) <= 0.02 for m in truth]) >= 0.9
+
+
+def test_the_settled_pitch_waits_for_the_drop_to_settle():
+    """Long notes of an 808 falling 8 semitones with a 120 ms time
+    constant: over 300-600 ms the drop is still 26 cents over its settled
+    pitch, and the tuning came out +25.3 cents off; the first window whose
+    halves agree, else the fitted drop, reads it within 3 cents (+0.5)."""
+    bass, drums, truth = line([(0, 8, 0), (8, 4, 5), (12, 2, 0), (14, 2, 7)], cents=11.0, drop=8.0, glide_ms=120.0)
+    b = B.transcribe(bass, drums)
+    assert abs(b["template"]["tuning_cents"] - 11.0) < 3
 
 
 def test_tune_808_splits_a_fraction_into_transpose_and_detune():
