@@ -6,7 +6,7 @@ import pytest
 from conftest import burst
 
 from refdissect import layers
-from refdissect.audio import PRE, SR, transpose
+from refdissect.audio import PRE, SR, fit, transpose
 from refdissect.detect import MAX_MS, Template, detect
 from refdissect.hits import Group, template
 
@@ -401,3 +401,26 @@ def test_hits_carry_where_their_sound_starts(sounds):
             for e in events["hat"] if e.get("semitones") == 4]
     t_err, attack_err = np.abs(np.array(late)).T
     assert len(late) >= 20 and np.median(t_err) > 0.0008 and np.median(attack_err) < 0.0003
+
+
+def test_a_residual_template_keeps_its_own_hits(sounds):
+    """A template of the hat's sound and another one (as a residual
+    template of discover() can be, on loop transients htdemucs left in the
+    drum stem): held under the hat, it found all 72 hats away from the snare
+    a second time. Found by the residual pass, it keeps its matched-filter
+    hits only; found on the grid from fewer hits than the hat, it is a
+    variant of the hat (NEAR_MS) and not held either. The hats stay found
+    once each."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    hat = templates[0].audio
+    other = fit(np.r_[np.zeros(PRE, np.float32), burst(11, 120, 4000, 12000, 20)], len(hat))
+    mixed = (0.6 * hat + 0.5 * np.max(np.abs(hat)) * other).astype(np.float32)
+    hats = [t for n, t, _ in hits if n == "hat"]
+    from refdissect.detect import explain as detect_explain
+    for kind in ("residual", "grid"):
+        got = detect_explain(x, templates + [Template("mixed", "hat", "hat", mixed, 3, {}, None, found=kind)])
+        assert not [e for e in got.events["mixed"] if e["source"] == "layer" or e.get("semitones")], kind
+        assert "mixed" not in got.info["purified"].get("hat", {}), kind
+        assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0, kind
