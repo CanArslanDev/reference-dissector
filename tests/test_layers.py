@@ -426,13 +426,12 @@ def test_a_residual_template_keeps_its_own_hits(sounds):
         assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0, kind
 
 
-def test_a_held_sound_sits_where_its_own_band_puts_it():
-    """Where a held template sits is read in its own band. This snare has
-    the hat at 2.6 ms, and at 23.8 ms a top end of its own over a body like
-    the hat's low part: read over all bands, it held the hat there (as
-    tempo95-1's snare did), and the hats found under the snares came 20.5
-    ms late."""
-    rng = np.random.default_rng(0)
+def _snare_holding_a_hat(seed: int, hat_gain: float, hat_low: float, top_gain: float, top_ms: float, hat_ms: float):
+    """A snare template's fit bands (kick, snare, hat rows) with a hat at
+    hat_ms (its hat-band part times hat_gain, its low part times hat_low)
+    and at top_ms a top end of the snare's own, partly like the hat; and
+    the hat's."""
+    rng = np.random.default_rng(seed)
     n = samples(40)
     decay = np.exp(-np.arange(n) / samples(10))
     hat = np.zeros((3, n))
@@ -440,9 +439,27 @@ def test_a_held_sound_sits_where_its_own_band_puts_it():
     top = rng.standard_normal(n) * decay
     snare = 0.8 * rng.standard_normal((3, samples(120)))
     snare[2] = 0.0
-    early, late = samples(2.6), samples(23.8)
-    snare[2, early:early + n] += hat[2]
-    snare[2, late:late + n] += 0.6 * hat[2] + 0.8 * top
-    snare[1, late:late + n] += 2.0 * hat[1]
-    held = layers._held([snare, hat], [samples(60), n], 0, [1], [1, 2], [16, 100])
-    assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(early, abs=samples(0.5))
+    at, later = samples(hat_ms), samples(top_ms)
+    snare[2, at:at + n] += hat_gain * hat[2]
+    snare[1, at:at + n] += hat_low * hat[1]
+    snare[2, later:later + n] += top_gain[0] * hat[2] + top_gain[1] * top
+    return snare, hat
+
+
+@pytest.mark.parametrize("case", ["body", "top"])
+def test_a_held_sound_sits_where_it_plays_with_its_holder(case):
+    """Where a held template sits: of where it fits best in its own band and
+    over all bands, the one nearer the holder's start. Over all bands a
+    snare's body like the hat's low part put the hat 21 ms after the hat it
+    plays with (tempo95-1: 23.8 ms over all bands, 2.6 in the hat band);
+    in the hat band alone a snare's own top 28 ms on beat it (producer-1:
+    28.7 ms, 2.4 over all bands)."""
+    if case == "body":  # the snare's body at 23.8 ms like the hat's low part
+        snare, hat = _snare_holding_a_hat(0, 1.0, 0.0, (0.6, 0.8), 23.8, 2.6)
+        snare[1, samples(23.8):samples(23.8) + hat.shape[1]] += 2.0 * hat[1]
+        want = 2.6
+    else:  # the snare's own top at 28.7 ms, more like the hat in its band than the hat under it
+        snare, hat = _snare_holding_a_hat(1, 0.8, 1.0, (1.0, 0.5), 28.7, 2.4)
+        want = 2.4
+    held = layers._held([snare, hat], [samples(60), hat.shape[1]], 0, [1], [1, 2], [16, 100])
+    assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(samples(want), abs=samples(0.5))
