@@ -73,7 +73,7 @@
 - **Transpose and Detune keep whole numbers.** 11.99 semitones play as 11; a Detune of 11.5 plays as 11, the text "11.5 ct" as 12 (Live 12.4.6). Write whole semitones and whole cents.
 - **Velocity is not a linear level.** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: velocity 127 plays 7.9 dB (35 %) or 10.2 dB (45 %) over it, and the amount depends on how the Simpler was made. The plan still assumes v/127.
 - **Snap cuts the end.** On by default, it stops every sample 10–30 ms early.
-- **The browser keeps an old file.** Loaded by a name Live has loaded before, a pad plays the old content after the file is overwritten; a file loaded by path is read again.
+- **The browser keeps an old file.** Loaded by a name Live has loaded before, a pad plays the old content after the file is overwritten; a file loaded by path is read again. Give changed content a new name: the 808 one-shot's carries its digest.
 - **New files reach the browser after a few seconds;** retry, do not fail.
 - **Locators at fractional beats were refused,** so round them.
 - **A new audio clip starts at its first transient.** Live's warp analysis moves the start, 21 ms to 3.6 s in here, and it stays moved with warping off. Set `loop_start` back to 0, or the reference plays early against the notes.

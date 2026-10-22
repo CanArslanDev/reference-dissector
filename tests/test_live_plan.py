@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 import mido
 import numpy as np
 import pytest
@@ -126,9 +129,9 @@ def test_build_spec_for_build_tracks(tmp_path):
     plan = make_plan(analysis, matches, synth, tmp_path)
     spec = {t["name"]: t for t in build_spec(plan)}
     t808, drums = spec["808 (synth)"], spec["Drums (library)"]
-    # the one-shot is named after the song, so plans for different songs do not collide
+    # the one-shot is named after the song and its content, so plans for different songs do not collide
     assert t808["instrument"] == {"sample": plan["tracks"]["808"]["sample"], "warping": False}
-    assert t808["instrument"]["sample"].endswith("808 (synth).wav")
+    assert re.fullmatch(r".+ 808 \(synth\) [0-9a-f]{8}\.wav", t808["instrument"]["sample"])
     assert t808["settings"]["Transpose"] == 36.0 and t808["clips"][0]["notes"]
     pad = drums["instrument"]["drum_rack"]["38"]
     assert pad["sample"] == "snare.wav" and pad["settings"]["Transpose"] == -1.0
@@ -154,18 +157,13 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
 
 
-def test_build_gives_the_808_simpler_one_voice(tmp_path, monkeypatch):
-    """build (ableton-live-mcp faked) sends the spec to build_tracks, then
-    sets the 808 Simpler's voices to 1 by its LOM property."""
-    import asyncio
+def _fake_live(monkeypatch) -> list:
+    """ableton-live-mcp faked for build: an empty set, build_tracks building
+    every track it is sent; returns the list of (tool, arguments) calls."""
     import json
     import sys
     import types
 
-    from refdissect.live import build
-    analysis, matches, synth = _fixture(tmp_path)
-    plan = make_plan(analysis, matches, synth, tmp_path)
-    plan["tracks"]["808"].update(detune_cents=7, voices=1, glide_mode="Glide", glide_time_ms=80.0)
     calls = []
 
     async def call_tool(name, args):
@@ -189,11 +187,47 @@ def test_build_gives_the_808_simpler_one_voice(tmp_path, monkeypatch):
     for name, module in (("MCP_Server", package), ("MCP_Server.server", server),
                          ("MCP_Server.extended_tools", tools)):
         monkeypatch.setitem(sys.modules, name, module)
+    return calls
+
+
+def test_build_gives_the_808_simpler_one_voice(tmp_path, monkeypatch):
+    """build (ableton-live-mcp faked) sends the spec to build_tracks, then
+    sets the 808 Simpler's voices to 1 by its LOM property."""
+    import asyncio
+
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    plan["tracks"]["808"].update(detune_cents=7, voices=1, glide_mode="Glide", glide_time_ms=80.0)
+    calls = _fake_live(monkeypatch)
     report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
     spec = next(a for n, a in calls if n == "build_tracks")["tracks"]
     assert next(t for t in spec if t["name"] == "808 (synth)")["settings"]["Detune"] == 7.0
     assert ("lom_set_property", {"path": "live_set tracks 1 devices 0", "property": "voices", "value": 1}) in calls
     assert "808_voices" in report and (tmp_path / "lib" / "Samples" / "AbletonMCP Generated").is_dir()
+
+
+def test_the_808_one_shot_is_named_by_its_content(tmp_path, monkeypatch):
+    """Live keeps playing a sample loaded through the browser under its name
+    after the file changes on disk, so the one-shot's name carries its
+    content's digest: fitted again, it gets another name. build copies it
+    into the User Library under that name, and refuses a one-shot that
+    changed after the plan named it."""
+    import asyncio
+
+    from refdissect.live import build, one_shot_digest
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    first = plan["tracks"]["808"]["sample"]
+    assert first.endswith(f" 808 (synth) {one_shot_digest(synth['file'])}.wav")
+    _fake_live(monkeypatch)
+    asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+    copied = tmp_path / "lib" / "Samples" / "AbletonMCP Generated" / first
+    assert copied.read_bytes() == Path(synth["file"]).read_bytes()
+    sf.write(synth["file"], np.sin(2 * np.pi * 36.7 * np.arange(SR) / SR) * 0.9, SR)  # fit-808 ran again
+    assert make_plan(analysis, matches, synth, tmp_path)["tracks"]["808"]["sample"] != first
+    with pytest.raises(RuntimeError, match="plan again"):
+        asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
 
 
 def test_a_match_between_semitones_is_played_with_detune(tmp_path):
