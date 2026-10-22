@@ -23,9 +23,9 @@ check:
   sounding hits of the group's other pads;
 - the 808 Simpler plays its one-shot per note, transposed by
   (pitch - 60) + transpose + detune_cents / 100 semitones (Simpler plays a
-  sample at its own pitch on C3; with the build's Transpose 60 - root_midi
-  that is pitch - root_midi) and cut at the note end (Classic mode,
-  cut_808=True);
+  sample at its own pitch on C3; with live.tune_808's Transpose and Detune
+  a note sounds at its pitch plus the 808's tuning) and cut at the note end
+  (Classic mode, cut_808=True);
 - with Glide on (the track's voices 1, glide_mode "Glide", glide_time_ms),
   a note that starts while the one before is held does not start the
   one-shot again: the voice slides to the new pitch, linearly in semitones
@@ -87,8 +87,8 @@ def settings_808(track: dict) -> dict:
 def pitch_808(s: dict, pitch: int) -> tuple[float, float]:
     """(semitones the one-shot is played at, sounding MIDI pitch) of a note:
     shift = (pitch - 60) + transpose + detune_cents/100, sounding at
-    root_midi + cents/100 + shift. With the build's Transpose 60 - root_midi
-    that is pitch + cents/100."""
+    root_midi + cents/100 + shift. With live.tune_808's Transpose and Detune
+    that is pitch + the 808's tuning (and heard_cents)."""
     shift = pitch - 60 + s["transpose"] + s["detune_cents"] / 100
     return shift, s["root_midi"] + s["cents"] / 100 + shift
 

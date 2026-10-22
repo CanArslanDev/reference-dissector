@@ -12,6 +12,12 @@ docs/07-building-in-live.md):
   Live 12.4.6 keeps whole semitones of it (11.99 plays as 11) and whole
   cents of Detune (+-50), so the one-shot's fraction goes to Detune
   (tune_808).
+- With one voice (Simpler's voices, a property of the device) and Glide
+  Mode "Glide", overlapping notes slide linearly in semitones over exactly
+  the Glide Time without starting the sample again; notes 25 ms apart jump.
+  The build sends Detune, Glide Mode and Glide Time as parameters and sets
+  voices after build_tracks (the battery set each of them this way); a
+  built 808 has not been captured in Live yet.
 - A new file in the User Library shows up in Live's browser after a few
   seconds; samples load onto Drum Rack pads through the browser.
 - Reference stems go in as Arrangement audio clips with warping off, so they
@@ -32,6 +38,7 @@ import mido
 import numpy as np
 
 from .audio import SR, attack_time, read, rms_db, transpose, trim_onset
+from .render import glide_s
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -336,8 +343,22 @@ def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
 
 # ── The build (needs ableton-live-mcp: pip install "reference-dissector[live]") ──
 
+def simpler_808(t808: dict) -> dict:
+    """The 808 Simpler's parameters as build_tracks sets them: Volume 0 dB,
+    Transpose and Detune (tune_808: whole semitones and whole cents, which
+    Live 12.4.6 keeps as given), and with Glide on (voices 1) Glide Mode
+    "Glide" and the Glide Time. These are what render_plan and
+    estimate_from_plan assume; voices is a property of the device, not a
+    parameter (build sets it)."""
+    out = {"Volume": "0.0 dB", "Transpose": float(t808["transpose"]), "Detune": float(t808.get("detune_cents", 0))}
+    if glide_s(t808):
+        out |= {"Glide Mode": "Glide", "Glide Time": f"{float(t808['glide_time_ms']):.1f} ms"}
+    return out
+
+
 def build_spec(plan: dict) -> list[dict]:
-    """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler,
+    """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
+    (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers at 0 dB with
     warping off and each sound's transposition, faders from the plan's levels."""
@@ -347,7 +368,7 @@ def build_spec(plan: dict) -> list[dict]:
     if "sample" in t808:
         spec.append({"name": "808 (synth)",
                      "instrument": {"sample": t808["sample"], "warping": False},
-                     "settings": {"Volume": "0.0 dB", "Transpose": float(t808["transpose"])},
+                     "settings": simpler_808(t808), "voices": t808.get("voices"),
                      "volume_db": round(min(6.0, levels.get("808_track_db", -levels["headroom_db"])), 1),
                      "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "808",
                                 "notes": t808["notes"]}] if t808["notes"] else []})
@@ -404,7 +425,8 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
         target = Path(user_library).expanduser() / GENERATED / t808["sample"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(t808["sample_path"], target)
-    built = json.loads(await call("build_tracks", tracks=build_spec(plan)))
+    spec = build_spec(plan)
+    built = json.loads(await call("build_tracks", tracks=spec))
     report: dict = {"tracks": built["tracks"]}
     problems = {r["track"]: r["problems"] for r in built["tracks"] if r["problems"]}
     if problems:
@@ -412,8 +434,12 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     if plan["locators"]:
         report["locators"] = et.place_locators([(n, float(round(b))) for n, b in plan["locators"]])
     overview = json.loads(await call("get_session_overview"))
-    first = next((t["index"] for t in overview["tracks"] if t["name"] == "808 (synth)"), 0)
-    await call("select_in_live", view="arrangement", track=first)
+    first = next((t["index"] for t in overview["tracks"] if t["name"] == "808 (synth)"), None)
+    voices = next((s.get("voices") for s in spec if s["name"] == "808 (synth)"), None)
+    if voices and first is not None:  # one voice, so overlapping notes glide (the battery set it this way)
+        report["808_voices"] = json.loads(await call("lom_set_property", path=f"live_set tracks {first} devices 0",
+                                                     property="voices", value=int(voices)))
+    await call("select_in_live", view="arrangement", track=first or 0)
     await call("transport", action="jump_to", time=0.0)
     log(json.dumps(report, ensure_ascii=False, default=str))
     return report
