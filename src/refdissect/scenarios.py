@@ -113,7 +113,7 @@ GLIDE_SEMIS, GLIDE_MS = (1, 12), (50.0, 300.0)  # a semitone to an octave, over 
 GLIDE_TOL_CENTS = 10.0  # an exponential start glide is within 10 cents of its note after `ms`
 SHORT_808_S = 0.14  # an 808 note under 140 ms is "short" (a 16th at 107 BPM)
 # where an 808 note's pitch is read (s): from 60 ms after it starts, over at most 450 ms, to 20 ms before it
-# ends (detect.notes_808 reads the same stretch, to 20 ms before the next onset)
+# ends (bass808.sounding hears a transcribed note by this rule too)
 SOUNDING = (0.060, 0.450, 0.020)
 DRUM_PITCH = {"kick": (2, 0), "snare": (-1, 30), "hat": (0, 25), "open_hat": (-2, 0)}  # semitones, cents
 LEAD_IN_MS, LEAD_IN_DB = (5.0, 30.0), -60.0  # quiet noise in front of the attack, as untrimmed files have
