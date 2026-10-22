@@ -113,7 +113,7 @@ Votes only rank the top three, so a template far from all of them still has a wi
 
 ## Verdicts
 
-`library.verdict` turns these into words a person (or a model) acts on:
+`library.verdict` turns the NCC, the margin and the share of hits won into words a person (or a model) acts on; the null test is reported beside the verdict, not used by it:
 - **same sample**
 - **candidate: maybe the same sample, processed (check by ear)**
 - **same family**

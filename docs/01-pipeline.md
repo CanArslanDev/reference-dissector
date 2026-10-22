@@ -15,7 +15,7 @@ All audio is processed as mono float32 at 44.1 kHz (`audio.read`). `refdissect s
 ## separate
 
 Demucs (`htdemucs`, or `htdemucs_6s` for guitar/piano stems) runs in its own uv environment (`workers/separate_worker.py`), the same way [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp)'s `separate_stems` tool does: torch never loads into the main process, and the memory is gone when the job ends.
-- On an M-series Mac, a 30 s beat separates in about 5 s on MPS once cached; a 129 s song with `htdemucs_6s` takes about 15 s.
+- On an M-series Mac, a 30 s beat separates in about 5 s on MPS once cached; a 129 s song with `htdemucs_6s` takes about 15 s. The suite, which separates several files per model load, takes 2.1 s a beat with htdemucs and 8.5 s with htdemucs_ft.
 - The guitar stem of the 6-stem model came out nearly empty (−80 dB) on Turkish trap.
 - `--seed` seeds Demucs' random shift: the same seed, the same stems. The suite separates every beat with seed 0 and one shift, several files per model load.
 - **htdemucs stays the default.** On the merged code htdemucs_ft gives better drums (plan F1@20 0.612 → 0.648, paired over the 48 beats +0.039 [+0.017, +0.062]) but worse 808 notes (note F1@50 0.936 → 0.924; bass_low 0.949 → 0.338) and snares (0.961 → 0.891), m2g against m2g-ft. The default changes only for a model better on both drums and 808 notes.
@@ -45,7 +45,7 @@ On 86 test beats (72–160 BPM; 4/4, 3/4 and 6/8; swing up to 66 %), the comb al
 
 Without a tracker (`--no-tracker`, or when it cannot run) the grid is the comb in `--bpm-range` alone, as before replica mode.
 
-- **Check.** `grid.offsets` reports, per beat of the bar, how far the strongest snare-band onset sits from the grid line (median and p90). A right tempo stays within a few ms over the whole song; a wrong one drifts. On PIRAMIT, 136.999 BPM gives p90 4.7–11.3 ms, and 136.36 BPM drifts from +29 ms to −49 ms.
+- **Check.** `grid.offsets` reports, per beat of the bar, how far the strongest snare-band onset sits from the grid line (median and p90). A right tempo stays within a few ms over the whole song; a wrong one drifts. On PIRAMIT, 136.999 BPM gives p90 4.7–11.3 ms, beat 3 in 58 bars. At 136.36 BPM, from the same bar line, beat 3's onsets sit 2.0 ms early in bar 1 and 49.5 ms early in bar 7 (8.0 ms a bar). `offsets` looks within 50 ms of each line, so after bar 7 it finds only other onsets the drifting line passes (22 more bars). By the end the grid is 0.59 s off (computed from the two tempi).
 - **Two time bases.** The grid's phase is on the attacks; `offsets` and the onset-strength peaks read it moved back by the phase correction (`grid.onset_grid`).
 
 ### Tuning (`grid.tuning`)
@@ -54,7 +54,7 @@ Stable spectral peaks on each pitched stem (bass, other, piano, vocals, guitar),
 
 The first version used `librosa.estimate_tuning`. On synthetic tones it was off by up to 60 cents (it histograms every bin, sidelobes and noise included), and it put all of PIRAMIT at +0.28 semitones. The peak method stays within 1 cent of synthetic tones and puts PIRAMIT's melodic stems at A440 (other −2, piano +1.5 cents; pyin agrees, +2 to +3).
 
-The 808 has a tuning of its own: its template's (see 808 notes below), the settled pitch of its long notes over the nearest MIDI note (`analysis.json` tuning `808`). An 808 sample is often detuned by itself. PIRAMIT's is C1 +11.8 cents: QIFFT of the 300–600 ms sustain of 53 notes, all starting on a kick. Each note's written pitch is its settled pitch less that tuning, and `fit-808` renders the one-shot at it. Without removing it, the notes measured "C or C#" one by one.
+The 808 has a tuning of its own: its template's (see 808 notes below), the settled pitch of its long notes over the nearest MIDI note (`analysis.json` tuning `808`). An 808 sample is often detuned by itself. PIRAMIT's is C1 +11.8 cents: QIFFT of the 300–600 ms sustain of 53 notes, all starting on a kick. Each note's written pitch is its settled pitch less that tuning, and `fit-808` renders the one-shot at it. The prototype's notes, read about 30 cents over C, came out "C or C#" one by one: a pitch tracker hears the drop ([02](02-case-study-piramit.md)).
 
 Before replica mode the tuning was the circular mean of the notes' pYIN pitches (`detect.pitch_offset`), and it said +33 cents (agreement 0.64): it heard the drop. The same mean over the new notes' settled pitches is kept as `808_agreement` (PIRAMIT: 0.868).
 
@@ -185,7 +185,7 @@ On the suite (m2g, before replica mode in brackets):
 - the written note is right for 0.947 of the notes. bass_low's is right for 0.487: its 110–220 ms notes never settle, and its template reads 44–60 cents sharp from the fitted drop;
 - no legato note is written; the truth has 24 on 5 beats.
 
-The reader takes 9–50 s on a suite beat and 159 s on PIRAMIT's 126 s. analyze now takes 38.7 s a suite beat at 2 jobs, against 5.7 s before replica mode (m1), and 202 s on PIRAMIT (1.83 GB at its peak). By the 808 lane's measure the reader is about 30 s of that; the joint fit and discovery take the rest (not separated). The pYIN reader it replaced (librosa onsets, a pYIN median over 60–450 ms) dropped every note under 140 ms and read pitches 14–27 cents sharp under 50 Hz.
+The reader takes 9–50 s on a suite beat and 159 s on PIRAMIT's 126 s. analyze now takes 38.7 s a suite beat at 2 jobs, against 5.7 s in m1, and 202 s on PIRAMIT (1.83 GB at its peak). By the 808 lane's measure the reader is about 30 s of that; the joint fit and discovery take the rest (not separated). The pYIN reader it replaced (librosa onsets, a pYIN median over 60–450 ms) dropped every note under 140 ms and read pitches 14–27 cents sharp under 50 Hz.
 
 ### Sections (`structure.sections`)
 
@@ -205,7 +205,7 @@ The reader takes 9–50 s on a suite beat and 159 s on PIRAMIT's 126 s. analyze 
 - **Loops.** Where a section's notes repeat (every 1, 2, 4 or 8 bars), the repeats vote: a note most repeats hold is put back where one missed it, if the stem sounds at its pitch there. `--drop-below` also drops notes few repeats hold (off by default: it cost F1 on synthetic loops).
 - **Chords.** The chord stems' note posteriorgrams are summed into pitch classes per 8th note, matched against 14 chord qualities, smoothed by Viterbi with a change penalty and averaged over the repeats of the loops the notes show. The 808 stays out of the pitch classes but names the bass: the 808 note sounding in a span gives the slash bass, and without one the lowest chord tone does. Chords with the same tones go to that bass, else to min7 and hdim7 over maj6 and min6. On 36 synthetic renders: majmin 0.953 and sevenths 0.904, against 0.732 and 0.201 for one triad per bar from chroma. Without the 808 as bass, majmin_inv fell from 0.804 to 0.715.
 
-On the suite's melodic and full beats (4 beats, m2g): note F1 (50 ms, 50 cents) 0.630, onset F1 0.693; chords majmin 0.977, sevenths 0.929, root 0.926. majmin was 0.888 when the chords read the 808 notes of the reader before replica mode (m1). In the plan each tonal stem's notes become a muted MIDI track ([07](07-building-in-live.md)).
+On the suite's melodic and full beats (4 beats, m2g): note F1 (50 ms, 50 cents) 0.630, onset F1 0.693; chords majmin 0.977, sevenths 0.929, root 0.926. majmin was 0.888 in m1, when the chords read the 808 notes of the reader before replica mode. In the plan each tonal stem's notes become a muted MIDI track ([07](07-building-in-live.md)).
 
 ## match
 
@@ -240,7 +240,7 @@ For each template, in each of the kick, snare and hat bands (150 ms for snare, 8
 
 **Layers.** A template matched in the snare or hat band is also fitted as its top match plus a second file (non-negative gains, `pair_fit`). The best partner is a layer when it takes 3 dB or more off the residual, is no other template's sound, does not correlate with the top match (≥ 0.5), is at most 10 dB louder, and is not heard more often away from the template's hits than at them. With 12 snares carrying a clap at a fixed offset and 12 plain ones (hits at the true times), both sounds were found in 10, and no plain snare got a layer. The suite's clap moves 0–8 ms from hit to hit and is found in neither of its 2 beats. Layers go to `matches.json`; the plan does not play them yet. The kick band is not searched: any sine-like file takes energy off a kick.
 
-On the 8 scenarios of the identification lane (20 beats), templates whose top match is their truth sound's file: 49 of 78 before replica mode (m1), 75 of 95 now (m2g). The match step takes 49 s a beat at 2 jobs (24 s in m1) and 115 s on PIRAMIT.
+On the 8 scenarios of the identification lane (20 beats), templates whose top match is their truth sound's file: 49 of 78 in m1, 75 of 95 now (m2g). The match step takes 49 s a beat at 2 jobs (24 s in m1) and 115 s on PIRAMIT.
 
 **Verdicts** (`library.verdict`), from the calibration:
 

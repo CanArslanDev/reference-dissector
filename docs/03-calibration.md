@@ -106,7 +106,7 @@ Beats already built and separated are reused. `results/calibration/summary.json`
 
 **Limits:**
 - Six beats and one genre: thresholds from 30 sounds are a starting point, not a law.
-- The beats have no per-track processing (EQ, reverb, saturation on the snare), which real mixes do. Expect real NCCs a little lower for the same sample: PIRAMIT's snare matched at 0.953.
+- The beats have no per-track processing (EQ, reverb, saturation on the snare), which real mixes do. Expect real NCCs a little lower for the same sample: PIRAMIT's −1 snare matches at 0.923 (0.953 before replica mode), though its hat and its snare at its own pitch reach 0.984 and 0.986 ([02](02-case-study-piramit.md)).
 
 ## Calibration v2: the suite
 

@@ -3,14 +3,14 @@
 ## Time
 
 - **Half time and double time.** A beat tracker reported 68.18 BPM for a 137 BPM track. Both fit, because every other grid line carries a hit. Decide explicitly with `--bpm-range`, then check that the snare sits on the beat the genre puts it on (trap: beat 3).
-- **An average tempo hides drift.** 136.36 BPM was 0.47 % off: within ±2 ms at the start, 49 ms off by the end. Fit the grid and look at the *last* bars (`grid.offsets`).
+- **An average tempo hides drift.** 136.36 BPM was 0.47 % off: PIRAMIT's snares sat 2 ms off its grid in bar 1, 50 ms off in bar 7 and 0.59 s off by the end (computed). `grid.offsets` looks within 50 ms of each grid line, so it lost them after bar 7, and this page said "49 ms off by the end". Fit the grid, then check that the *last* bars still land on it, and count them: at 136.999 BPM `grid.offsets` finds beat 3 in 58 bars; at 136.36 it finds the snares in bars 1–7 only.
 - **A tracker's median interval is quantized.** beat_this's beats come on 20 ms frames, so their median interval is a whole number of frames: 0.88 s (68.18 BPM) on PIRAMIT. A line through the same beats gives 68.498.
 - **Seconds versus beats.** MIDI notes go into Live in beats. Convert with the fitted tempo (beat = s × BPM / 60), and place the stems unwarped at beat 0 so both share a clock. A MIDI file's own tempo is not applied by Live's import: ableton-live-mcp's `import_midi_file` reads beats.
 - **The grid phase is not the attack.** Onset-strength peaks come 4.8–13.2 ms after the attacks (82 test beats; 7.1 ms on PIRAMIT's drums). That is fine for finding a tempo; it is not fine for lining up waveforms or placing notes. The grid is moved onto the attacks, and every hit and note is timed where its sound starts.
 
 ## Pitch
 
-- **An 808 not at A440.** PIRAMIT's 808 sits at +11.8 cents while the rest of the track is at A440; it made every 808 note "C or C#". Measure the 808's own tuning and remove it before writing notes.
+- **An 808 not at A440.** PIRAMIT's 808 settles at +11.8 cents while the rest of the track is at A440. Read about 30 cents over C, with its drop, every 808 note came out "C or C#". Measure the 808's own tuning and remove it before writing notes.
 - **A pitch tracker on an 808 measures its drop.** An 808's pitch falls for 0.1–0.6 s after every attack, and a median over the note reads the drop. Read the note as a transposition of the 808 itself: PIRAMIT's 808 read +33 cents by a pYIN median over 60–450 ms, +11.8 by QIFFT of its template's sustain. pYIN also reads 14–27 cents sharp under 50 Hz by itself.
 - **An 808 may not have settled by 300 ms.** Check that the two halves of the sustain window agree: one suite 808 read 35 cents sharp over 300–600 ms and 1.2 cents flat over 600–750 ms.
 - **A short 808 never settles.** bass_low's 110–220 ms notes never reach their settled pitch. Read from a fitted drop, it came out 44–60 cents sharp and every note of one beat was written a semitone high. On htdemucs_ft, read from a 217 ms tail, it was 2.4 semitones off (note F1@50 0.34).

@@ -34,7 +34,7 @@ Spectrograms side by side, plus a difference map (red: the candidate is louder t
 - the library hat is a little brighter at its start (red above 4 kHz) and the reference holds more below 2 kHz;
 - the synthesized 808 lacks the reference's upper harmonics.
 
-Before replica mode the figure showed 300 ms of the −1 snare. A model read off it a tail to about 150 ms, and a hat 220 ms after every snare (pattern, not the snare). Measured on the levels, the tail difference is 9 ms at −40 dB ([02](02-case-study-piramit.md#drums)): a 70 dB colour scale makes a quiet tail look long.
+Before replica mode the figure showed 300 ms of the −1 snare. A model read off it a tail to about 150 ms, and a hat 220 ms after every snare (pattern, not the snare). Measured on the levels in the snare band, the tail difference is 9 ms at −40 dB ([02](02-case-study-piramit.md#drums)): a 70 dB colour scale makes a quiet tail look long.
 
 **Pictures and numbers fail in different places:**
 - On a 70 dB color scale, the library 808 *looked* just like the reference. The numbers said its 6th–12th harmonics were 12–17 dB too strong (before replica mode).
