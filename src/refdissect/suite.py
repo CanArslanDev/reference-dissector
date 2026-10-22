@@ -447,6 +447,15 @@ def _run_job(args: tuple) -> dict:
         return record
 
 
+def scored(beat: Path, tag: str) -> bool:
+    """Whether runs/<tag>/scores.json holds the beat's scores. A beat that
+    failed has one too, with its error (_run_job), and was never scored."""
+    try:
+        return "failed" not in json.loads((beat / "runs" / tag / "scores.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+
+
 def _done(record: dict, log) -> None:
     if "failed" in record:
         log(f"{record['beat']}: FAILED {record['failed']}")
@@ -467,8 +476,9 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     run_beat over the beats, `jobs` at a time in their own processes (each
     loads the library once, about 0.5 GB, if match runs), and write the
     means per scenario to root/scores-<tag>.json (also returned). resume
-    skips beats this tag has scored already. steps and reuse: run_beat's,
-    checked for every beat before any runs (check_steps, reuse_problems)."""
+    skips beats this tag has scored already (scored); a beat that failed
+    runs again. steps and reuse: run_beat's, checked for every beat before
+    any runs (check_steps, reuse_problems)."""
     steps = check_steps(steps, reuse)
     if stale := stale_steps(steps, reuse):
         log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
@@ -476,7 +486,7 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     root = Path(root).resolve()
     beats = beat_dirs(root, scenarios)
     if resume:
-        beats = [b for b in beats if not (b / "runs" / tag / "scores.json").is_file()]
+        beats = [b for b in beats if not scored(b, tag)]
     t0 = time.perf_counter()
     separate_beats(beats, model, log)
     if reuse:
