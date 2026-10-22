@@ -105,7 +105,7 @@ What the table says about the beat:
   Before replica mode there were also 12 at C#1 and one each at D#1 and G0.
   - 13 notes first read as C#2: 60–90 ms each, each followed at once by a C1 note. The 10 that start on a kick are its attack split off that C1 note, which now starts there (flag `split`). 3 C#2 notes remain.
   - No note slides: legato notes are off by default. Before replica mode 3 notes slid by more than 1.5 semitones (not played).
-- **Wrong: one note from bar 48 to bar 57.** The reader holds one B0 note for 15.3 s. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −15 dB where the 808 plays) for 1.0 s. Then the 808 plays alone for bars 49–51, with no kick: four rises of its envelope (the reader before replica mode wrote five notes there). Then it stays under −82 dB for 7.2 s, the breakdown.
+- **Wrong: one note from bar 48 to bar 57.** The reader holds one B0 note for 15.3 s. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −27 dB where the 808 plays) for 1.0 s. Then the 808 plays alone for bars 49–51, with no kick: four rises of its envelope (the reader before replica mode wrote five notes there). Then it stays under −82 dB for 7.2 s, the breakdown.
   - The cause, measured: the reader finds four C1 notes there, but their onsets sit 27 ms before the feet of their envelope rises, past the 20 ms that `bass808.legato` allows. Their template fit is 0.887–0.893, under its 0.9. With no kick there, each reads as the note before going on, and that note takes their end.
   - Three more notes hold 0.24–1.26 s of silence. Before replica mode no note held 0.2 s of silence.
   - Not fixed.
