@@ -9,23 +9,33 @@ import pytest
 from conftest import burst, placed
 
 from refdissect import pipeline
-from refdissect.audio import SR, band, fit, samples, shift, write
+from refdissect.audio import SR, band, fit, samples, shift, transpose, write
 from refdissect.detect import Template, detect
 
 
 def test_kicks_keep_whole_semitones(noisy):
-    """A tonal template is searched by whole semitones in every band, never
-    refined at fractional pitch (that let other kicks win)."""
+    """The kick band is searched by whole semitones, never refined at
+    fractional pitch (that let other kicks win); the snare and hat bands at
+    any pitch."""
     lib, sounds = noisy
-    kick = placed(sounds[-2], 0.3, 200)
-    for b in ("kick", "snare", "hat"):
-        ranked, how = pipeline._search(lib, kick[: samples({"kick": 200, "snare": 150, "hat": 80}[b])], b, True,
-                                       None)
-        assert how == "semitones" and all(float(r["semitones"]).is_integer() for r in ranked)
-    ranked, _ = pipeline._search(lib, placed(sounds[-2], 0.0, 200), "kick", True, None)
+    ranked, how = pipeline._search(lib, placed(sounds[-2], 0.3, 200), "kick", None)
+    assert how == "semitones" and all(float(r["semitones"]).is_integer() for r in ranked)
+    ranked, _ = pipeline._search(lib, placed(sounds[-2], 0.0, 200), "kick", None)
     assert ranked[0]["i"] == len(sounds) - 2 and ranked[0]["semitones"] == 0.0
     noisy_t = placed(sounds[30], 0.3, 150)
-    assert pipeline._search(lib, noisy_t, "snare", False, None)[1] == "speckle"
+    assert pipeline._search(lib, noisy_t, "snare", None)[1] == "speckle"
+
+
+def test_a_snare_found_in_the_low_band_keeps_its_cents(noisy, tmp_path):
+    """discover() finds snares in the low band too (drum_pitch-2's, 0.70
+    semitones down, was matched at -1 in the kick band, 30 cents off). Such
+    a template is matched at any pitch in the snare band: a snare 0.47
+    semitones down is found there at -0.47."""
+    lib, sounds = noisy
+    work = _kick_work(tmp_path, transpose(sounds[30], -0.47), hiss=0.0)
+    out = pipeline.match(work, lib, log=lambda *a: None)["sound_1"]
+    assert out["matched_in_band"] == "snare" and out["top"][0]["path"] == lib.paths[30]
+    assert out["top"][0]["semitones"] == pytest.approx(-0.47, abs=0.01)
 
 
 def test_a_layered_snare_and_clap_are_both_found(noisy):
@@ -34,7 +44,7 @@ def test_a_layered_snare_and_clap_are_both_found(noisy):
     lib, sounds = noisy
     clap = sounds[4]  # role clap
     t = placed(sounds[30], 0.0, 150, [(clap, 10 ** (-4 / 20), samples(3))])
-    ranked, _ = pipeline._search(lib, t, "snare", False, None)
+    ranked, _ = pipeline._search(lib, t, "snare", None)
     assert ranked[0]["i"] == 30
     layers, evidence = pipeline._layer(lib, t, "snare", ranked, taken=[])
     assert evidence["accepted"] and [x["path"] for x in layers] == [lib.paths[4]]
@@ -49,12 +59,12 @@ def test_a_plain_snare_has_no_layer(noisy):
     lib, sounds = noisy
     rng = np.random.default_rng(7)
     plain = placed(sounds[30], 0.0, 150) + 0.01 * rng.standard_normal(samples(150)).astype(np.float32)
-    ranked, _ = pipeline._search(lib, plain, "snare", False, None)
+    ranked, _ = pipeline._search(lib, plain, "snare", None)
     layers, evidence = pipeline._layer(lib, plain, "snare", ranked, taken=[])
     assert layers == [] and not evidence["accepted"] and evidence["better_db"] < 3
     hat = sounds[14]
     with_hat = placed(sounds[30], 0.0, 150, [(hat, 0.5, 0)])
-    ranked, _ = pipeline._search(lib, with_hat, "snare", False, None)
+    ranked, _ = pipeline._search(lib, with_hat, "snare", None)
     layers, evidence = pipeline._layer(lib, with_hat, "snare", ranked, taken=[14])
     assert layers == [] and evidence["partner"] == lib.paths[14].rsplit("/", 1)[1] and evidence["better_db"] > 3
     assert evidence["why"] == "the partner is another template's sound"
@@ -89,7 +99,7 @@ def test_a_sound_heard_all_over_the_song_is_no_layer(noisy):
             x[a:a + len(hat)] += 0.7 * hat
         others = [(clap, 0.6, samples(3))] if with_clap else [(hat, 0.7, 0)]
         t = placed(snare, 0.0, 150, others)
-        ranked, _ = pipeline._search(lib, t, "snare", False, None)
+        ranked, _ = pipeline._search(lib, t, "snare", None)
         layers, evidence = pipeline._layer(lib, t, "snare", ranked, taken=[], drums=x, hits=np.array(snares) / SR)
         if with_clap:
             assert [r["path"] for r in layers] == [lib.paths[4]] and evidence["heard"]["elsewhere"] <= 2
@@ -192,10 +202,11 @@ def test_heard_is_detects_matched_filter(noisy):
     assert not len(pipeline._heard(x, lib.candidate(30, samples(60)), "snare"))
 
 
-def _kick_work(tmp_path, kick: np.ndarray):
-    """A work folder whose one template is a kick heard 8 times in the drum
-    stem (with hiss above the kick band on the template, so the kick band
-    matches it best), stems with bass.wav and the mix they came from."""
+def _kick_work(tmp_path, kick: np.ndarray, hiss: float = 0.3):
+    """A work folder whose one template, found in the low band, is a kick
+    heard 8 times in the drum stem (with hiss above the kick band on the
+    template, so the kick band matches it best), stems with bass.wav and
+    the mix they came from."""
     stems, work = tmp_path / "stems", tmp_path / "work"
     n = int(4.5 * SR)
     starts = [int((0.3 + 0.5 * k) * SR) for k in range(8)]
@@ -206,9 +217,9 @@ def _kick_work(tmp_path, kick: np.ndarray):
     write(stems / "bass.wav", np.zeros(n, np.float32), peak=None)
     write(tmp_path / "mix.wav", drums, peak=None)
     (stems / "separation.json").write_text(json.dumps({"audio": str(tmp_path / "mix.wav")}))
-    hiss = burst(6, 350, 10000, 16000, 1000)
     (work / "templates").mkdir(parents=True)
-    np.save(work / "templates" / "sound_1.npy", placed(kick, 0.0, 350) + 0.3 * fit(hiss, samples(350)))
+    np.save(work / "templates" / "sound_1.npy",
+            placed(kick, 0.0, 350) + hiss * fit(burst(6, 350, 10000, 16000, 1000), samples(350)))
     analysis = {"source": {"stems": str(stems)}, "notes_808": [],
                 "templates": {"sound_1": {"role_guess": "kick", "band": "low",
                                           "members": [[a, 0, 1.0, 1.0, 1.0] for a in starts]}}}
