@@ -50,7 +50,7 @@ ableton-live-mcp's replica-mode branch adds more to `build_tracks`: files loaded
 | look at the set | `get_session_overview` |
 | tempo, loop | `set_song_properties` |
 | every track, device, setting, clip and note | `build_tracks` (ableton-live-mcp 2.1.2+), one call with the spec above |
-| the 808's voices | `lom_set_property` (`voices` on the 808 track's Simpler) |
+| the 808's voices, with Glide on | `lom_set_property` (`voices` on the 808 track's Simpler) |
 | locators | `place_locators` |
 | view | `select_in_live`, `transport` |
 
