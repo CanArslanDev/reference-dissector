@@ -56,6 +56,10 @@ REFERENCE = {"drums": "drums", "bass": "bass"}  # truth group -> the plan's stem
 STEPS = ("analyze", "melodic", "match", "fit-808", "plan", "score")
 NEEDS = {"melodic": "analyze", "match": "analyze", "fit-808": "analyze", "plan": "analyze", "score": "plan"}
 ONE_SHOT = "808 (synth).wav"  # pipeline.fit_808's
+# the outputs each step reads beyond NEEDS: melodic.build reads notes_808 (the chords' bass) and match the
+# drum templates, so a reused melodic.json or matches.json describes the analysis it was made from
+READS = {"melodic": ("analyze",), "match": ("analyze",), "fit-808": ("analyze",),
+         "plan": ("analyze", "melodic", "match", "fit-808")}
 # what each step leaves in runs/<tag>/ (templates/ is analyze's but for fit-808's 808.npy), and the file
 # whose absence means it did not run; score is never copied: a reused score would describe other outputs
 OUTPUTS = {"analyze": ("analysis.json", "bass808.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
@@ -218,6 +222,17 @@ def check_steps(steps=None, reuse: str | None = None) -> tuple[str, ...]:
     return picked
 
 
+def stale_steps(steps, reuse: str | None) -> list[str]:
+    """The steps a run reuses although a step it runs rewrites what they read
+    (READS): their outputs describe the old inputs. The 808 lane's runs
+    re-ran analyze and reused m1's melodic.json, whose chords were built on
+    the old notes_808; rebuilt on the new ones, majmin went 0.888 -> 0.977
+    on four beats."""
+    if not reuse:
+        return []
+    return [s for s in STEPS if s not in steps and any(r in steps for r in READS.get(s, ()))]
+
+
 def tonal(stems: Path) -> bool:
     """Whether a stems folder holds a stem pipeline.melodic transcribes."""
     from .melodic import MELODIC_STEMS
@@ -310,6 +325,9 @@ def _prepare(beat: Path, work: Path, tag: str, model: str, steps, reuse: str | N
             for rel in OUTPUTS[step]:
                 _copy(beat / "runs" / reuse, work, rel)
     status = {s: "run" if s in steps else "reused" if s in kept else "skipped" for s in STEPS}
+    for s in stale_steps(steps, reuse):
+        if status[s] == "reused":
+            status[s] = "reused_stale"
     if not has_tonal:
         status["melodic"] = "no_tonal_stem"
     carried = {k: v for k, v in (old.get("problems") or {}).items() if k.replace("_", "-") in kept}
@@ -452,6 +470,9 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     skips beats this tag has scored already. steps and reuse: run_beat's,
     checked for every beat before any runs (check_steps, reuse_problems)."""
     steps = check_steps(steps, reuse)
+    if stale := stale_steps(steps, reuse):
+        log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
+            f"{', '.join(r for r in steps if any(r in READS.get(s, ()) for s in stale))} runs: they read its outputs")
     root = Path(root).resolve()
     beats = beat_dirs(root, scenarios)
     if resume:
@@ -723,10 +744,16 @@ def _role_table(aggs: dict, part: str, metric: str, title: str, digits: int) -> 
 
 
 def _reused(agg: dict) -> str:
-    """'; fit-808 reused from base' for a tag whose runs reused steps."""
-    kept = sorted({s for st in agg.get("steps") or [] for s, v in st.items() if v == "reused"}, key=STEPS.index)
+    """'; fit-808 reused from base' for a tag whose runs reused steps, with
+    the stale ones (stale_steps) named."""
+    statuses = [st for st in agg.get("steps") or []]
+    kept = sorted({s for st in statuses for s, v in st.items() if v.startswith("reused")}, key=STEPS.index)
+    stale = sorted({s for st in statuses for s, v in st.items() if v == "reused_stale"}, key=STEPS.index)
     tags = [r for r in agg.get("reuse") or [] if r]
-    return f"; {', '.join(kept)} reused from {', '.join(tags)}" if kept and tags else ""
+    if not (kept and tags):
+        return ""
+    return f"; {', '.join(kept)} reused from {', '.join(tags)}" + (
+        f" (stale: {', '.join(stale)} read outputs this run rewrote)" if stale else "")
 
 
 def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> str:
