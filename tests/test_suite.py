@@ -133,7 +133,7 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     rec = json.loads((root / "v1-1" / "runs" / "a" / "scores.json").read_text())
     assert rec["separation"]["seed"] == 0 and rec["separation"]["shifts"] == 1
     assert rec["options"] == {"analyze": {"bpm_range": [100.0, 180.0], "bpm": None, "meter": None, "tracker": False},
-                              "match": {"detune": None}}
+                              "match": {"detune": None, "kick_sources_on": False}}
     assert rec["analysis"]["estimate_from"] == "analysis" and rec["plan"]["estimate_from"] == "plan"
     assert rec["plan"]["levels"]["sounds"] and not (root / "v1-1" / "runs" / "a" / "render").exists()
     for step in ("analyze", "melodic", "match", "fit_808", "plan", "score_analysis", "render", "score_plan", "total"):

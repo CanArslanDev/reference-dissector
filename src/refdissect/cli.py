@@ -1,8 +1,9 @@
 """refdissect: take a reference track apart and rebuild it in Ableton Live.
 
     refdissect inventory ~/Music/Ableton/"User Library" --out work/inventory.json
-    refdissect index-library work/inventory.json --out work/library.npz
+    refdissect index-library work/inventory.json --out work/library.npz      (and library_speckle.npz)
     refdissect index-library work/inventory.json --808 --out work/library_808.npz
+    refdissect index-speckle work/library.npz       (the speckle index of a library indexed before it existed)
     refdissect separate song.mp3 --out work/song/stems
     refdissect analyze work/song/stems --work work/song
     refdissect melodic work/song                 (Basic Pitch in its own uv environment)
@@ -59,6 +60,20 @@ def _index(a):
         lib = Library.build(rows, seconds=a.seconds)
     lib.save(a.out)
     print(f"{len(lib)} sounds -> {a.out}")
+    if not a.is_808:
+        _speckle_index(lib, a.out)
+
+
+def _speckle_index(lib, library_path) -> None:
+    from .library import speckle_path
+    info = lib.build_speckle()
+    lib.save_speckle(speckle_path(library_path))
+    print(f"speckle index of {info['entries']} noisy sounds in {info['build_s']} s -> {speckle_path(library_path)}")
+
+
+def _index_speckle(a):
+    from .library import Library
+    _speckle_index(Library.load(a.library), a.library)
 
 
 def _separate(a):
@@ -82,10 +97,13 @@ def _analyze_kwargs(a) -> dict:
 
 def _match_options(s) -> None:
     s.add_argument("--detune", type=float, default=None, help="also try every sound shifted by this many semitones")
+    s.add_argument("--kick-sources", action="store_true",
+                   help="also read kick templates from drums + bass and the mix, the 808 taken out with fit-808's "
+                        "one-shot (run fit-808 before match)")
 
 
 def _match_kwargs(a) -> dict:
-    return {"detune": a.detune}
+    return {"detune": a.detune, "kick_sources_on": a.kick_sources}
 
 
 def _analyze(a):
@@ -294,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seconds", type=float, default=0.6)
     s.add_argument("--808", dest="is_808", action="store_true", help="808s only, 1 s each")
     s.set_defaults(run=_index)
+    s = sub.add_parser("index-speckle", help="the speckle index (noisy sounds at any pitch) next to a library")
+    s.add_argument("library", help="library.npz from index-library")
+    s.set_defaults(run=_index_speckle)
     s = sub.add_parser("separate", help="stems with Demucs (in its own uv environment)")
     s.add_argument("audio")
     s.add_argument("--out", required=True)

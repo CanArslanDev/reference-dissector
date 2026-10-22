@@ -1,10 +1,13 @@
 import json
 
 import numpy as np
+import pytest
 import soundfile as sf
+from conftest import burst, placed
+from scipy.optimize import nnls
 
-from refdissect.audio import SR, transpose
-from refdissect.library import Library, inventory, role_of, summarize, verdict
+from refdissect.audio import SR, fit, samples, transpose, trim_onset
+from refdissect.library import Library, copies, inventory, pair_fit, role_of, speckle_path, summarize, verdict
 
 
 def test_roles_from_names():
@@ -64,3 +67,103 @@ def test_verdicts():
     assert verdict("kick", 0.95, 0.02) == "same family"  # tonal sounds all correlate
     assert verdict("808", 0.98, 0.08).startswith("same sample")
     assert verdict("snare", 0.5, 0.2) == "no close match"
+
+
+# ── The speckle index: noisy sounds at any pitch ──
+
+@pytest.mark.parametrize("d", [0.0, 0.3, -0.47, 2.4, -7.15])
+def test_a_detuned_snare_and_its_cents(noisy, d):
+    """A snare played d semitones off (-7.15: over half an octave): the
+    speckle search names the file and the transposition within a cent."""
+    lib, sounds = noisy
+    t = placed(sounds[30], d, 150)
+    top = lib.distinct(lib.match_fine(t, "snare", top=20), len(t))[0]
+    assert top["i"] == 30 and abs(100 * (top["semitones"] - d)) <= 1.0 and top["ncc"] > 0.95
+
+
+@pytest.mark.parametrize("d", [0.25, -0.33])
+def test_a_detuned_hat(noisy, d):
+    lib, sounds = noisy
+    t = placed(sounds[14], d, 80)
+    old = lib.distinct(lib.match(t, "hat", semitones=range(-3, 4), top=20), len(t))[0]
+    new = lib.distinct(lib.match_fine(t, "hat", top=20), len(t))[0]
+    assert new["i"] == 14 and abs(100 * (new["semitones"] - d)) <= 1.0
+    assert new["ncc"] > old["ncc"] + 0.2  # off by a quarter of a semitone, no whole semitone fits
+
+
+def test_the_semitone_search_joins_the_speckle_one(noisy):
+    """union: match()'s best candidates are tried at their speckle
+    transposition as well; nothing match() found is lost."""
+    lib, sounds = noisy
+    t = placed(sounds[30], -1.0, 150)
+    both = lib.match_fine(t, "snare", keep=5, semitones=range(-3, 4), union=10, top=0)
+    alone = lib.match(t, "snare", semitones=range(-3, 4), top=10)
+    found = {r["i"]: r["ncc"] for r in both}
+    assert all(found.get(r["i"], 0) >= r["ncc"] for r in alone)
+    assert both[0]["i"] == 30 and both[0]["semitones"] == -1.0
+
+
+def test_the_template_length_is_the_index_one(noisy):
+    lib, sounds = noisy
+    with pytest.raises(ValueError, match="150 ms"):
+        lib.match_fine(placed(sounds[30], 0.0, 100), "snare")
+
+
+def test_speckle_index_saved_next_to_the_library(noisy, tmp_path):
+    lib, _ = noisy
+    lib.save(tmp_path / "lib.npz")
+    lib.save_speckle(speckle_path(tmp_path / "lib.npz"))
+    back = Library.load(tmp_path / "lib.npz")
+    assert back.speckle_info["version"] == 1 and back.speckle_info["entries"] == 120  # kicks not indexed
+    assert np.array_equal(back.speckles["hat"][1], lib.speckles["hat"][1])
+    other = Library(lib.paths[:-1], lib.roles[:-1], lib.audio[:-1], lib.seconds)
+    assert other.load_speckle(speckle_path(tmp_path / "lib.npz")) == \
+        {"ignored": "lib_speckle.npz: built for another library's entries"}
+    assert other.speckles == {}
+
+
+def test_pair_fit_is_nonnegative_least_squares():
+    rng = np.random.default_rng(1)
+    atoms = rng.standard_normal((6, 400))
+    target = 1.0 * atoms[0] + 0.5 * atoms[3] + 0.05 * rng.standard_normal(400)
+    out = pair_fit(target, atoms)
+    k = int(np.argmin(out["residual_db"]))
+    assert k == 3 and np.isinf(out["residual_db"][0])
+    g, res = nnls(atoms[[0, 3]].T, target)
+    assert np.allclose([out["gains"][0][3], out["gains"][1][3]], g)
+    assert out["residual_db"][3] == pytest.approx(10 * np.log10(res ** 2 / np.sum(target ** 2)))
+    assert out["single_db"] > out["residual_db"][3] + 3
+
+
+def test_a_copy_at_another_pitch_is_the_same_sound(noisy):
+    """A kit's copy of a snare, resampled 0.22 semitones down: found by the
+    fine search at +0.22 next to the original at 0, it is one sound, listed
+    once (at 0 semitones the two correlate far less)."""
+    lib, sounds = noisy
+    n = int(0.6 * SR)
+    copy = transpose(sounds[30], -0.22)
+    entries = np.r_[lib.audio, (fit(copy, n) / np.max(np.abs(copy)))[None].astype(np.float16)]
+    both = Library(lib.paths + ["/lib/copy.wav"], lib.roles + ["snare"], entries, lib.seconds)
+    both.build_speckle()
+    t = placed(sounds[30], 0.0, 150)
+    ranked = both.match_fine(t, "snare", top=10)
+    assert {ranked[0]["i"], ranked[1]["i"]} == {30, len(sounds)}
+    assert not both.same(30, len(sounds), len(t)) and both.same(30, len(sounds), len(t), semitones=(0.0, 0.22))
+    listed = [r["i"] for r in both.distinct(ranked, len(t))]
+    assert listed[0] in (30, len(sounds)) and (30 in listed) != (len(sounds) in listed)
+
+
+def test_two_kicks_at_one_pitch_are_two_sounds():
+    """Two different sine-like kicks, the second tuned 2 semitones up:
+    played at one pitch they agree in the full band, where the tone is
+    (0.99), but not in the snare band (0.10), so distinct lists both. (A
+    kit's copy at another pitch agrees in both: the test above.)"""
+    n, length = int(0.6 * SR), samples(200)
+    a, b = burst(500, 400, 30, 2000, 150, tone_hz=50.0), burst(501, 400, 30, 2000, 150, tone_hz=50 * 2 ** (2 / 12))
+    entries = np.stack([fit(trim_onset(x), n) / np.max(np.abs(x)) for x in (a, b)]).astype(np.float16)
+    kicks = Library(["/lib/kick a.wav", "/lib/kick b.wav"], ["kick", "kick"], entries, 0.6)
+    played = kicks.candidate(0, length), kicks.candidate(1, length, -2.0)
+    assert copies(*played, pitched=False)  # what the full band alone calls one recording
+    assert not copies(*played, pitched=True) and not kicks.same(0, 1, length, semitones=(0.0, -2.0))
+    ranked = [{"i": 1, "semitones": -2.0}, {"i": 0, "semitones": 0.0}]
+    assert [r["i"] for r in kicks.distinct(ranked, length)] == [1, 0]

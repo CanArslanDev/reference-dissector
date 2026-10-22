@@ -124,6 +124,30 @@ def test_a_missing_sound_scores_zero_and_a_layer_is_a_sound_of_its_own():
     assert s["sounds"]["clap"]["layer_of"] == "snare" and s["macro"]["f1_20"] == 0.5
 
 
+def test_a_pad_that_plays_its_sounds_file_is_scored_for_pitch():
+    """A plan's pads: the snare pad plays the truth snare's file at -1
+    semitone, 30 cents off its -0.70 (Transpose without Detune), the hat pad
+    its file at its +0.25, the kick pad another file (no pitch to compare).
+    Two of three truth sounds are played by their own file, 30 and 0 cents
+    off; with Detune +30 both are right. An analysis has no such pads."""
+    from refdissect.suite import headline
+    t, e = truth(), estimate()
+    t["sounds"] |= {"kick": {"role": "kick", "sha256": "k", "semitones": 2.0, "cents": 0.0},
+                    "snare": {"role": "snare", "sha256": "s", "semitones": -1.0, "cents": 30.0},
+                    "hat": {"role": "hat", "sha256": "h", "semitones": 0.0, "cents": 25.0}}
+    e["sounds"] |= {"36": {"role": "kick", "sha256": "x", "semitones": 2.0, "cents": 0.0},
+                    "38": {"role": "snare", "sha256": "s", "semitones": -1.0, "cents": 0.0},
+                    "42": {"role": "hat", "sha256": "h", "semitones": 0.0, "cents": 25.0}}
+    d = drum_scores(t, e, files=True)
+    assert d["pitch"] == {"same_file": 0.6667, "pads": 2, "cents_abs_mean": 15.0, "cents_abs_max": 30.0}
+    assert d["sounds"]["snare"]["same_file_cents"] == {"38": -30.0} and d["sounds"]["kick"]["same_file_cents"] is None
+    e["sounds"]["38"]["cents"] = 30.0
+    e["generator"] = {"switches": {"from": "plan"}}
+    h = headline(score(t, e))
+    assert (h["drums.same_file"], h["drums.pitch_cents_abs_max"], h["drums.pitch_cents_abs_mean"]) == (0.6667, 0, 0)
+    assert "pitch" not in drum_scores(t, e) and "drums.same_file" not in headline(score(t, estimate()))
+
+
 def test_an_808_60_cents_off_has_its_onsets_and_none_of_its_notes():
     b = evaluate.bass_scores(truth(), estimate(midi=36.6))
     assert (b["f1_20"], b["note_f1_20"], b["note_f1_50"]) == (1.0, 0.0, 0.0)

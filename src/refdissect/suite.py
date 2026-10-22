@@ -527,6 +527,10 @@ def _by_role(sounds) -> dict[str, list[dict]]:
 def _drums(d: dict) -> dict:
     out = {f"drums.{k}": v for k, v in d["macro"].items()}
     out["drums.extra"] = len(d["extra"])
+    if d.get("pitch"):  # a plan's: pads that play their truth sound's file, and how far off its pitch
+        p = d["pitch"]
+        out |= {"drums.same_file": p["same_file"], "drums.pitch_cents_abs_mean": p["cents_abs_mean"],
+                "drums.pitch_cents_abs_max": p["cents_abs_max"]}
     for role, sounds in _by_role(d["sounds"].values()).items():
         out |= _role_numbers(f"drums.{role}", sounds)
     return out
@@ -667,6 +671,9 @@ TABLES = (  # (part, key, title, digits)
     ("analysis", "drums.f1_20", "Drums, strict F1@20, analysis (mean over truth sounds)", 3),
     ("analysis", "drums.v1_f1", "Drums, v1 rule (one offset removed per sound), analysis", 3),
     ("plan", "drums.f1_20", "Drums, strict F1@20, plan", 3),
+    ("plan", "drums.same_file", "Drums: share of truth sounds a pad plays with their own file, plan", 3),
+    ("plan", "drums.pitch_cents_abs_max", "Drums: largest |cents| off of a pad that plays its truth sound's file, "
+                                          "plan", 1),
     ("analysis", "808.f1_20", "808 onsets, strict F1@20, analysis", 3),
     ("analysis", "808.note_f1_50", "808 note F1 (50 ms, 50 cents), analysis", 3),
     ("analysis", "808.cents_median_abs", "808 pitch, median |cents| of matched notes, analysis", 1),
