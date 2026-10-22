@@ -604,11 +604,65 @@ def note_f1(ref: list[dict], est: list[dict], window: float = 0.05, onset: str =
         pitch_tolerance=50.0, offset_ratio=None)[2])
 
 
+def tuning_808(notes: list[dict]) -> float | None:
+    """The tuning (semitones, -0.5 to 0.5) the notes' settled pitches share:
+    the median of their fractional parts around their circular mean, legato
+    notes aside (a slide may stop anywhere). A truth's notes share one
+    exactly (the sample's own tuning, or a line's cents); an analysis' are
+    the template's settled pitch plus each note's transposition."""
+    s = np.array([n["midi_settled"] for n in notes
+                  if n.get("midi_settled") is not None and "legato" not in (n.get("flags") or [])], dtype=float)
+    if not len(s):
+        return None
+    frac = s - np.round(s)
+    centre = float(np.angle(np.mean(np.exp(2j * np.pi * frac)))) / (2 * np.pi)
+    return round(centre + float(np.median((frac - centre + 0.5) % 1.0 - 0.5)), 4)
+
+
+def _settled(ref: list[dict], mine: list[dict], pairs) -> dict | None:
+    """Over the notes matched within 50 ms: how far the settled pitch
+    (midi_settled) is from the truth's (cents), the share within 50 cents,
+    and the share whose written pitch (the settled pitch less its side's
+    own tuning_808, rounded: the MIDI note a plan writes) is the truth's.
+    The heard pitch (cents) cannot see a whole line written a semitone high
+    on a tuning read 40 cents off: on bass_low-1 note F1@50 read 0.994 with
+    every note written one semitone high."""
+    pairs = [(i, j) for i, j in pairs if ref[i].get("midi_settled") is not None
+             and mine[j].get("midi_settled") is not None]
+    if not pairs:
+        return None
+    tr, te = tuning_808(ref), tuning_808(mine)
+    c = np.array([100 * (mine[j]["midi_settled"] - ref[i]["midi_settled"]) for i, j in pairs])
+    written = [round(mine[j]["midi_settled"] - te) == round(ref[i]["midi_settled"] - tr) for i, j in pairs]
+    return {"n": len(c), "median": round(float(np.median(c)), 1), "median_abs": round(float(np.median(np.abs(c))), 1),
+            "within_50": round(float(np.mean(np.abs(c) <= 50)), 4), "written_equal": round(float(np.mean(written)), 4),
+            "tuning_cents": {"truth": round(100 * tr, 1), "est": round(100 * te, 1)}}
+
+
+def _legato(ref: list[dict], mine: list[dict], window: float = WINDOWS["50"]) -> dict:
+    """The legato notes (flag "legato": no attack of their own, a slide from
+    the note before): the estimate's against the truth's, matched one to one
+    on where the slide starts (t, within window) with the pitch it slides to
+    (midi_settled, else midi) within 50 cents. precision is None without an
+    estimated legato note, recall without a truth one."""
+    def legato(notes):
+        return sorted((n for n in notes if "legato" in (n.get("flags") or [])), key=lambda n: n["t"])
+
+    r, e = legato(ref), legato(mine)
+
+    def to(n):
+        return n["midi_settled"] if n.get("midi_settled") is not None else n["midi"]
+    hit = sum(abs(to(e[j]) - to(r[i])) <= 0.5 for i, j in _pairs(_times(r, "t"), _times(e, "t"), window))
+    return {"n_truth": len(r), "n_est": len(e), "matched": hit,
+            "precision": round(hit / len(e), 4) if e else None, "recall": round(hit / len(r), 4) if r else None}
+
+
 def bass_scores(truth: dict, est: dict) -> dict | None:
     """The 808 notes: onset scores on attack times (strict, and v1's rule),
-    note F1 at 20 and 50 ms (pitch within 50 cents, offsets ignored), and the
+    note F1 at 20 and 50 ms (pitch within 50 cents, offsets ignored), the
     pitch error (cents, estimate - truth) of the notes whose onsets match
-    within 50 ms."""
+    within 50 ms, the same notes' settled and written pitches (_settled),
+    and the legato notes' precision and recall (_legato)."""
     ref = sorted(truth.get("bass808") or [], key=lambda n: n["t_attack"])
     if not ref:
         return None
@@ -617,10 +671,13 @@ def bass_scores(truth: dict, est: dict) -> dict | None:
     out = {**onset_scores(rt, et), "v1": v1_scores(rt, [et] if len(et) else [])}
     for name, w in WINDOWS.items():
         out[f"note_f1_{name}"] = round(note_f1(ref, mine, w, "t_attack"), 4)
-    c = np.array([100 * (_midi(mine[j]) - _midi(ref[i])) for i, j in _pairs(rt, et, WINDOWS["50"])])
+    pairs = _pairs(rt, et, WINDOWS["50"])
+    c = np.array([100 * (_midi(mine[j]) - _midi(ref[i])) for i, j in pairs])
     out["cents"] = None if not len(c) else {
         "n": len(c), "median": round(float(np.median(c)), 1), "median_abs": round(float(np.median(np.abs(c))), 1),
         "p90_abs": round(float(np.percentile(np.abs(c), 90)), 1)}
+    out["settled"] = _settled(ref, mine, pairs)
+    out["legato"] = _legato(ref, mine)
     return out
 
 
