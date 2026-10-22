@@ -33,7 +33,17 @@ Before the fit, a template that holds another (a snare template holds the
 hat that plays on every snare) has it subtracted, else it takes that
 sound's place at every hit (purification), and a template the others
 explain (a duplicate, a kick+hat found where they always coincide) is left
-out, its hits handed to the templates that explain it.
+out, its hits handed to the templates that explain it. Two kinds of
+template are never held or probed for, as they only find another
+template's sound a second time: one of discover()'s residual pass (found
+where no template of its band plays: it keeps its matched-filter hits, and
+gets no pitched copies), and one that a bigger template of its fit band
+holds within NEAR_MS (a variant of that sound). Re-fit on discover()'s
+templates of the 48 suite beats (htdemucs), the drums' F1 at 20 ms went
+0.847 -> 0.879 (mean over sounds; 0.801 -> 0.844 over hits) and the false
+hits from 68.6 to 43.1 a beat; open hats 0.901 -> 0.979, snares 0.933 ->
+0.961; claps 0.580 -> 0.500, as the layers scenario's clap had been found
+only by a residual template held under the snare.
 
 On 22 calibration-suite beats (layers, rolls, flams, dynamics, v1, v1orig,
 producer, full, kick808), against one template per moment and band: hats
@@ -92,6 +102,7 @@ FLAM_MS = 35  # a quieter hit this close before another of the same sound is its
 # was found again 15-23 ms after every strike (v1-1)
 TONE_MS = 35
 TAIL = (0.25, 0.5)  # a low or tonal template's hit this soon (s) after one this much louder is its ringing (_tails)
+NEAR_MS = 2  # a template held this close by a bigger one of its fit band is a variant of that sound (_held)
 
 
 @dataclass
@@ -303,13 +314,13 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
         if kept and mine >= ECHO:
             echo[k] = round(mine, 3)
         kept.append(k)
-    holds = {s: held for s in kept
-             if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo and h in holdable], rows))}
+    holds = {s: held for s in kept if (held := _held(full, n, s, [h for h in kept if h != s and h not in echo
+                                                                      and h in holdable], rows, hits))}
     return {"composite": composite, "echo": echo, "kept": sorted(kept), "holds": holds}
 
 
-def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int],
-          rows: list[int]) -> list[tuple[int, float, int, float]]:
+def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int], rows: list[int],
+          hits: list[int]) -> list[tuple[int, float, int, float]]:
     """The templates s holds, (h, c, lag, share) each: h's least-squares
     coefficient c within HOLDS[0] (an accented hat under every snare is 1.4
     times the average hat) and the share of s over h's span it explains
@@ -324,7 +335,11 @@ def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int],
     leave, a second one needing twice the first's least share: what the
     first leaves is mostly s itself, and a duplicate of the first or a
     noisy sound matches some of it (an open hat 2.9 % in a snare on a
-    calibration beat, where it never plays)."""
+    calibration beat, where it never plays). A template of s's own fit band
+    that s holds within NEAR_MS, averaged from fewer hits (hits), is a
+    variant of s's sound, not a layer: on tempo160-1 the main hat held a
+    second hat-band template at 0.4 ms, which then got 37 hits under the
+    hats, 33 of them hats the main template had already."""
     rest = full[s].astype(np.float64)
     lags = (samples(LAG_MS[0]), samples(LAG_MS[1]))
     out: list[tuple[int, float, int, float]] = []
@@ -334,6 +349,8 @@ def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int],
         for h in others:
             d, r = full[h][:, :n[h]].astype(np.float64), rows[h]
             share, c, lag = containment(rest, d, lags)
+            if r == rows[s] and abs(lag) <= samples(NEAR_MS) and hits[s] > hits[h]:
+                continue
             _, mine, _ = containment(rest[r:r + 1], d[r:r + 1], (lag - samples(1), lag + samples(1)))
             if HOLDS[0][0] <= min(c, mine) and c <= HOLDS[0][1] and least <= share <= HOLDS[1][1]:
                 found.append((share, min(c, mine), lag, h))
@@ -650,10 +667,17 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     # probed (a kick found in the hat band, 31 % in the kick band, probed:
     # kick808-1 drums F1@20 0.636 -> 0.415)
     hatlike = {k for k in tones if rows[k] == ROW["hat"] and low_share(full[k], n[k]) < TONAL[0]}
-    holdable = {k for k in range(len(templates)) if k not in tones or k in hatlike}
+    # A residual template (discover's second pass) was found where no template
+    # of its band plays. Held under another, looked for at its band's onsets
+    # or copied at other pitches, it found that template's sound a second
+    # time: on v1-1, 40 of the 50 hits one got under other templates were the
+    # main hat's own hits again, 9 were on no hit. It keeps its matched-filter
+    # hits
+    residual = {k for k, tp in enumerate(templates) if getattr(tp, "found", "grid") == "residual"}
+    holdable = {k for k in range(len(templates)) if (k not in tones or k in hatlike) and k not in residual}
     rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows)
     tones &= set(rel["kept"])
-    noisy = [k for k in rel["kept"] if k not in tones and k not in rel["echo"]]
+    noisy = [k for k in rel["kept"] if k not in tones | residual and k not in rel["echo"]]
     columns, purity = [], {}
     for k in rel["kept"]:
         held = rel["holds"].get(k, [])
