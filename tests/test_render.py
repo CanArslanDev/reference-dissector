@@ -186,7 +186,8 @@ def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
     tuning as cents (before, a plan claimed root_midi: 45.8 cents flat), and
     estimate_from_plan's notes settle where the render settles (native_f0,
     the truth's rule) and sound where the render sounds (pitch_track through
-    sounding): a 125 ms note 5 semitones up sits 2-3 semitones over its
+    sounding): a 110 ms note 5 semitones up, planned at its own length (no
+    longer floored to a quarter beat), sits 2.5-3.5 semitones over its
     settled pitch. A plan without cents is read at the one-shot's measured
     tuning."""
     from refdissect import scenarios as S
@@ -209,7 +210,7 @@ def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
     a, b = int(2.0 * SR), int((2.0 + short["end"] - short["t"]) * SR)
     track = S.pitch_track(x[a:b], hz * 2 ** (5 / 12))
     heard = S.sounding(lambda t: S.hz_to_midi(1.0) + 12 * np.log2(track[0](t)), (b - a) / SR)
-    assert short["midi"] == pytest.approx(heard, abs=0.1) and 2 < short["midi"] - short["midi_settled"] < 3
+    assert short["midi"] == pytest.approx(heard, abs=0.1) and 2.5 < short["midi"] - short["midi_settled"] < 3.5
     del p["tracks"]["808"]["cents"]
     assert estimate_from_plan(p)["bass808"][0]["midi_settled"] == pytest.approx(24.458, abs=0.01)
 

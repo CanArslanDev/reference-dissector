@@ -123,6 +123,64 @@ def test_build_spec_for_build_tracks(tmp_path):
     assert not spec["REF other"]["mute"]
 
 
+def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
+    """The 808 Simpler gets the plan's Transpose and Detune and, with Glide
+    on, Glide Mode and Glide Time: what render_plan and estimate_from_plan
+    assume it plays. voices is a device property build_tracks cannot set:
+    it rides along for build."""
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    plan["tracks"]["808"]["detune_cents"] = -12
+    t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
+    assert t808["settings"] == {"Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0} and t808["voices"] is None
+    plan["tracks"]["808"].update(voices=1, glide_mode="Glide", glide_time_ms=60.7)
+    t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
+    assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
+
+
+def test_build_gives_the_808_simpler_one_voice(tmp_path, monkeypatch):
+    """build (ableton-live-mcp faked) sends the spec to build_tracks, then
+    sets the 808 Simpler's voices to 1 by its LOM property."""
+    import asyncio
+    import json
+    import sys
+    import types
+
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    plan["tracks"]["808"].update(detune_cents=7, voices=1, glide_mode="Glide", glide_time_ms=80.0)
+    calls = []
+
+    async def call_tool(name, args):
+        calls.append((name, args))
+        if name == "get_session_overview":
+            built = any(c[0] == "build_tracks" for c in calls)
+            tracks = [{"name": "Drums (library)", "index": 0}, {"name": "808 (synth)", "index": 1}] if built else []
+            text = json.dumps({"tracks": tracks})
+        elif name == "build_tracks":
+            text = json.dumps({"tracks": [{"track": t["name"], "problems": []} for t in args["tracks"]]})
+        else:
+            text = "{}"
+        return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)], is_error=False)
+
+    server = types.ModuleType("MCP_Server.server")
+    server.mcp = types.SimpleNamespace(call_tool=call_tool)
+    tools = types.ModuleType("MCP_Server.extended_tools")
+    tools.place_locators = lambda cues: [{"name": n} for n, _ in cues]
+    package = types.ModuleType("MCP_Server")
+    package.extended_tools, package.server = tools, server
+    for name, module in (("MCP_Server", package), ("MCP_Server.server", server),
+                         ("MCP_Server.extended_tools", tools)):
+        monkeypatch.setitem(sys.modules, name, module)
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+    spec = next(a for n, a in calls if n == "build_tracks")["tracks"]
+    assert next(t for t in spec if t["name"] == "808 (synth)")["settings"]["Detune"] == 7.0
+    assert ("lom_set_property", {"path": "live_set tracks 1 devices 0", "property": "voices", "value": 1}) in calls
+    assert "808_voices" in report and (tmp_path / "lib" / "Samples" / "AbletonMCP Generated").is_dir()
+
+
 def test_melodic_tracks_in_the_plan(tmp_path):
     """melodic.json adds one muted MIDI track per stem; the drums and the 808
     are planned exactly as without it."""

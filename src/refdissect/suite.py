@@ -18,8 +18,9 @@ matched, planned and scored, so a change to any step shows up per scenario.
 A beat folder after a run:
     events.json, mix*, stems_truth/   the truth (scenarios)
     stems-<model>/                    Demucs' stems and separation.json
-    runs/<tag>/                       analysis.json, melodic.json, basicpitch/, matches.json, synth808.json,
-                                      plan.json, midi/, templates/, log.txt, scores.json (run.json unscored)
+    runs/<tag>/                       analysis.json, bass808.json, melodic.json, basicpitch/, matches.json,
+                                      synth808.json, plan.json, midi/, templates/, log.txt, scores.json
+                                      (run.json unscored)
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -55,9 +56,13 @@ REFERENCE = {"drums": "drums", "bass": "bass"}  # truth group -> the plan's stem
 STEPS = ("analyze", "melodic", "match", "fit-808", "plan", "score")
 NEEDS = {"melodic": "analyze", "match": "analyze", "fit-808": "analyze", "plan": "analyze", "score": "plan"}
 ONE_SHOT = "808 (synth).wav"  # pipeline.fit_808's
+# the outputs each step reads beyond NEEDS: melodic.build reads notes_808 (the chords' bass) and match the
+# drum templates, so a reused melodic.json or matches.json describes the analysis it was made from
+READS = {"melodic": ("analyze",), "match": ("analyze",), "fit-808": ("analyze",),
+         "plan": ("analyze", "melodic", "match", "fit-808")}
 # what each step leaves in runs/<tag>/ (templates/ is analyze's but for fit-808's 808.npy), and the file
 # whose absence means it did not run; score is never copied: a reused score would describe other outputs
-OUTPUTS = {"analyze": ("analysis.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
+OUTPUTS = {"analyze": ("analysis.json", "bass808.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
            "match": ("matches.json",), "fit-808": ("synth808.json", ONE_SHOT, "templates/808.npy"),
            "plan": ("plan.json", "midi")}
 
@@ -217,6 +222,17 @@ def check_steps(steps=None, reuse: str | None = None) -> tuple[str, ...]:
     return picked
 
 
+def stale_steps(steps, reuse: str | None) -> list[str]:
+    """The steps a run reuses although a step it runs rewrites what they read
+    (READS): their outputs describe the old inputs. The 808 lane's runs
+    re-ran analyze and reused m1's melodic.json, whose chords were built on
+    the old notes_808; rebuilt on the new ones, majmin went 0.888 -> 0.977
+    on four beats."""
+    if not reuse:
+        return []
+    return [s for s in STEPS if s not in steps and any(r in steps for r in READS.get(s, ()))]
+
+
 def tonal(stems: Path) -> bool:
     """Whether a stems folder holds a stem pipeline.melodic transcribes."""
     from .melodic import MELODIC_STEMS
@@ -309,6 +325,9 @@ def _prepare(beat: Path, work: Path, tag: str, model: str, steps, reuse: str | N
             for rel in OUTPUTS[step]:
                 _copy(beat / "runs" / reuse, work, rel)
     status = {s: "run" if s in steps else "reused" if s in kept else "skipped" for s in STEPS}
+    for s in stale_steps(steps, reuse):
+        if status[s] == "reused":
+            status[s] = "reused_stale"
     if not has_tonal:
         status["melodic"] = "no_tonal_stem"
     carried = {k: v for k, v in (old.get("problems") or {}).items() if k.replace("_", "-") in kept}
@@ -451,6 +470,9 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     skips beats this tag has scored already. steps and reuse: run_beat's,
     checked for every beat before any runs (check_steps, reuse_problems)."""
     steps = check_steps(steps, reuse)
+    if stale := stale_steps(steps, reuse):
+        log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
+            f"{', '.join(r for r in steps if any(r in READS.get(s, ()) for s in stale))} runs: they read its outputs")
     root = Path(root).resolve()
     beats = beat_dirs(root, scenarios)
     if resume:
@@ -517,6 +539,13 @@ def _bass(b: dict) -> dict:
         out |= {"808.error_median_ms": b["error_ms"]["median"], "808.error_p90_ms": b["error_ms"]["p90_abs"]}
     if b.get("cents"):
         out |= {"808.cents_median": b["cents"]["median"], "808.cents_median_abs": b["cents"]["median_abs"]}
+    if b.get("settled"):
+        out |= {"808.settled_cents_median_abs": b["settled"]["median_abs"],
+                "808.settled_within_50": b["settled"]["within_50"], "808.written_equal": b["settled"]["written_equal"]}
+    if b.get("legato"):
+        lg = b["legato"]
+        out |= {"808.legato_est": lg["n_est"], "808.legato_truth": lg["n_truth"],
+                "808.legato_precision": lg["precision"], "808.legato_recall": lg["recall"]}
     return out
 
 
@@ -642,6 +671,14 @@ TABLES = (  # (part, key, title, digits)
     ("analysis", "808.note_f1_50", "808 note F1 (50 ms, 50 cents), analysis", 3),
     ("analysis", "808.cents_median_abs", "808 pitch, median |cents| of matched notes, analysis", 1),
     ("plan", "808.note_f1_50", "808 note F1 (50 ms, 50 cents), plan", 3),
+    ("plan", "808.cents_median_abs", "808 pitch, median |cents| of matched notes, plan", 1),
+    ("analysis", "808.settled_within_50", "808 settled pitch within 50 cents (share of matched notes), analysis", 3),
+    ("analysis", "808.written_equal", "808 written pitch right (share of matched notes), analysis", 3),
+    ("plan", "808.written_equal", "808 written pitch right (share of matched notes), plan", 3),
+    ("analysis", "808.legato_est", "808 legato notes per beat, analysis", 1),
+    ("analysis", "808.legato_truth", "808 legato notes per beat, truth", 1),
+    ("analysis", "808.legato_precision", "808 legato notes, precision (where the analysis has some), analysis", 3),
+    ("analysis", "808.legato_recall", "808 legato notes, recall (where the truth has some), analysis", 3),
     ("analysis", "rhythm.octave_x1", "Tempo in the right octave (share of beats)", 2),
     ("analysis", "rhythm.downbeat_error_ms_abs", "First downbeat, |error| modulo a bar (ms)", 1),
     ("analysis", "rhythm.beat_f", "Beat F (70 ms)", 3),
@@ -707,10 +744,16 @@ def _role_table(aggs: dict, part: str, metric: str, title: str, digits: int) -> 
 
 
 def _reused(agg: dict) -> str:
-    """'; fit-808 reused from base' for a tag whose runs reused steps."""
-    kept = sorted({s for st in agg.get("steps") or [] for s, v in st.items() if v == "reused"}, key=STEPS.index)
+    """'; fit-808 reused from base' for a tag whose runs reused steps, with
+    the stale ones (stale_steps) named."""
+    statuses = [st for st in agg.get("steps") or []]
+    kept = sorted({s for st in statuses for s, v in st.items() if v.startswith("reused")}, key=STEPS.index)
+    stale = sorted({s for st in statuses for s, v in st.items() if v == "reused_stale"}, key=STEPS.index)
     tags = [r for r in agg.get("reuse") or [] if r]
-    return f"; {', '.join(kept)} reused from {', '.join(tags)}" if kept and tags else ""
+    if not (kept and tags):
+        return ""
+    return f"; {', '.join(kept)} reused from {', '.join(tags)}" + (
+        f" (stale: {', '.join(stale)} read outputs this run rewrote)" if stale else "")
 
 
 def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> str:

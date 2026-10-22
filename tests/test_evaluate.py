@@ -131,6 +131,39 @@ def test_an_808_60_cents_off_has_its_onsets_and_none_of_its_notes():
     assert evaluate.bass_scores(truth(), estimate(midi=36.4))["note_f1_50"] == 1.0
 
 
+def test_an_808_heard_right_but_written_a_semitone_high_and_its_legato_notes():
+    """bass_low-1's failure: the notes heard within 50 cents (they never
+    settle), the settled pitch read 60 cents sharp and the tuning 29 cents
+    flat, so every note is written a semitone high; the heard-pitch scores
+    pass it, the settled and written ones do not. A legato note is right
+    where its slide starts within 50 ms at the pitch it slides to."""
+    ref, est = truth(), estimate()
+    for k, (r, e) in enumerate(zip(ref["bass808"], est["bass808"])):
+        r["midi_settled"] = 20.11 + (3 if k % 2 else 0)
+        e["midi_settled"] = r["midi_settled"] + 0.597
+    b = evaluate.bass_scores(ref, est)
+    assert b["note_f1_50"] == 1.0 and b["settled"]["within_50"] == 0.0 and b["settled"]["written_equal"] == 0.0
+    assert b["settled"]["tuning_cents"] == {"truth": 11.0, "est": -29.3}
+    assert b["settled"]["median"] == pytest.approx(59.7, abs=0.01)
+    for e in est["bass808"]:
+        e["midi_settled"] -= 0.597
+    assert evaluate.bass_scores(ref, est)["settled"]["written_equal"] == 1.0
+    for e in est["bass808"]:  # a plan's heard Detune past half a semitone: its own MIDI notes are what it wrote
+        e["midi_settled"] += 0.6
+        e["pitch"] = round(e["midi_settled"] - 0.6 - 0.11)
+    assert evaluate.bass_scores(ref, est)["settled"]["written_equal"] == 1.0
+    for e in est["bass808"]:
+        e["midi_settled"] -= 0.6
+    assert evaluate.bass_scores(ref, est)["legato"] == {"n_truth": 0, "n_est": 0, "matched": 0, "precision": None,
+                                                        "recall": None}
+    for n in ref["bass808"][2:4] + est["bass808"][2:5]:
+        n["flags"] = ["legato"]
+    est["bass808"][3]["t"] += 0.04  # within 50 ms
+    est["bass808"][4]["midi_settled"] += 1.0  # another pitch, and no truth legato note there
+    assert evaluate.bass_scores(ref, est)["legato"] == {"n_truth": 2, "n_est": 3, "matched": 2,
+                                                        "precision": 0.6667, "recall": 1.0}
+
+
 def test_chord_accuracy_on_a_known_sequence():
     """8 s: the estimate gets every root, misses the 7th of A:min7 and G:7, and
     stops a second early (no chord there)."""
