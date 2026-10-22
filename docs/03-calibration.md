@@ -157,7 +157,7 @@ A hit's time is where its file starts. Its attack (`t_attack`) adds `audio.attac
 
 `evaluate.score` compares an estimate in the same schema with the truth. There are two estimates per beat:
 - **Analysis level** (`estimate_from_analysis`): what the pipeline heard, from `analysis.json`, `matches.json` and `melodic.json`.
-- **Plan level** (`estimate_from_plan`): what Live would play, from `plan.json` as `render.py` plays it. Each pad plays its sample at its Transpose and Detune, and the 808 its one-shot per note. Live itself is not in the loop yet ([12](12-replica-mode.md)).
+- **Plan level** (`estimate_from_plan`): what Live would play, from `plan.json` as `render.py` plays it. Each pad plays its sample at its Transpose and Detune, and the 808 its one-shot per note, each velocity at its level under Live 12.4.6's law. Live itself is not in the loop yet ([12](12-replica-mode.md)).
 
 The rules:
 - **Strict.** No offset is removed. Both sides time a hit at its attack, and a hit counts within 20 ms (50 ms is reported too). Pairs come from a maximum one-to-one matching (mir_eval).
@@ -243,6 +243,8 @@ m2 and m2-ft measured the first merge (ba7b69d), before those five fixes. Each t
 | seconds per beat after separation (jobs) | 190 (3) | 90 (2) | 142 (2) | 141 (2) |
 
 base-htdemucs_ft, the before of the m2g-ft column: drums 0.470 / 0.354; kick 0.581 / 0.637, snare 0.556 / 0.319, hat 0.626 / 0.589, open hat 0.324 / 0.006; 808 notes 0.173 / 0.146; levels 3.81 dB.
+
+**Levels under Live's velocity law.** m2g and m2g-ft rendered velocities as linear levels (v/127). m2g-vel and m2g-ft-vel ran plan and score again on their other outputs, with velocities from Live 12.4.6's law at "Vol < Vel" 35 % (`suite-m2g-vel.json`, `suite-m2g-ft-vel.json`). Distance from a perfect kit 3.67 and 3.21 dB, balance 2.24 and 1.98 dB, the 808 −1.97 and −2.24 dB against the kit; every other number is unchanged. With v/127 velocities, Live would have played m2g's plans 9.30 dB from a perfect kit and m2g-ft's 9.59 dB (computed from the law: pads at 45 %, the 808 at 35 %). Not verified in Live.
 
 **What changed what:**
 - **The grid** moved in m1 (beat_this) and not since.

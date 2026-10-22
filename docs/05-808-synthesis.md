@@ -74,6 +74,6 @@ The one-shot is rendered at the template's settled pitch, 3 s long, at −1 dBFS
 - **Slides.** By default an 808 line has no legato notes and the Simpler no Glide. The rule this replaced called every unattacked pitch move a slide and was right 6 times in 79 ([08](08-pitfalls.md)); the opt-in rule (`slides=True`) made 18 legato notes, 6 of them right, on the 24 beats its thresholds were chosen on. With slides on, three legato notes or more put the Simpler on one voice, with Glide Mode "Glide" and the song's median Glide Time. Live 12.4.6 then slides overlapping notes linearly in semitones over exactly the Glide Time. A legato chain held past the end of the 3 s one-shot is silent from there.
 - **Warping off.** Pitch is changed by speed, as an 808 should be.
 - **Volume set to 0 dB.** Simpler loads at −12 dB.
-- **Levels.** On the suite (m2g) the plan's 808 sits 1.95 dB under a perfect kit (+0.09 dB in m1): faders matched to the bass stem's whole-track RMS now see the notes' real lengths.
+- **Levels.** Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, which the build sets: 115 at the line's median peak, 0.14 dB a step from there, within 70–127. On the suite (m2g-vel) the plan's 808 sits 1.97 dB under a perfect kit (+0.09 dB in m1): faders matched to the bass stem's whole-track RMS now see the notes' real lengths.
 
 The build sends Transpose and Detune, and with Glide on also Glide Mode, Glide Time and one voice. None of it has been built and recorded in Live yet: not verified ([07](07-building-in-live.md)).

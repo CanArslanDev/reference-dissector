@@ -21,6 +21,8 @@ Then it measures the rebuild against the reference.
 | 808 pitch, median abs error | 55.3 / 69.8 cents | 6.0 / 7.7 cents |
 | plan levels: median distance from a perfect kit | 7.18 dB | 3.67 dB |
 
+The plan levels are the same under Live 12.4.6's velocity law, which the plan follows since m2g-vel (3.67 dB), and not verified in Live.
+
 `base-htdemucs` is the code before replica mode (471fd70) and `m2g` the merged code (9ccc759). Their scores are `results/calibration/suite-base-htdemucs.json` and `suite-m2g.json`.
 
 ## Running it
@@ -167,8 +169,8 @@ Each step is described in [01](01-pipeline.md), the 808 voice in [05](05-808-syn
   - `measured_hz` is the template's pitch, and `fit_vs_measured_cents` how far the fit's own pitch lies from it.
 - **plan.json**:
   - `tempo`, `length_beats`, `stems`, `locators`, `levels`;
-  - `tracks.drums`: `pads` (note → template, file, `transpose`, `detune_cents`, NCC, verdict, role) and `notes`;
-  - `tracks.808`: `notes`, `sample_path`, `transpose`, `detune_cents`, `tuning_cents`, `heard_cents`, `slides` (every glide), and with Glide on `voices`, `glide_mode` and `glide_time_ms`;
+  - `tracks.drums`: `pads` (note → template, file, `transpose`, `detune_cents`, `vol_vel`, NCC, verdict, role) and `notes`;
+  - `tracks.808`: `notes`, `sample` (the one-shot's name in the User Library, with its digest), `sample_path`, `transpose`, `detune_cents`, `vol_vel`, `tuning_cents`, `heard_cents`, `slides` (every glide), and with Glide on `voices`, `glide_mode` and `glide_time_ms`;
   - `tracks.melodic`: a muted track per tonal stem.
 - **events.json** (schema `refdissect.events/1`) holds a truth or an estimate in one form, so one scorer reads both.
   - A scenario writes the truth (`kind: "truth"`):
@@ -236,6 +238,7 @@ Means over the 22 scenarios of calibration v2. Columns are tags: `base` = base-h
 - **The 808** changed only in its lane. Its numbers are the same in m2 and m2g.
 - **Chords** rose from m1 to m2g because melodic now reads the new 808 notes as the chords' bass.
 - **Kick timing on htdemucs_ft** was already near 0 before (base-ft +2.0 ms). On htdemucs drums a kick's body comes 26 ms after its click, as the rest of the kick goes to the bass stem, and the old templates timed kicks on their body.
+- **Levels under Live's velocity law.** m2g-vel and m2g-ft-vel (`suite-m2g-vel.json`, `suite-m2g-ft-vel.json`) ran plan and score again on m2g's and m2g-ft's other outputs, with velocities from Live 12.4.6's law at "Vol < Vel" 35 %: 3.67 and 3.21 dB from a perfect kit, balance 2.24 and 1.98 dB, the 808 −1.97 and −2.24 dB; every other number is unchanged. With v/127 velocities, Live would have played m2g's plans 9.30 dB from a perfect kit and m2g-ft's 9.59 dB (computed from the law: pads at 45 %, the 808 at 35 %).
 - **m2 and m2-ft** (`suite-m2.json`, `suite-m2-ft.json`) measured the first merge (ba7b69d), before five merge fixes: drums 0.847 / 0.600, open hat 0.901, and pads up to 300 cents off pitch (producer-2; drum_pitch-2: 30 cents). For that last number `suite-m2.json` gives 7.5 cents, a mean over scenarios of each beat's largest error.
 
 **Each lane alone**, on m1's other steps:
@@ -267,14 +270,14 @@ The plan carries every setting below, and `live.build_spec` sends it to `build_t
 - **Glide.** With slides on and three legato notes or more, the 808 gets Glide Mode "Glide" and the median Glide Time. Slides are off by default, so no plan of the suite turns Glide on (0 legato notes written under m2g).
 - **Voices.** One voice for Glide, set with `lom_set_property` after `build_tracks`: voices is a property of the device, not a parameter.
 - **Melodic tracks.** A muted MIDI track per tonal stem, with Drift as a placeholder instrument.
-- **The build as a whole.** The plan-level numbers come from `render.py`, which assumes how Simpler plays. Live 12.4.6 was measured on 2026-10-19 (ableton-live-mcp's replica-mode branch records it in its CLAUDE.md), and three of those assumptions differ from it:
-  - **Velocity.** `render.py` assumes a linear v/127. In Live a velocity sets the level by dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: "Vol < Vel" is 35 % on a Simpler made with `insert_device` and 45 % on a pad loaded through the browser.
+- **"Vol < Vel".** 35 % on every pad and on the 808, sent through `build_tracks` as a raw value; the battery set it through the same LOM call. In Live a velocity sets the level by dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume, and "Vol < Vel" starts at 35 % on a Simpler made with `insert_device` and at 45 % on a pad loaded through the browser. The plan's velocities invert the law, and `render.py` plays it.
+- **The build as a whole.** The plan-level numbers come from `render.py`, which assumes how Simpler plays. Live 12.4.6 was measured on 2026-10-19 (ableton-live-mcp's replica-mode branch records it in its CLAUDE.md), and two of those assumptions differ from it:
   - **Snap.** It is on by default and ends a sample 10–30 ms early; `render.py` plays every sample to its end.
   - **Chokes.** A choke group cuts with a 1 ms fade; `render.py` fades a cut over 5 ms, and the plan sets no choke groups.
 
-  The onset scores do not depend on these three; the level scores do.
+  The onset scores do not depend on these two; the level scores do.
 - **Bar 1.** The plan holds no meter, and Live's bar 1 sits at 0 s.
-- **Loading.** Pads still load through Live's browser by file name (ableton-live-mcp 2.2.0). The replica-mode branch of ableton-live-mcp adds `sample_path`, which loads the exact file and reads it back; the build does not use it yet.
+- **Loading.** Pads still load through Live's browser by file name (ableton-live-mcp 2.2.0). The replica-mode branch of ableton-live-mcp adds `sample_path`, which loads the exact file and reads it back; the build does not use it yet. The 808's one-shot is named after its content (`live.sample_808`), so Live cannot play an older one loaded under the same name.
 
 ## Known limits
 
@@ -309,7 +312,7 @@ All measured on the suite (m2g unless named).
   - The opt-in slide rule was tuned on the beats it was measured on.
   - Merging every unattacked note into the note before loses a few real notes (tempo160-1 1.000 → 0.946 in the lane).
   - Two 16th notes at one pitch at 160 BPM are split only in part: 2 of the 4 pairs of the unit-test bar still merge.
-- **The plan's 808 sits 1.9 dB under a perfect kit** (−1.95 dB; +0.09 dB in m1). Its fader matches the bass stem's whole-track RMS, which now sees the notes' real lengths.
+- **The plan's 808 sits 2.0 dB under a perfect kit** (−1.97 dB in m2g-vel, −1.95 dB in m2g; +0.09 dB in m1). Its fader matches the bass stem's whole-track RMS, which now sees the notes' real lengths.
 - **The tails of long legato chains are silent.** The one-shot is 3 s long.
 
 **Identification**
@@ -336,7 +339,7 @@ All measured on the suite (m2g unless named).
 ## Next
 
 In order ([10](10-roadmap.md) has the metrics, targets and gaps):
-1. **The plan with Live's measured behaviour:** velocities from Live's law, Snap off, choke groups, pads loaded by path, the meter and bar 1, a lower pad gate.
+1. **The plan with Live's measured behaviour:** Snap off, choke groups, pads loaded by path, the meter and bar 1, a lower pad gate. Velocities already follow Live's law (m2g-vel).
 2. **The build, checked in Live:** build suite plans, record them, and score the recording as the plan is scored.
 3. **The closed loop:** measure the recording, correct levels, pitch and timing, rebuild, and stop when the distance stops falling.
 4. **Speed.** A DE popsize of 10 fitted the 808 1.9–2.2× faster at equal mean loss on 4 beats. It is not yet run on all 48.

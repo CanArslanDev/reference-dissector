@@ -274,7 +274,7 @@ Kicks and 808s are mostly decaying sines, so every one correlates highly with ev
 - **Pitch.** A pad plays its match at the pitch it was found at: Transpose in whole semitones and Detune in whole cents (`pad_pitch`), as Live 12.4.6 keeps them. drum_pitch's snare (−0.70 semitones) is Transpose −1, Detune +30. With Transpose alone it played 30 cents off, and its hat (+0.25) 25. Over the suite no pad now plays its sound's file off pitch (m2g). Matches written before replica mode carry whole semitones and get Detune 0.
 - **Pads** follow GM (kick 36, snare 38, hats 42/44/46, …). A pitched copy (hits with `semitones`) gets the next free pad from 54 up: the same sample, transposed that much further, with the base pad's Detune. On the rolls, full and producer beats (6 beats), on the layers lane's templates, the plan's drums F1 at 20 ms is 0.452 with these pads, 0.157 with the copies played unpitched (runs l1b-after3, l1b-nopads3) and 0.145 for one template per moment (m1); 0.455 in the lane's final run (l1b-fix) and 0.605 with the merged code (m2g). Over hits it is 0.726, 0.670 and 0.602 (0.732 in l1b-fix): the 37 pitched-copy sounds hold 193 of the 1,878 truth hits, so the pads are worth 87 of them (88 of the 193 found in l1b-fix). The mean over sounds counts each copy, of 1–68 hits, as much as a main hat.
 - **Twins.** A `same_as` template shares its twin's pad. The same file at another pitch plays on a pad of its own, transposed so far. producer-2's hat 3 semitones down had played at the hat's pitch, and its own pitched copies 300 cents off; re-planned, producer-2's drums F1@20 went 0.579 → 0.665.
-- **Velocities** come from the hit gains: 127 at the 90th percentile, 35 at least.
+- **Velocities** come from the hit gains, under Live 12.4.6's law at "Vol < Vel" 35 % (see Levels): 127 at the 90th percentile, and no hit more than 11.2 dB under it (velocity 47).
 - **Layers** found by `match` are not played yet.
 
 **Notes:**
@@ -288,17 +288,17 @@ Kicks and 808s are mostly decaying sines, so every one correlates highly with ev
 - Times are converted to beats from the start of the audio: beat = seconds × BPM / 60. The reference stems start at beat 0 unwarped, so the notes line up with them by construction.
 
 **Levels.**
-- Our drums and 808 are rendered offline at unity gain (Simpler at 0 dB, velocity as linear level): each pad at its Transpose and Detune, the 808 as `render.render_plan` plays it (Transpose, Detune and Glide, cut at each note's end).
+- Our drums and 808 are rendered offline at unity gain (Simpler at 0 dB, each velocity at its level under Live's law): each pad at its Transpose and Detune, the 808 as `render.render_plan` plays it (Transpose, Detune and Glide, cut at each note's end).
 - Each is set to the RMS of the stem it replaces.
 - Everything, the stems included, is 4 dB down for headroom.
-- On the suite (m2g) the plan's levels sit a median 3.67 dB from a perfect kit under its faders (7.18 dB before replica mode). The 808 sits 1.95 dB under it (+0.09 dB in m1): faders matched by whole-track RMS now see the notes' real lengths.
-- Live's velocity curve is not linear (measured on 2026-10-19, see [07](07-building-in-live.md)). Neither the levels nor the plan's render apply it yet.
+- **Velocity is no linear level in Live.** Live 12.4.6 plays dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over Simpler's Volume (measured on 2026-10-19, see [07](07-building-in-live.md)), and "Vol < Vel" is 35 % or 45 % by how the Simpler was made. The build sets it to 35 % on every pad and on the 808 (`render.VOL_VEL`), and `live.velocities` inverts the law: a hit at half its sound's 90th-percentile gain is velocity 84, 6.0 dB under 127. Taken as a linear level (v/127) it was 64, which Live plays 8.8 dB under 127. An 808 note is velocity 115 at the line's median peak, 0.14 dB a step from there, within 70–127.
+- On the suite the plan's levels sit a median 3.67 dB from a perfect kit under its faders (7.18 dB before replica mode), with Live's law (m2g-vel: m2g's plans made and scored again) as with v/127 (m2g). The 808 sits 1.97 dB under it (+0.09 dB in m1): faders matched by whole-track RMS now see the notes' real lengths. With v/127 velocities, the same plans built in Live would have sat 9.30 dB from a perfect kit (computed from the law, pads at 45 %, the 808 at 35 %). Not verified in Live.
 
 **Locators** go at section starts, counted from the grid's first bar line in its meter; the build rounds them to whole beats.
 
 **Not in the plan:** the meter, and where bar 1 is. Live counts bar 1 from 0 s, so a 3/4 beat is built in 4/4 (the plan's meter is right on 0.909 of the scenarios: meter34 and meter68 are not), and full's first bar line, at 0.4 s, lands 400 ms off.
 
-`midi/drums.mid`, `midi/808.mid` and a file per melodic track (480 PPQ, the plan's tempo) are written too, for `import_midi_file` or any DAW.
+`midi/drums.mid`, `midi/808.mid` and a file per melodic track (480 PPQ, the plan's tempo) are written too, for `import_midi_file` or any DAW. Their drum and 808 velocities are Simpler's at "Vol < Vel" 35 %; another instrument plays them at other levels.
 
 On the suite (m2g), strict F1@20 over drum hits and 808 onsets is 0.886 at analysis and 0.667 in the plan; drums alone 0.880 and 0.612; 808 notes F1@50 0.936 and 0.926.
 

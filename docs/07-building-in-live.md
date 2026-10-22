@@ -13,8 +13,8 @@ Live must be running with the AbletonMCP Remote Script selected as a control sur
 
 | track | content |
 |---|---|
-| 808 (synth) | Simpler with the fitted one-shot, Volume 0 dB, warping off, at the plan's Transpose and Detune (whole numbers, `live.tune_808`). With Glide on, also Glide Mode "Glide", the Glide Time and one voice. An Arrangement clip holds every 808 note at its written pitch and length. |
-| Drums (library) | Drum Rack: one pad per identified sound, each a Simpler at Volume 0 dB with its match's Transpose and Detune (whole cents). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note where its hit attacks. |
+| 808 (synth) | Simpler with the fitted one-shot, Volume 0 dB, "Vol < Vel" 35 %, warping off, at the plan's Transpose and Detune (whole numbers, `live.tune_808`). With Glide on, also Glide Mode "Glide", the Glide Time and one voice. An Arrangement clip holds every 808 note at its written pitch and length. |
+| Drums (library) | Drum Rack: one pad per identified sound, each a Simpler at Volume 0 dB and "Vol < Vel" 35 % with its match's Transpose and Detune (whole cents). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note where its hit attacks. |
 | other / piano / guitar / vocals (notes) | a MIDI track per tonal stem with `melodic`'s notes, Drift as a placeholder instrument, muted |
 | REF drums / bass / other / piano / vocals | the stems as Arrangement audio clips from beat 0, warping off; drums, bass and vocals muted |
 
@@ -33,8 +33,8 @@ Also set:
 ## What the build sends
 
 `live.build_spec(plan)` is the whole spec of one `build_tracks` call:
-- **808**: `{"sample": "<song> 808 (synth) <digest>.wav", "warping": false}`. Its settings come from `live.simpler_808`: `"Volume": "0.0 dB"`, `"Transpose"` and `"Detune"` as numbers, and with Glide `"Glide Mode": "Glide"` and `"Glide Time": "<ms> ms"`. The one-shot is first copied into the User Library (`Samples/AbletonMCP Generated/`), named after the song and its content: `<digest>` is the first 8 hex digits of the file's SHA-1 (`live.sample_808`). The build refuses a one-shot that changed after the plan named it.
-- **Each pad**: `{"sample": <file name>, "warping": false, "settings": {"Volume": "0.0 dB", "Transpose": …, "Detune": …}}`.
+- **808**: `{"sample": "<song> 808 (synth) <digest>.wav", "warping": false}`. Its settings come from `live.simpler_808`: `"Volume": "0.0 dB"`, `"Transpose"`, `"Detune"` and `"Vol < Vel"` (0.35, raw) as numbers, and with Glide `"Glide Mode": "Glide"` and `"Glide Time": "<ms> ms"`. The one-shot is first copied into the User Library (`Samples/AbletonMCP Generated/`), named after the song and its content: `<digest>` is the first 8 hex digits of the file's SHA-1 (`live.sample_808`). The build refuses a one-shot that changed after the plan named it.
+- **Each pad**: `{"sample": <file name>, "warping": false, "settings": {"Volume": "0.0 dB", "Transpose": …, "Detune": …, "Vol < Vel": 0.35}}`.
 - **Melodic tracks**: `"instrument": "Drift"`, muted, with their notes.
 - **Stems**: audio tracks with one clip each, warping off.
 - **Faders**: `volume_db` from the plan's levels, at most +6 dB.
@@ -106,8 +106,7 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 
 ### What this means for the build (estimates, not measured on a build)
 
-- **Velocity.** The plan's levels and its render take velocity as a linear level (v/127): 0 dB at velocity 127, −11.2 dB at 35. By the law above, a browser-loaded pad plays +10.2 dB and −6.4 dB over its Volume. The plan's drum velocities run from 35 to 127, so in Live its loudest hits would sit about 10 dB over the plan's estimate and its softest about 5 dB. Its 808 notes run from velocity 70 to 127, around 115: about +8 dB at 45 % (+6.2 at 35 %), where the plan assumes −0.9 dB. These numbers come from the law; no build has been captured.
-- **Which "Vol < Vel" the 808 gets** (a track's Simpler loaded through the browser) was not measured.
+- **Velocity.** The plan took velocity as a linear level (v/127): 0 dB at velocity 127, −11.2 dB at 35. By the law above, a browser-loaded pad plays +10.2 dB and −6.4 dB over its Volume. Rendered by the law, with the pads at 45 % and the 808 at 35 % (which "Vol < Vel" a track's Simpler loaded through the browser gets was not measured), m2g's 48 plans sit 9.30 dB from a perfect kit, against the 3.67 dB they scored under v/127. The build now sets "Vol < Vel" to 35 % on every Simpler, and the velocities invert the law ([01](01-pipeline.md#plan)): 3.67 dB again (m2g-vel). These numbers come from the law; no build has been captured, and "Vol < Vel" set through `build_tracks` (a raw value, as the battery set it through the LOM) is not checked in Live.
 - **Snap.** The build leaves it on, so every pad and the one-shot would end 10–30 ms early.
 - **The one-shot's name.** Named after the song alone, a one-shot fitted again reached the User Library under the name Live had loaded, so a rebuild in that Live could play the old one-shot. Its name now carries its content's digest, so a changed one-shot is a new file to Live (not checked in Live).
 
@@ -116,7 +115,8 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 No plan of replica mode has been built and captured yet. Not verified:
 - Detune on Drum Rack pads as `build_tracks` sets it (the battery read whole cents back on Simplers and set Detune by display text through `build_tracks`, but no pad with a plan's Detune has been recorded);
 - the 808's Detune, Glide Mode and Glide Time sent through `build_tracks`, and its voices set to 1 with `lom_set_property` after it;
-- the plan-level pitch, slide and level numbers of the suite, which assume these settings behave as the battery measured them and velocity as a linear level;
+- the plan-level pitch, slide and level numbers of the suite, which assume these settings behave as the battery measured them, velocities included;
+- "Vol < Vel" at 35 % on every pad and on the 808, as `build_tracks` sends it;
 - the meter and bar 1: the plan holds no meter, and Live's bar 1 sits at 0 s. A 3/4 beat would be built in 4/4, and full's first bar line, at 0.4 s, lands 400 ms off.
 
 ## Runs

@@ -24,7 +24,7 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
   - the written note is right for 0.947 of the notes.
 - **Sounds at any pitch.** The snare and hat bands are matched to a quarter cent (the speckle index), and pads play their match's Transpose and Detune. No pad that plays its sound's file is off pitch now; before Detune per pad, drum_pitch's snare played 30 cents off.
 - **Melodies and chords, started** (item 5 before). Basic Pitch runs per tonal stem: note F1 0.630; chords majmin 0.977 (4 beats). The plan carries the notes as muted MIDI tracks.
-- **Levels.** The plan's median distance from a perfect kit: 7.18 → 3.67 dB.
+- **Levels.** The plan's median distance from a perfect kit: 7.18 → 3.67 dB. Since m2g-vel the plan's velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, which the build sets on every Simpler (3.67 dB as before; not verified in Live).
 
 ## Targets
 
@@ -54,7 +54,7 @@ Live 12.4.6 was measured on 2026-10-19; the results are recorded in ableton-live
 | Live 12.4.6 | the plan and the build now | next |
 |---|---|---|
 | Transpose keeps whole semitones (a fraction is truncated toward zero). Detune keeps whole cents from −50 to +50. | `pad_pitch` and `tune_808` round both. Pads and the 808 get Detune. | Check them in Live (item 2). |
-| A velocity sets a Simpler's level: dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over its Volume. "Vol < Vel" is 35 % on a Simpler made with `insert_device` and 45 % on a pad loaded through the browser. | Velocities are linear in the hit's gain (127 at the 90th percentile, 35 at least). `render.py` and `estimate_levels` assume a level of v/127. | Velocities from Live's law, "Vol < Vel" set explicitly, and the same law in `render.py`. At 35 %, velocity 127 plays 7.9 dB over the Volume and velocity 35 plays 5.0 dB under it; v/127 gives 0 and −11.2 dB. That is arithmetic from the law, not measured on a plan. |
+| A velocity sets a Simpler's level: dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over its Volume. "Vol < Vel" is 35 % on a Simpler made with `insert_device` and 45 % on a pad loaded through the browser. | Done offline (m2g-vel): the build sends "Vol < Vel" 35 % to every pad and to the 808, the velocities invert the law, and `render.py` and `estimate_levels` play it. Plan levels 3.67 dB from a perfect kit; with v/127 velocities, Live would have played m2g's plans 9.30 dB off (computed from the law). | Check it in Live (item 2). |
 | Snap, on by default, ends a sample 10–30 ms early. | Not set. | Snap off on every Simpler. |
 | A choke group cuts the sounding pad with a linear 1 ms fade (groups 0–16). | No choke groups. `render.py` fades a cut over 5 ms. | Choke groups for the hats (rolls, producer and full choke their open hats), and a 1 ms fade in `render.py`. |
 | Glide slides linearly in semitones over exactly the Glide Time, with one voice and overlapping notes. Notes 25 ms apart jump. | A legato note's predecessor is held 10 ms over it, and voices are set to 1 after `build_tracks`. Slides are off by default. | Check it in Live. Slides that score better than merging the unattacked notes. |
@@ -64,7 +64,7 @@ Live 12.4.6 was measured on 2026-10-19; the results are recorded in ableton-live
 The plan's own gaps:
 - **The pad gate.** A template gets a pad from 12 hits on. Open hats (4–8 hits) score 0.043 in the plan against 0.979 in the analysis, and tempo72's and tempo95's snares (8 hits) score 0. Metric: plan F1@20 per role. Target: the analysis's score; the gap for open hats is 0.936.
 - **Note timing.** Drum notes go to `t_attack` without the pad sample's own attack taken out: plan medians kick +2.1 ms, snare +1.1 ms, hat +0.6 ms.
-- **The 808's level.** It sits 1.95 dB under a perfect kit, because its fader matches the bass stem's whole-track RMS. Match faders the way levels are scored.
+- **The 808's level.** It sits 1.97 dB under a perfect kit (m2g-vel), because its fader matches the bass stem's whole-track RMS. Match faders the way levels are scored.
 - **Library layers.** Play `matches.json`'s layer on a second pad with the same notes, at its gain and lag.
 
 **Measured by:** plan-level scores (drums F1@20 0.612 against 0.880 at analysis; kick and hat, gaps above), and the levels: 3.67 dB from a perfect kit now. Target for the levels: under 1 dB, an estimate.
