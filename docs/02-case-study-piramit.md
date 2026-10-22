@@ -138,7 +138,7 @@ What the table says about the beat:
 
 The two runs fit different references, so their numbers are not comparable cell by cell.
 - Every note of the new reference starts on a kick, and the drum stem is averaged in.
-- The fitted voice now starts at 120 Hz, 22 semitones over its end, and falls with a 23 ms time constant and no soft attack. That is the shape of a kick's sweep. Whether it comes from the kicks in the reference is not separated here.
+- The fitted voice now starts at 120 Hz, 22 semitones over its end, and falls with a 23 ms time constant and no soft attack. Both sit on the search's bounds: the top of f_start (120 Hz) and the bottom of the attack (0.3 ms). That is the shape of a kick's sweep. Whether it comes from the kicks in the reference is not separated here.
 - Both the synth and the closest library 808 correlate less with this reference than with the old one.
 - Whether the one-shot now sounds like the 808 alone or like an 808 with a kick is not checked by ear. In Live the kick also plays on its own pad.
 
