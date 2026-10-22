@@ -38,7 +38,7 @@ import mido
 import numpy as np
 
 from .audio import SR, attack_time, read, rms_db, transpose, trim_onset
-from .render import glide_s
+from .render import glide_s, render_808
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -49,9 +49,7 @@ GENERATED = Path("Samples") / "AbletonMCP Generated"
 # are built muted, so the reference stems still play as before
 MELODIC_INSTRUMENT = "Drift"
 LEGATO_S = 0.01  # a legato 808 note's predecessor is held this long past its start (overlapping notes glide)
-# heard_808: notes that disagree by more than this (interquartile range, cents) get no correction;
-# 0.1-20 on 18 of the suite's 23 beats (htdemucs), 26-262 on the other 5 (a sliding line among them)
-HEARD_IQR = 25.0
+GLIDE_LEAST = 3  # legato notes a plan needs to put its 808 on one voice with Glide (fewer play as notes of their own)
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -97,19 +95,32 @@ def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | Non
     drop the analysis heard (midi_float over midi_settled) less the
     one-shot's own drop heard at the note's pitch (shift0 + pitch semitones
     over its own) and length, both by the truth's rule (scenarios.sounding);
-    the median, or None where the notes disagree by more than HEARD_IQR.
-    The fitted one-shot falls as one exponential, faster than the songs'
-    808s after about 100 ms (v1-1: 42 cents over its settled pitch at
-    150 ms, the beat's 808 117): tuned to settle where the 808 settled, the
-    plan's 808 sounded 6.8 cents flat (mean over 23 suite beats, htdemucs);
-    the correction is -11 to +22 cents on the 18 where the notes agree."""
+    the median over the notes at the line's most common written pitch, None
+    without notes. The fitted one-shot falls as one exponential, faster
+    than the songs' 808s after about 100 ms (v1-1: 42 cents over its
+    settled pitch at 150 ms, the beat's 808 117), so tuned to settle where
+    the 808 settled the plan's 808 sounded flat. How much depends on the
+    rate a note plays the one-shot at, and Detune is one per Simpler: it is
+    fitted where most notes are.
+
+    Re-scored on the 808-after4 plans (plan level, mean over the 10 lane
+    scenarios; htdemucs, then htdemucs_ft): the guard this replaces (a
+    correction only where all notes agreed within 25 cents, interquartile
+    range) gave note F1@50 0.849 and 0.826, median |cents| 11.1 and 36.2;
+    it rejected bass_low-1's +70 cents (0.333 there; 0.949 with it). The
+    median over all notes gave 0.881 and 0.829, but producer-2 on
+    htdemucs_ft fell from 0.485 to 0.061 (its notes disagree by 97 cents);
+    this rule 0.886 and 0.834, 8.4 and 31.4 cents (producer-2: 0.576)."""
     from .scenarios import drop, sounding, tuning
     curve = tuning(shot)[1]
+    use = [n for n in notes if n.get("midi_settled") is not None and (n.get("glide") or {}).get("kind") != "legato"]
+    if not use:
+        return None
+    pitches = [n["pitch"] for n in use]
+    common = max(set(pitches), key=lambda p: (pitches.count(p), -p))
     d = [100 * (n["midi_float"] - n["midi_settled"] - sounding(
             lambda t, r=2 ** ((n["pitch"] + shift0) / 12): drop(curve, t * r) / 100, n["end"] - n["t"]))
-         for n in notes if n.get("midi_settled") is not None and (n.get("glide") or {}).get("kind") != "legato"]
-    if not d or np.subtract(*np.percentile(d, [75, 25])) > HEARD_IQR:
-        return None
+         for n in use if n["pitch"] == common]
     return float(np.median(d))
 
 
@@ -132,8 +143,13 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     overlapping notes linearly in semitones over exactly the Glide Time and
     does not start the sample again; notes 25 ms apart jump. The track then
     carries voices 1, glide_mode and glide_time_ms (the median of the
-    glides', one per Simpler) for the build, and every glide (legato, and
-    the start and end glides no note plays yet) under "slides"."""
+    glides', one per Simpler) for the build, where the line has GLIDE_LEAST
+    legato notes or more: one or two play as notes of their own rather than
+    turn the whole track to one voice. Every glide (legato, and the start
+    and end glides no note plays yet) is listed under "slides". The
+    durations are final here (one voice: a note ends 0.001 beat before the
+    next starts, or holds over it to slide), as Glide would turn any other
+    overlap into a slide."""
     notes = analysis["notes_808"]
     peaks = np.array([n["peak"] for n in notes]) if notes else np.array([1.0])
     med = float(np.median(peaks)) or 1.0
@@ -170,9 +186,10 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
         return leads[shift]
 
     out, slid, slides = [], [], []
+    gliding = sum((n.get("glide") or {}).get("kind") == "legato" for n in notes[1:]) >= GLIDE_LEAST
     for n in notes:
         g = n.get("glide") or {}
-        legato_note = g.get("kind") == "legato" and bool(out)
+        legato_note = gliding and g.get("kind") == "legato" and bool(out)
         start = n["t"] if legato_note or "t_attack" not in n or shot is None else n["t_attack"] - lead(n["pitch"])
         out.append({"pitch": n["pitch"], "start_time": round(max(0.0, start) * beats_per_second, 4),
                     "duration": round(max(0.05, (n["end"] - start) * beats_per_second), 4),
@@ -184,16 +201,17 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     order = sorted(range(len(out)), key=lambda i: out[i]["start_time"])
     for a, b in zip(order, order[1:]):  # one voice: a note ends where the next starts, or holds over it to slide
         nxt = out[b]["start_time"]
+        gap = nxt - out[a]["start_time"]
         if slid[b]:
-            out[a]["duration"] = round(nxt + LEGATO_S * beats_per_second - out[a]["start_time"], 4)
+            out[a]["duration"] = round(gap + LEGATO_S * beats_per_second, 4)
         else:
-            out[a]["duration"] = round(max(0.01, min(out[a]["duration"], nxt - out[a]["start_time"] - 0.001)), 4)
+            out[a]["duration"] = round(max(min(0.01, gap / 2), min(out[a]["duration"], gap - 0.001)), 4)
     legato = [sl["ms"] for sl in slides if sl["kind"] == "legato" and sl["ms"]]
-    if legato:
+    if gliding and legato:
         track.update(voices=1, glide_mode="Glide", glide_time_ms=round(float(np.median(legato)), 1))
     if slides:
         track["slides"] = slides
-    return {"notes": no_overlaps(out, None), **track}
+    return {"notes": [out[i] for i in order], **track}
 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
@@ -280,7 +298,9 @@ def _render(notes: list[dict], sample_for, n: int, bps: float, cut: bool) -> np.
 def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     """Track faders (dB) that put our parts at the level of the stems they
     replace: our parts rendered offline at unity (Simpler at 0 dB, velocity as
-    a linear level), compared by RMS over the whole track."""
+    a linear level; the 808 as render_plan plays it, Transpose, Detune and
+    Glide included, cut without a fade), compared by RMS over the whole
+    track."""
     bps = plan["tempo"] / 60
     n = int(analysis["source"]["duration_s"] * SR)
     samples_by_pad = {}
@@ -297,14 +317,7 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
         out["drums_track_db"] = round(ref - rms_db(drums) - headroom_db, 1)
     track808 = plan["tracks"]["808"]
     if "sample_path" in track808 and "bass" in stems:
-        shot = read(track808["sample_path"])
-        cache: dict[int, np.ndarray] = {}
-
-        def sample_808(e):
-            if e["pitch"] not in cache:
-                cache[e["pitch"]] = transpose(shot, e["pitch"] - track808["root_midi"])
-            return cache[e["pitch"]]
-        ours = _render(track808["notes"], sample_808, n, bps, True)
+        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "linear")
         out["808_track_db"] = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
     out["stems_track_db"] = -headroom_db
     return out
