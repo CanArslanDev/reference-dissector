@@ -6,7 +6,7 @@ import pytest
 from conftest import burst
 
 from refdissect import layers
-from refdissect.audio import SR, transpose
+from refdissect.audio import PRE, SR, transpose
 from refdissect.detect import MAX_MS, Template, detect
 from refdissect.hits import Group, template
 
@@ -375,3 +375,29 @@ def test_silence_and_a_lone_template(sounds):
     assert layers.explain(x, [], {}, {}).events == {}
     events, times = explain(x, [snare]), [t for _, t, _ in hits]
     assert found(events, "snare", times).all() and extra(events, "snare", times) == 0
+
+
+def test_hits_carry_where_their_sound_starts(sounds):
+    """Each hit carries t_attack: its window start plus the template's
+    attack_s, and a pitched copy's that much sooner as Simpler plays it
+    faster. Its t (PRE after the window start) puts a hat 4 semitones up
+    1 ms late; its t_attack is on the hat."""
+    sounds = {**sounds, **{f"hat{st:+d}": transpose(sounds["hat"], st) for st in range(1, 5)}}
+    hits = []
+    for b in range(12):
+        o = 0.05 + b * 16 * STEP
+        hits += [("kick", o, 0.9), ("snare", o + 4 * STEP, 0.8), ("kick", o + 8 * STEP, 0.9)]
+        hits += [("hat", o + s * STEP, 0.35) for s in range(0, 12, 2)]
+        hits += [(f"hat{1 + i // 2:+d}", o + 12 * STEP + i * STEP / 2, 0.3) for i in range(8)]
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    events = explain(x, templates)
+    for tp in templates:
+        for e in events[tp.name]:
+            start = e["t"] - PRE / SR
+            assert e["t_attack"] == pytest.approx(start + tp.attack_s * 2 ** (-e.get("semitones", 0) / 12), abs=2e-4)
+    up4 = np.array([t for n, t, _ in hits if n == "hat+4"])
+    late = [(e["t"] - up4[np.argmin(np.abs(up4 - e["t"]))], e["t_attack"] - up4[np.argmin(np.abs(up4 - e["t"]))])
+            for e in events["hat"] if e.get("semitones") == 4]
+    t_err, attack_err = np.abs(np.array(late)).T
+    assert len(late) >= 20 and np.median(t_err) > 0.0008 and np.median(attack_err) < 0.0003
