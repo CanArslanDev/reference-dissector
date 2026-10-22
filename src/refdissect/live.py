@@ -237,11 +237,15 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     A detected sound gets a Drum Rack pad when it was detected often and
     cleanly and the library has something close (NCC >= min_ncc), or when
     it is a kick or snare (the backbone, played with the closest sound even
-    if far). A sound found twice (same_as) shares the first one's pad. The
-    pad plays the top match at its pitch: Transpose in whole semitones and
-    Detune in whole cents (pad_pitch), as Live keeps them. A match's layers
-    (matches.json) are not played yet. With melodic (melodic.json), each
-    tonal stem's notes get a MIDI track."""
+    if far). A sound found twice (same_as) shares the first one's pad; the
+    same file at another pitch plays on a pad of its own, transposed so far
+    (_pitched_pads: discover() finds a pitched copy as a template too, and
+    producer-2's hat 3 semitones down had played at the hat's pitch, its
+    own pitched copies 300 cents off). The pad plays the top match at its
+    pitch: Transpose in whole semitones and Detune in whole cents
+    (pad_pitch), as Live keeps them. A match's layers (matches.json) are
+    not played yet. With melodic (melodic.json), each tonal stem's notes get
+    a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -257,8 +261,11 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             continue
         role = m["role"] if m["role"] in PADS else "perc"
         structural = role in ("kick", "snare") and info.get("clean", 1.0) >= 0.7 and info["detected_hits"] >= 16
+        shift = 0  # semitones from the pad's pitch to the template's
         if m.get("same_as") in pad_of:
             note = pad_of[m["same_as"]]
+            if m["top"][0]["path"] == pads[str(note)]["path"]:
+                shift = pad_pitch(m["top"][0])["transpose"] - pads[str(note)]["transpose"]
         elif m["top"][0]["ncc"] >= min_ncc or structural:
             if used[role] >= len(PADS[role]):
                 continue
@@ -271,15 +278,15 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
         hits = analysis["events"][name]
-        notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) for h in hits} - {0})}
+        notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) + shift for h in hits} - {0})}
         for e, v in zip(hits, velocities([h["gain"] for h in hits])):
             st = e.get("semitones", 0)
-            if st not in notes:  # a copy without a free pad is left out, not played unpitched
+            if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
                 continue
             # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
             t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
-            drum_notes.append({"pitch": notes[st], "start_time": round(t * beats_per_second, 4), "duration": 1.0,
-                               "velocity": v})
+            drum_notes.append({"pitch": notes[st + shift], "start_time": round(t * beats_per_second, 4),
+                               "duration": 1.0, "velocity": v})
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
                        "808": plan_808(analysis, synth, stems_dir, beats_per_second)},

@@ -85,6 +85,21 @@ def test_pitched_copies_get_transposed_pads(tmp_path):
     assert {s: v["semitones"] for s, v in est["sounds"].items() if s != "808"} == {"38": -1, "54": 0, "55": 1}
 
 
+def test_the_same_file_at_another_pitch_plays_on_a_pad_of_its_own(tmp_path):
+    """A template found twice (same_as) as the same file 3 semitones lower
+    (producer-2's hat at -3, found as a template of its own) plays on a pad
+    of that file transposed so far, and its pitched copies from there; at
+    the twin's pitch it shared the twin's pad and played 3 semitones high."""
+    analysis, matches, synth = _fixture(tmp_path)
+    matches["sound_2"]["top"] = [{**matches["sound_1"]["top"][0], "semitones": -4.0}]
+    analysis["events"]["sound_2"].append({"t": 3.9, "gain": 0.5, "semitones": 2})
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert pads["38"]["transpose"] == -1 and (pads["54"]["transpose"], pads["55"]["transpose"]) == (-4, -2)
+    notes = plan["tracks"]["drums"]["notes"]
+    assert [sum(n["pitch"] == p for n in notes) for p in (38, 54, 55)] == [8, 8, 1]
+
+
 def test_locators_on_the_bar_lines(tmp_path):
     """Bar 1 starts at the grid's phase (here 1 s = 2 beats), bars of 3 beats in 3/4."""
     analysis, matches, synth = _fixture(tmp_path)
