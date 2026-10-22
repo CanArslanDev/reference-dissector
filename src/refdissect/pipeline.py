@@ -259,7 +259,7 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     if abs(apart) <= 2 or method == "qifft_tail":
         pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"
     else:
-        pitch, source = f1, "qifft" if method else "tuning"
+        pitch, source = f1, method or "tuning"
     shot = one_shot(params, pitch)
     name = "808 (synth).wav"
     write(work / name, shot, peak=None)

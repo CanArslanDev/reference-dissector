@@ -209,22 +209,6 @@ def pitch_offset(midi: list[float] | np.ndarray) -> tuple[float, float]:
     return round(float(np.angle(z) / (2 * np.pi)), 3), round(float(abs(z)), 3)
 
 
-def notes_808(bass: np.ndarray, tuning: float = 0.0, drums: np.ndarray | None = None) -> list[dict]:
-    """808 notes from the bass stem (and the drum stem, whose kicks mark
-    onsets): bass808.transcribe's notes as analysis.json's notes_808 (t,
-    t_attack, end, pitch, midi_float, midi_settled, cents, slide, peak).
-    The pitch is the written note under the 808's own tuning, which the
-    transcription measures; `tuning` (the track's) is kept for callers and
-    no longer used.
-
-    Before bass808, notes came from librosa onsets (delta 0.05) and a pYIN
-    median over 60-450 ms: on the calibration stems 1,413 onsets for 336
-    notes, every note under 140 ms dropped, and pitches read 14-27 cents
-    sharp under 50 Hz (+33 cents on PIRAMIT, whose 808 sits at +11.7)."""
-    from .bass808 import project, transcribe
-    return project(transcribe(bass, drums))
-
-
 def isolated(notes: list[dict], pitch: int | None = None, ring_s: float = 0.6) -> list[dict]:
     """Notes of one pitch (default: the most common) that ring at least ring_s
     before the next note: what the 808 sounds like on its own."""
