@@ -6,7 +6,7 @@ import pytest
 from conftest import burst
 
 from refdissect import layers
-from refdissect.audio import PRE, SR, fit, transpose
+from refdissect.audio import PRE, SR, fit, samples, transpose
 from refdissect.detect import MAX_MS, Template, detect
 from refdissect.hits import Group, template
 
@@ -424,3 +424,25 @@ def test_a_residual_template_keeps_its_own_hits(sounds):
         assert not [e for e in got.events["mixed"] if e["source"] == "layer" or e.get("semitones")], kind
         assert "mixed" not in got.info["purified"].get("hat", {}), kind
         assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0, kind
+
+
+def test_a_held_sound_sits_where_its_own_band_puts_it():
+    """Where a held template sits is read in its own band. This snare has
+    the hat at 2.6 ms, and at 23.8 ms a top end of its own over a body like
+    the hat's low part: read over all bands, it held the hat there (as
+    tempo95-1's snare did), and the hats found under the snares came 20.5
+    ms late."""
+    rng = np.random.default_rng(0)
+    n = samples(40)
+    decay = np.exp(-np.arange(n) / samples(10))
+    hat = np.zeros((3, n))
+    hat[2], hat[1] = rng.standard_normal(n) * decay, rng.standard_normal(n) * decay
+    top = rng.standard_normal(n) * decay
+    snare = 0.8 * rng.standard_normal((3, samples(120)))
+    snare[2] = 0.0
+    early, late = samples(2.6), samples(23.8)
+    snare[2, early:early + n] += hat[2]
+    snare[2, late:late + n] += 0.6 * hat[2] + 0.8 * top
+    snare[1, late:late + n] += 2.0 * hat[1]
+    held = layers._held([snare, hat], [samples(60), n], 0, [1], [1, 2], [16, 100])
+    assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(early, abs=samples(0.5))
