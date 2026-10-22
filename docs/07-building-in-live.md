@@ -33,7 +33,7 @@ Also set:
 ## What the build sends
 
 `live.build_spec(plan)` is the whole spec of one `build_tracks` call:
-- **808**: `{"sample": "<song> 808 (synth).wav", "warping": false}`. Its settings come from `live.simpler_808`: `"Volume": "0.0 dB"`, `"Transpose"` and `"Detune"` as numbers, and with Glide `"Glide Mode": "Glide"` and `"Glide Time": "<ms> ms"`. The one-shot is first copied into the User Library (`Samples/AbletonMCP Generated/`), named after the song.
+- **808**: `{"sample": "<song> 808 (synth) <digest>.wav", "warping": false}`. Its settings come from `live.simpler_808`: `"Volume": "0.0 dB"`, `"Transpose"` and `"Detune"` as numbers, and with Glide `"Glide Mode": "Glide"` and `"Glide Time": "<ms> ms"`. The one-shot is first copied into the User Library (`Samples/AbletonMCP Generated/`), named after the song and its content: `<digest>` is the first 8 hex digits of the file's SHA-1 (`live.sample_808`). The build refuses a one-shot that changed after the plan named it.
 - **Each pad**: `{"sample": <file name>, "warping": false, "settings": {"Volume": "0.0 dB", "Transpose": …, "Detune": …}}`.
 - **Melodic tracks**: `"instrument": "Drift"`, muted, with their notes.
 - **Stems**: audio tracks with one clip each, warping off.
@@ -109,7 +109,7 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 - **Velocity.** The plan's levels and its render take velocity as a linear level (v/127): 0 dB at velocity 127, −11.2 dB at 35. By the law above, a browser-loaded pad plays +10.2 dB and −6.4 dB over its Volume. The plan's drum velocities run from 35 to 127, so in Live its loudest hits would sit about 10 dB over the plan's estimate and its softest about 5 dB. Its 808 notes run from velocity 70 to 127, around 115: about +8 dB at 45 % (+6.2 at 35 %), where the plan assumes −0.9 dB. These numbers come from the law; no build has been captured.
 - **Which "Vol < Vel" the 808 gets** (a track's Simpler loaded through the browser) was not measured.
 - **Snap.** The build leaves it on, so every pad and the one-shot would end 10–30 ms early.
-- **The one-shot's name.** The build names the 808 file after the song, so a rebuild in a Live that loaded the old file may play the old one-shot.
+- **The one-shot's name.** Named after the song alone, a one-shot fitted again reached the User Library under the name Live had loaded, so a rebuild in that Live could play the old one-shot. Its name now carries its content's digest, so a changed one-shot is a new file to Live (not checked in Live).
 
 ## Not verified in Live
 

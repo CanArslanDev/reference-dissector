@@ -19,7 +19,10 @@ docs/07-building-in-live.md):
   voices after build_tracks (the battery set each of them this way); a
   built 808 has not been captured in Live yet.
 - A new file in the User Library shows up in Live's browser after a few
-  seconds; samples load onto Drum Rack pads through the browser.
+  seconds; samples load onto Drum Rack pads through the browser. A file
+  loaded through the browser keeps playing what Live loaded under its name
+  after it is overwritten on disk (Live 12.4.6), so the 808's one-shot is
+  named after its content (sample_808).
 - Reference stems go in as Arrangement audio clips with warping off, so they
   play at their own speed and line up with notes placed at their seconds,
   once their start (moved to the first transient by Live's warp analysis)
@@ -30,6 +33,7 @@ docs/07-building-in-live.md):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -102,6 +106,25 @@ def tune_808(own_midi: float, cents: float) -> tuple[int, int]:
     exact = 60 - own_midi + cents / 100
     transpose = int(np.floor(exact + 0.5))
     return transpose, int(np.floor(100 * (exact - transpose) + 0.5))
+
+
+def one_shot_digest(path: str | Path) -> str:
+    """The first 8 hex digits of a file's SHA-1."""
+    return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:8]
+
+
+def sample_808(song: str, synth: dict) -> str:
+    """The one-shot's file name in the User Library: the song's name, the
+    one-shot's, and its content's digest. Live 12.4.6 keeps playing a
+    sample loaded through the browser under a name after the file is
+    overwritten on disk (ableton-live-mcp's battery, 2026-10-19), so a
+    one-shot fitted again gets a name of its own. Without a readable file,
+    the names alone."""
+    name = Path(synth["file_name"])
+    try:
+        return f"{song} {name.stem} {one_shot_digest(synth['file'])}{name.suffix}"
+    except OSError:
+        return f"{song} {name.name}"
 
 
 def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | None:
@@ -184,9 +207,9 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
         heard = None if shot is None else heard_808(notes, shot, semis + detune / 100 - 60)
         if heard is not None:  # sound as the notes were heard, not only settle where they settled
             semis, detune = tune_808(own, tuning + heard)
-        # named after the song: the User Library keeps one file per name
+        # named after the song and the one-shot's content: the User Library keeps one file per name
         song = Path(stems_dir).resolve().parent.name
-        track.update(sample=f"{song} {synth['file_name']}", sample_path=synth["file"], transpose=semis,
+        track.update(sample=sample_808(song, synth), sample_path=synth["file"], transpose=semis,
                      detune_cents=detune, root_midi=root, cents=round(100 * (own - root), 1),
                      tuning_cents=round(tuning, 1), heard_cents=None if heard is None else round(heard, 1))
         shift0 = semis + detune / 100 - 60
@@ -462,7 +485,11 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
                 log=print) -> dict:
     """Build the plan in the open Live set with ableton-live-mcp's build_tracks
     (one call for every track, device, setting, clip and note). Refuses unless
-    every track in the set is empty; the set's empty tracks are left as they are."""
+    every track in the set is empty; the set's empty tracks are left as they are.
+    Refuses an 808 one-shot whose content is not the one the plan named
+    (sample_808): fit-808 ran again after plan, and Live, having loaded
+    that name before, could play the old one-shot; so would the plan's
+    Transpose and Detune, made for the old one."""
     import shutil
 
     try:
@@ -479,13 +506,16 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
             raise RuntimeError(f"{tool_name}: {text}")
         return text
 
+    t808 = plan["tracks"]["808"]
+    if "sample_path" in t808 and one_shot_digest(t808["sample_path"]) not in t808["sample"]:
+        raise RuntimeError(f"{t808['sample_path']} changed after the plan named it {t808['sample']!r}: "
+                           "run refdissect plan again")
     overview = json.loads(await call("get_session_overview"))
     busy = [t["name"] for t in overview["tracks"]
             if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
     if busy:
         raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
     await call("set_song_properties", tempo=plan["tempo"], loop=False)
-    t808 = plan["tracks"]["808"]
     if "sample_path" in t808:  # Live's browser lists it a few seconds after it lands in the User Library
         target = Path(user_library).expanduser() / GENERATED / t808["sample"]
         target.parent.mkdir(parents=True, exist_ok=True)
