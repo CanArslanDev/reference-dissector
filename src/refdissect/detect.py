@@ -28,14 +28,13 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
-import librosa
 import numpy as np
 from scipy.signal import find_peaks
 
 from . import layers
 from .audio import PRE, SR, band, samples
 from .grid import Grid
-from .hits import RISE, Group, aligned_template, group, merge, onsets, rise, starts, strength_peaks
+from .hits import RISE, Group, aligned_template, group, merge, rise, starts, strength_peaks
 from .xcorr import ncc, sliding_ncc
 
 CLUSTER_MS = {"kick": 80, "snare": 60, "hat": 40, "low": 80}
@@ -645,48 +644,6 @@ def pitch_offset(midi: list[float] | np.ndarray) -> tuple[float, float]:
         return 0.0, 0.0
     z = np.mean(np.exp(2j * np.pi * (m - np.round(m))))
     return round(float(np.angle(z) / (2 * np.pi)), 3), round(float(abs(z)), 3)
-
-
-def notes_808(bass: np.ndarray, tuning: float, fade_db: float = -35.0, own_tuning: bool = True,
-              min_agreement: float = 0.5) -> list[dict]:
-    """808 notes from the bass stem: onset, end (where it falls fade_db below
-    its peak, or the next note), pitch rounded after removing a tuning offset,
-    and the pitch where it ends (a slide when they differ).
-
-    The offset is the 808's own when its notes agree on one (own_tuning, at
-    least min_agreement): an 808 sample is often detuned on its own. On
-    PIRAMIT the melodic stems sit at A440 (-1..+3 cents by spectral peaks and by
-    pyin) while its 808 notes sit at +33 cents. Otherwise `tuning` (the
-    track's) is used."""
-    lo = band(bass, "808")
-    on = onsets(lo, delta=0.05)
-    w = samples(25)
-    env = np.sqrt(np.convolve(lo ** 2, np.ones(w) / w, mode="same"))
-    notes = []
-    for k, s in enumerate(on):
-        nxt = on[k + 1] if k + 1 < len(on) else len(lo)
-        a, b = s + samples(60), min(s + samples(450), nxt - samples(20))
-        if b - a < samples(60):
-            continue
-        f0, voiced, _ = librosa.pyin(lo[a:b], fmin=25, fmax=160, sr=SR, frame_length=4096, hop_length=512)
-        f = f0[voiced] if np.any(voiced) else np.array([])
-        if not len(f):
-            continue
-        midi = float(librosa.hz_to_midi(np.median(f)))
-        tail = f[-3:] if len(f) >= 3 else f
-        peak = float(env[s:s + samples(200)].max())
-        seg = env[s:nxt]
-        below = np.where(seg[samples(100):] < peak * 10 ** (fade_db / 20))[0]
-        end = s + samples(100) + int(below[0]) if len(below) else nxt
-        notes.append({"t": round(s / SR, 4), "end": round(min(end, nxt) / SR, 4),
-                      "midi_float": round(midi, 2),
-                      "slide": round(float(librosa.hz_to_midi(np.median(tail))) - midi, 1),
-                      "peak": round(peak, 5)})
-    offset, agreement = pitch_offset([n["midi_float"] for n in notes])
-    use = offset if own_tuning and agreement >= min_agreement else tuning
-    for n in notes:
-        n["pitch"] = int(round(n["midi_float"] - use))
-    return notes
 
 
 def isolated(notes: list[dict], pitch: int | None = None, ring_s: float = 0.6) -> list[dict]:

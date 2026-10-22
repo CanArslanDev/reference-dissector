@@ -65,8 +65,10 @@ def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarra
 
 
 def laid_out(p: Params, length: int) -> np.ndarray:
-    """The voice positioned like a template (onset PRE in)."""
-    return np.r_[np.zeros(PRE, np.float32), voice(p, (length - PRE) / SR)][:length]
+    """The voice positioned like a template (onset PRE in), exactly length
+    samples (int(seconds * SR) can lose one to rounding)."""
+    y = np.r_[np.zeros(PRE, np.float32), voice(p, (length - PRE + 1) / SR)][:length]
+    return np.pad(y, (0, length - len(y)))
 
 
 def compare(reference: np.ndarray, x: np.ndarray, f1: float) -> dict:

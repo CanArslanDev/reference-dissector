@@ -23,12 +23,18 @@ check:
   sounding hits of the group's other pads;
 - the 808 Simpler plays its one-shot per note, transposed by
   (pitch - 60) + transpose + detune_cents / 100 semitones (Simpler plays a
-  sample at its own pitch on C3; with the build's Transpose 60 - root_midi
-  that is pitch - root_midi) and cut at the note end (Classic mode,
-  cut_808=True);
+  sample at its own pitch on C3; with live.tune_808's Transpose and Detune
+  a note sounds at its pitch plus the 808's tuning) and cut at the note end
+  (Classic mode, cut_808=True);
+- with Glide on (the track's voices 1, glide_mode "Glide", glide_time_ms),
+  a note that starts while the one before is held does not start the
+  one-shot again: the voice slides to the new pitch, linearly in semitones
+  over glide_time_ms, and stops at the last note's end (chains_808; measured
+  in Live 12.4.6 on a 1 kHz sine: overlapping notes only, exactly the Glide
+  Time, for 2 to 12 semitones);
 - every cut is a fade_ms [5 ms] linear release that starts at the cut;
-- no effects and no glides; the reference stems Live plays beside these are
-  the reference's own and are not rendered.
+- no effects; the reference stems Live plays beside these are the
+  reference's own and are not rendered.
 
 live.estimate_levels makes the same assumptions for its level estimate
 (velocity v/127, One-Shot pads, the 808 per note cut at its end) except two
@@ -81,10 +87,60 @@ def settings_808(track: dict) -> dict:
 def pitch_808(s: dict, pitch: int) -> tuple[float, float]:
     """(semitones the one-shot is played at, sounding MIDI pitch) of a note:
     shift = (pitch - 60) + transpose + detune_cents/100, sounding at
-    root_midi + cents/100 + shift. With the build's Transpose 60 - root_midi
-    that is pitch + cents/100."""
+    root_midi + cents/100 + shift. With live.tune_808's Transpose and Detune
+    that is pitch + the 808's tuning (and heard_cents)."""
     shift = pitch - 60 + s["transpose"] + s["detune_cents"] / 100
     return shift, s["root_midi"] + s["cents"] / 100 + shift
+
+
+def glide_s(track: dict) -> float:
+    """The 808 track's Glide Time (s) when it glides (one voice, Glide Mode
+    "Glide"), else 0."""
+    if track.get("voices") == 1 and track.get("glide_mode") == "Glide":
+        return float(track.get("glide_time_ms") or 0.0) / 1000
+    return 0.0
+
+
+def chains_808(track: dict) -> list[list[dict]]:
+    """The 808's notes as one voice plays them: with Glide on, a note that
+    starts while the one before is held joins its chain (it slides there);
+    every other note starts a chain of its own."""
+    gliding = glide_s(track) > 0
+    chains: list[list[dict]] = []
+    for n in sorted(track.get("notes") or [], key=lambda n: n["start_time"]):
+        last = chains[-1][-1] if chains else None
+        if gliding and last is not None and n["start_time"] < last["start_time"] + last["duration"] - 1e-9:
+            chains[-1].append(n)
+        else:
+            chains.append([n])
+    return chains
+
+
+def chain_semitones(chain: list[dict], s: dict, bps: float, glide: float) -> np.ndarray:
+    """Per sample, from the chain's first note to its last note's end, the
+    semitones the one-shot plays at (pitch_808's shift): each later note's
+    shift reached linearly over `glide` seconds from where the voice was."""
+    a0 = chain[0]["start_time"] / bps
+    end = (chain[-1]["start_time"] + chain[-1]["duration"]) / bps
+    semis = np.full(max(1, int(round((end - a0) * SR))), pitch_808(s, chain[0]["pitch"])[0], dtype=np.float64)
+    ramp = max(1, int(round(glide * SR)))
+    for n in chain[1:]:
+        o = int(round((n["start_time"] / bps - a0) * SR))
+        if 0 < o < len(semis):
+            here, to = semis[o - 1], pitch_808(s, n["pitch"])[0]
+            semis[o:] = here + (to - here) * np.minimum(np.arange(1, len(semis) - o + 1) / ramp, 1.0)
+    return semis
+
+
+def read_at(semis: np.ndarray) -> np.ndarray:
+    """Where a sampler reads its sample (samples) at each output sample when
+    it plays it `semis` higher per output sample: pitch and speed together."""
+    return np.r_[0.0, np.cumsum(2 ** (semis[:-1] / 12))]
+
+
+def varispeed(x: np.ndarray, semis: np.ndarray) -> np.ndarray:
+    """x read at a rate that follows `semis` per output sample (read_at)."""
+    return np.interp(read_at(semis), np.arange(len(x)), x, right=0.0).astype(np.float32)
 
 
 def as_played(x: np.ndarray, start_s: float, semitones: float) -> np.ndarray:
@@ -212,24 +268,31 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
         except (OSError, RuntimeError):
             missing.append(str(t808["sample_path"]))
         else:
-            _write(out / "808.wav", _render_808(t808, shot, n, bps, fade, cut_808,
+            _write(out / "808.wav", render_808(t808, shot, n, bps, fade, cut_808,
                                                 10 ** (manifest["faders_db"]["808"] / 20), velocity_curve))
             manifest["tracks"]["808"] = "808.wav"
     (out / "render.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
 
 
-def _render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut: bool, gain: float,
-                velocity_curve: str | Callable) -> np.ndarray:
+def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut: bool, gain: float,
+               velocity_curve: str | Callable) -> np.ndarray:
+    """The 808 track (n samples, at `gain`): one voice per chain (chains_808), each
+    cut `fade` samples after its last note's end when cut."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)
     cache: dict[float, np.ndarray] = {}
     g = gain * 10 ** (s["volume_db"] / 20)
-    for note in track["notes"]:
-        shift, _ = pitch_808(s, note["pitch"])
-        if shift not in cache:
-            cache[shift] = as_played(shot, s["start_s"], shift)
-        x = _cut(cache[shift], int(round(note["duration"] / bps * SR)), fade) if cut else cache[shift]
-        _place(out, x, int(round(note["start_time"] / bps * SR)),
-               g * velocity_gain(note["velocity"], s["velocity_curve"] or velocity_curve))
+    for chain in chains_808(track):
+        first = chain[0]
+        if len(chain) == 1:
+            shift, _ = pitch_808(s, first["pitch"])
+            if shift not in cache:
+                cache[shift] = as_played(shot, s["start_s"], shift)
+            x = cache[shift]
+        else:  # the voice slides on: one sample read at the chain's rates, the first note's velocity
+            x = varispeed(shot[int(round(s["start_s"] * SR)):], chain_semitones(chain, s, bps, glide_s(track)))
+        length = int(round((chain[-1]["start_time"] + chain[-1]["duration"] - first["start_time"]) / bps * SR))
+        _place(out, _cut(x, length, fade) if cut else x, int(round(first["start_time"] / bps * SR)),
+               g * velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve))
     return out

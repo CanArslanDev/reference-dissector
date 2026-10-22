@@ -19,7 +19,7 @@ This project analyses commercial recordings and uses sample libraries. What it p
 
 - **The songs and their stems.**
 - **The templates:** averaged hits cut from the stems, as `.npy` and `.wav`. They are close copies of the song's sounds, so they are for **personal study only**. Do not publish them, and do not use them in work you release.
-- **Note-level transcriptions** (`analysis.json` events, `plan.json`, `midi/`). A transcription of a song's drum pattern and bassline is a derivative of the composition.
+- **Note-level transcriptions** (`analysis.json` events, `bass808.json`, `melodic.json`, `plan.json`, `midi/`). A transcription of a song's drum pattern and bassline is a derivative of the composition.
 - **Your library:** inventory, index (`library.npz` holds audio), and file and kit names. `scripts/export_results.py` replaces names from a personal library with role + hash. Ableton's Core Library keeps its names.
 - **The synthesized 808 one-shot.** It is ours, but fitted to a recording; the parameters are published, and the sound can be re-rendered from them.
 
