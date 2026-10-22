@@ -322,7 +322,8 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
 def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int], rows: list[int],
           hits: list[int]) -> list[tuple[int, float, int, float]]:
     """The templates s holds, (h, c, lag, share) each: where h sits (lag),
-    read in h's own band (rows[h]); h's least-squares coefficient c there
+    of where it fits s best in its own band (rows[h]) and over all bands,
+    the one nearer s's start; h's least-squares coefficient c there
     within HOLDS[0] (an accented hat under every snare is 1.4 times the
     average hat) and the share of s over h's span it explains within
     HOLDS[1] (a near duplicate explains far more), both over all bands, and
@@ -340,11 +341,13 @@ def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int], rows:
     that s holds within NEAR_MS, averaged from fewer hits (hits), is a
     variant of s's sound, not a layer: on tempo160-1 the main hat held a
     second hat-band template at 0.4 ms, which then got 37 hits under the
-    hats, 33 of them hats the main template had already. Read over all
-    bands, the lag followed a snare's body: on three seed-1 beats the snare
-    held the hat 21 ms after the hat it plays with (tempo95-1: 23.8 ms over
-    all bands, 2.6 ms in the hat band), and the hats found under the snares
-    came 20.5 ms late."""
+    hats, 33 of them hats the main template had already. Over all bands,
+    a snare's body put the hat 21 ms after the hat it plays with on three
+    seed-1 beats (tempo95-1: 23.8 ms, 2.6 ms in the hat band), and the hats
+    found under the snares came 20.5 ms late; in the hat band alone, a
+    snare's own top 28 ms on beat the hat under it on two others
+    (producer-1: 28.7 ms, 2.4 over all bands), and 41 hats under snares
+    were lost."""
     rest = full[s].astype(np.float64)
     lags = (samples(LAG_MS[0]), samples(LAG_MS[1]))
     out: list[tuple[int, float, int, float]] = []
@@ -353,7 +356,7 @@ def _held(full: list[np.ndarray], n: list[int], s: int, others: list[int], rows:
         found = []
         for h in others:
             d, r = full[h][:, :n[h]].astype(np.float64), rows[h]
-            _, _, lag = containment(rest[r:r + 1], d[r:r + 1], lags)
+            lag = min(containment(rest[r:r + 1], d[r:r + 1], lags)[2], containment(rest, d, lags)[2], key=abs)
             share, c, _ = containment(rest, d, (lag, lag))
             if r == rows[s] and abs(lag) <= samples(NEAR_MS) and hits[s] > hits[h]:
                 continue
