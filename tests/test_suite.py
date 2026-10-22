@@ -237,6 +237,18 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     assert suite.reuse_problems(beat, "full", "htdemucs", ("plan", "score")) == []
 
 
+def test_a_reused_step_that_reads_a_rerun_one_is_stale():
+    """analyze run again, melodic and match reused: both read analysis.json
+    (the chords' bass, the drum templates), so their outputs are stale; the
+    run warns and the report names them."""
+    assert suite.stale_steps(("analyze", "fit-808", "plan", "score"), "m1") == ["melodic", "match"]
+    assert suite.stale_steps(("plan", "score"), "m1") == []
+    assert suite.stale_steps(("analyze", "fit-808", "plan", "score"), None) == []
+    agg = {"steps": [dict.fromkeys(suite.STEPS, "run") | {"melodic": "reused_stale", "match": "reused_stale"}],
+           "reuse": ["m1"]}
+    assert suite._reused(agg) == "; melodic, match reused from m1 (stale: melodic, match read outputs this run rewrote)"
+
+
 def test_copied_outputs_point_into_their_new_folder(tmp_path):
     """The one-shot fit-808 writes is named by path in synth808.json and
     plan.json: copied, both name the copy; a folder whose name starts like
