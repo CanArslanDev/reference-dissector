@@ -50,8 +50,9 @@ The work started from one question: *can an AI that cannot hear tell whether the
 
 - **The plan trails the analysis**: a template gets a pad only from 12 hits on, so open hats score 0.979 in the analysis and 0.043 in the plan.
 - **htdemucs stays the default.** htdemucs_ft's drums are better, but its 808 notes (bass_low 0.949 → 0.338) and its snares (0.961 → 0.891) are worse.
+- **Plan levels follow Live 12.4.6's measured velocity law**, with "Vol < Vel" set to 35 % on every Simpler: 3.7 dB (3.2 dB on htdemucs_ft), as under the linear velocities they replaced (tags m2g-vel, m2g-ft-vel). Built with those linear velocities, the same plans would have played 9.3 dB from a perfect kit in Live (computed from the law).
 - **Not verified in Live:** no replica-mode plan has been built in Live and recorded yet.
-- The scores: `results/calibration/suite-base-htdemucs.json`, `suite-m2g.json` and `suite-m2g-ft.json`.
+- The scores: `results/calibration/suite-base-htdemucs.json`, `suite-m2g.json` and `suite-m2g-ft.json`; the plan levels under Live's velocity law, `suite-m2g-vel.json` and `suite-m2g-ft-vel.json`.
 
 **Calibration v1**: 6 synthetic beats built from known library samples, mastered loud, passed through mp3 and Demucs.
 
@@ -89,7 +90,7 @@ song.mp3 ──Demucs──▶ stems ──▶ grid + tuning ──▶ drum temp
   - A sine + glide + envelope + tanh-drive voice is fitted to the template's notes by differential evolution. It is scored on waveform, harmonics and envelope, not on correlation alone.
   - Simpler's Transpose and Detune put the one-shot on the written notes.
 - **Melodic layers**: Basic Pitch on each tonal stem, moved onto A440 by its tuning. Chords come from its note posteriorgrams, with the 808 as their bass. The plan carries them as muted MIDI tracks.
-- **Live**: [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp)'s `build_tracks` builds the whole set from one spec. Our tracks are matched to the stems' levels and the stems are muted for A/B. The replica-mode settings (Detune per pad, the 808's Detune and Glide) are not verified in Live yet.
+- **Live**: [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp)'s `build_tracks` builds the whole set from one spec. Our tracks are matched to the stems' levels, with velocities by Live's measured law, and the stems are muted for A/B. The replica-mode settings (Detune per pad, the 808's Detune and Glide, "Vol < Vel") are not verified in Live yet.
 - **Measuring**: `refdissect suite` builds synthetic beats with every answer kept, runs the pipeline on them and scores the analysis and the plan against the answer.
 
 Each step is described in [docs/01-pipeline.md](docs/01-pipeline.md), replica mode in [docs/12-replica-mode.md](docs/12-replica-mode.md).
@@ -214,7 +215,7 @@ tests/           synthetic drums, 808 lines and short scenario beats: lag conven
 This is a working pipeline with measured limits, not a finished product:
 - **Measured on synthetic beats.** On the calibration-v2 suite, drum hits and 808 onsets score F1@20 0.886 in the analysis and 0.667 in the plan. A song has no truth to score against.
 - **The plan trails the analysis.** Its 12-hit pad gate leaves open hats at 0.043, and drum notes do not yet take out each pad sample's own attack.
-- **The build in Live is not verified for replica mode.** Detune per pad, the 808's Detune and Glide, and the build as a whole have not been recorded in Live. The plan's levels assume a velocity law that Live 12.4.6 does not follow.
+- **The build in Live is not verified for replica mode.** Detune per pad, the 808's Detune and Glide, and the build as a whole have not been recorded in Live. The plan's velocities follow the law measured in Live 12.4.6, which no build has checked yet.
 - **Melodies are transcribed but not played.** They go to muted placeholder tracks, and the original melodic stems play under the rebuilt beat.
 - **The 808's slides are off by default.** The reader writes no legato notes. The rule this replaced, which called every unattacked pitch move a slide, was right 6 times in 79; the opt-in rule (`slides=True`) made 18 legato notes, 6 of them right, on the beats its thresholds were chosen on.
 

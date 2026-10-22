@@ -71,7 +71,7 @@
 - **Simpler loads at −12 dB.** Set 0 dB, or every level estimate is 12 dB off. "0.0 dB" as text lands on −0.005 dB.
 - **Simpler's root is C3.** Transpose +36 for an 808 whose notes are written at C1 (MIDI 24).
 - **Transpose and Detune keep whole numbers.** 11.99 semitones play as 11; a Detune of 11.5 plays as 11, the text "11.5 ct" as 12 (Live 12.4.6). Write whole semitones and whole cents.
-- **Velocity is not a linear level.** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: velocity 127 plays 7.9 dB (35 %) or 10.2 dB (45 %) over it, and the amount depends on how the Simpler was made. The plan still assumes v/127.
+- **Velocity is not a linear level.** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: velocity 127 plays 7.9 dB (35 %) or 10.2 dB (45 %) over it, and the amount depends on how the Simpler was made. Set "Vol < Vel" on every Simpler and invert the law: taken as v/127, m2g's plans would have played 9.3 dB from a perfect kit, against 3.7 dB (computed from the law).
 - **Snap cuts the end.** On by default, it stops every sample 10–30 ms early.
 - **The browser keeps an old file.** Loaded by a name Live has loaded before, a pad plays the old content after the file is overwritten; a file loaded by path is read again. Give changed content a new name: the 808 one-shot's carries its digest.
 - **New files reach the browser after a few seconds;** retry, do not fail.
