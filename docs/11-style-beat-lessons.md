@@ -59,6 +59,14 @@ About 7.7 hours of active work (228 minutes of tool time, the rest writing and d
 ## Smaller findings
 
 - Basic Pitch returns no notes at all when its minimum frequency is under its lowest note, A0 (27.5 Hz): 25 Hz gave 0 notes on a bass stem, 30 Hz gave 232. ableton-live-mcp now raises the floor.
-- Basic Pitch's posteriorgram frames drift 0.8 s by the end of a song if indexed as t × 22050 / 256 ([`basicpitch`](../src/refdissect/basicpitch.py)).
+- Basic Pitch's posteriorgram frames drift 0.8 s by the end of a song if indexed as t × 22050 / 256 ([`basicpitch`](../src/refdissect/basicpitch.py)). Read on Basic Pitch's own frame times, its onset posterior at its own note starts on this song was 0.45–0.47; read the naive way, 0.29 falling to 0.21. Those frame times are still up to 18 ms off inside each block of 142 frames, so notes are now timed block by block.
 - Recordings clip at 0 dBFS without a warning (Simpler at 0 dB is +12 dB over its default); `capture_stems` now reports clipped stems.
 - `grid.tuning` was wrong by up to 60 cents (see [01](01-pipeline.md#tuning-gridtuning)); the PIRAMIT case study is corrected.
+
+## What the song taught replica mode
+
+The `melodic` step and the drum discovery of replica mode ([01](01-pipeline.md)) were checked on this song's stems too. There is no truth for it, so these are counts, not scores:
+- **A stored tuning can be stale.** This song's `analysis.json` predated the stable-peak estimator: +21 to +35 cents where its stems measure −2 to −5. Taking those values out moved in-tune stems off A440, and the other stem kept 165 of its 520 notes. `melodic` now measures each stem's tuning itself.
+- **The 808's range as a floor, by time, not by notes.** Notes under the 808's range are left out of the stems it bleeds into. The highest 808 pitch heard twice put that floor at E3: 266 of the song's 273 808 notes are at or under MIDI 43, but two sit at MIDI 51. The pitch under which the 808 spends 95 % of its time puts the floor at G#2, and the guitar keeps 157 notes instead of 128 (159 with no floor).
+- **A vocal keeps its low notes.** 458 of its 768 notes lay under the first rule's floor; the floor now applies to other, piano and guitar only.
+- **Rare drum templates grow with a song's length.** With 3 hits enough anywhere, the residual pass made 7 templates on this song; with one hit per 16 bars, 5.
