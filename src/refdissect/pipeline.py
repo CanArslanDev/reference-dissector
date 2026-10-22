@@ -266,9 +266,11 @@ def kick_sources(work: Path, analysis: dict, stems: Path, drums: np.ndarray) -> 
 
 def _heard(drums: np.ndarray, sound: np.ndarray, b: str) -> np.ndarray:
     """Where a sound (laid out like a template) plays in the drum stem, in
-    seconds: detect()'s matched filter in band b, with its threshold and
-    minimum gap, built from xcorr and scipy rather than from detect's own
-    helpers, which are not an interface."""
+    seconds: a matched filter in band b at detect's threshold, its peaks
+    MIN_GAP_MS apart, built from xcorr and scipy rather than from detect's
+    own helpers, which are not an interface. detect() starts from the same
+    filter (its candidates 8 ms apart) and then fits each moment with every
+    template (layers.explain); a sound alone is found at the same moments."""
     score, _ = sliding_ncc(drums, sound, b)
     peaks, _ = find_peaks(score, height=det.THRESHOLD[b], distance=samples(det.MIN_GAP_MS[b]))
     return (peaks + PRE) / SR
