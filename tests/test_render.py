@@ -9,7 +9,7 @@ import soundfile as sf
 
 from refdissect.audio import SR, attack_time, samples
 from refdissect.evaluate import SCHEMA, estimate_from_plan, score
-from refdissect.render import render_plan
+from refdissect.render import render_plan, velocity_db
 
 
 def wav(folder, name, x):
@@ -75,9 +75,10 @@ def test_a_choke_group_cuts_the_open_hat(tmp_path):
                     "46")
     assert np.abs(free[int(0.8 * SR):int(0.9 * SR)]).max() > 0.4
     # one pad hit again at 0.5 s: mono leaves only the second hit after the fade, the default sums both
+    # (velocities at unity, "flat", so the samples compare as they are)
     twice = [note(46, 0.0), note(46, 1.0)]
-    mono = rendered(tmp_path / "mono", render_plan(plan(pads, twice), tmp_path / "mono", mono=True), "46")
-    poly = rendered(tmp_path / "poly", render_plan(plan(pads, twice), tmp_path / "poly"), "46")
+    mono = rendered(tmp_path / "mono", render_plan(plan(pads, twice), tmp_path / "mono", "flat", mono=True), "46")
+    poly = rendered(tmp_path / "poly", render_plan(plan(pads, twice), tmp_path / "poly", "flat"), "46")
     hit, x = int(0.5 * SR), noise(1.0)
     after = slice(hit + samples(5) + 1, SR)
     second = x[after.start - hit:SR - hit]
@@ -85,6 +86,13 @@ def test_a_choke_group_cuts_the_open_hat(tmp_path):
 
 
 def test_velocity_law_faders_and_the_drums_sum(kit, tmp_path):
+    """A hit plays at the track fader x the pad's Volume x its velocity's
+    level under Live 12.4.6's law at the pad's "Vol < Vel" (0.35 unless the
+    pad says): velocity 127 7.88 dB over the Volume, 64 0.94 dB under it,
+    and 127 10.16 dB over it at 0.45, as the battery measured (7.8844,
+    -0.9356 and 10.1657 dB). v/127 and a flat law on request."""
+    assert (velocity_db(127), velocity_db(64), velocity_db(127, 0.45)) == pytest.approx(
+        (7.8844, -0.9356, 10.1657), abs=0.002)
     pads = {"36": {"path": wav(tmp_path, "kick.wav", kit["kick"]), "transpose": 0, "role": "kick"},
             "38": {"path": wav(tmp_path, "snare.wav", kit["snare"]), "transpose": 0, "role": "snare",
                    "volume_db": -6.0}}
@@ -92,16 +100,21 @@ def test_velocity_law_faders_and_the_drums_sum(kit, tmp_path):
     p["levels"]["drums_track_db"] = -3.0
     m = render_plan(p, tmp_path / "v")
     kick, snare = rendered(tmp_path / "v", m, "36"), rendered(tmp_path / "v", m, "38")
-    g = 10 ** (-3 / 20)
-    assert np.abs(kick[: SR // 2]).max() == pytest.approx(g, rel=1e-4)
-    assert np.abs(kick[SR: SR + SR // 2]).max() == pytest.approx(g * 64 / 127, rel=1e-4)
-    assert np.abs(snare).max() == pytest.approx(g * 10 ** (-6 / 20), rel=1e-4)
+    g, loud, soft = 10 ** (-3 / 20), 10 ** (velocity_db(127) / 20), 10 ** (velocity_db(64) / 20)
+    assert np.abs(kick[: SR // 2]).max() == pytest.approx(g * loud, rel=1e-4)
+    assert np.abs(kick[SR: SR + SR // 2]).max() == pytest.approx(g * soft, rel=1e-4)
+    assert np.abs(snare).max() == pytest.approx(g * 10 ** (-6 / 20) * loud, rel=1e-4)
     drums = sf.read(tmp_path / "v" / m["drums"], dtype="float32")[0]
     assert np.allclose(drums, kick + snare, atol=1e-6)
     gains = [e["gain"] for e in estimate_from_plan(p)["drums"]]
-    assert gains == pytest.approx([g, g * 10 ** (-6 / 20), g * 64 / 127], rel=1e-4)
+    assert gains == pytest.approx([g * loud, g * 10 ** (-6 / 20) * loud, g * soft], rel=1e-4)
+    linear = render_plan(p, tmp_path / "linear", velocity_curve="linear")
+    assert np.abs(rendered(tmp_path / "linear", linear, "36")[SR:]).max() == pytest.approx(g * 64 / 127, rel=1e-4)
     flat = render_plan(p, tmp_path / "flat", velocity_curve="flat")
     assert np.abs(rendered(tmp_path / "flat", flat, "36")[SR:]).max() == pytest.approx(g, rel=1e-4)
+    pads["36"]["vol_vel"] = 0.45  # a pad loaded through the browser, as Live 12.4.6 leaves it
+    browser = rendered(tmp_path / "45", render_plan(p, tmp_path / "45"), "36")
+    assert np.abs(browser[: SR // 2]).max() == pytest.approx(g * 10 ** (velocity_db(127, 0.45) / 20), rel=1e-4)
 
 
 def test_the_808_plays_each_note_at_its_pitch_and_stops_at_its_end(tmp_path):
@@ -126,7 +139,8 @@ def test_the_808_plays_each_note_at_its_pitch_and_stops_at_its_end(tmp_path):
 
 def test_levels_from_the_render(kit, tmp_path):
     """The truth stem plays the snare at full level; the rebuild plays it at
-    velocity 64: -6.0 dB on every hit, and 0 dB of spread."""
+    velocity 64, which Live 12.4.6 plays 0.94 dB under the pad's Volume at
+    "Vol < Vel" 35 %: -0.94 dB on every hit, and 0 dB of spread."""
     times = [0.5, 1.5, 2.5, 3.5]
     stem = np.zeros(4 * SR, np.float32)
     for t in times:
@@ -142,7 +156,7 @@ def test_levels_from_the_render(kit, tmp_path):
     render_plan(p, tmp_path / "r", n_samples=len(stem))
     s = score(truth, estimate_from_plan(p), tmp_path / "r", truth_dir=tmp_path / "truth")
     level = s["levels"]["sounds"]["snare"]
-    assert level["level_db"] == pytest.approx(20 * np.log10(64 / 127), abs=0.01) and level["spread_p90_db"] < 0.01
+    assert level["level_db"] == pytest.approx(velocity_db(64), abs=0.01) and level["spread_p90_db"] < 0.01
     assert s["drums"]["sounds"]["snare"]["f1_20"] == 1.0 and level["n"] == 4
     json.dumps(s)
     # a stem written halved, as a scenario writes one that would clip, reads the same (+6.02 dB without stems_gain)
@@ -156,7 +170,8 @@ def test_a_kit_at_the_truths_levels_reads_where_the_faders_put_it(kit, tmp_path)
     """The plan's faders match each track to a separated stem, here at half
     the truth's level (Demucs separates the clipped mix): a perfect kit then
     reads -6.02 dB on every sound (kit_db), so the snare played at velocity
-    64 is -5.94 dB re the truth and +0.08 dB re a perfect kit (vs_kit_db)."""
+    64, taken here as a linear level (v/127), is -5.94 dB re the truth and
+    +0.08 dB re a perfect kit (vs_kit_db)."""
     times = [0.5, 1.5, 2.5, 3.5]
     stem = np.zeros(4 * SR, np.float32)
     for t in times:
@@ -170,7 +185,7 @@ def test_a_kit_at_the_truths_levels_reads_where_the_faders_put_it(kit, tmp_path)
              "drums": [{"sound": "snare", "role": "snare", "t": t, "t_attack": t + lead, "gain": 1.0} for t in times]}
     p = plan({"38": {"path": wav(tmp_path, "s.wav", kit["snare"]), "transpose": 0, "role": "snare"}},
              [note(38, 2 * t, 64) for t in times])
-    render_plan(p, tmp_path / "r", n_samples=len(stem))
+    render_plan(p, tmp_path / "r", n_samples=len(stem), velocity_curve="linear")
     reference = {"drums": wav(tmp_path, "separated drums.wav", 0.5 * stem), "bass": None}
     lv = score(truth, estimate_from_plan(p), tmp_path / "r", tmp_path / "truth", reference=reference)["levels"]
     assert list(lv["kit"]) == ["drums"] and lv["kit"]["drums"]["kit_db"] == pytest.approx(-6.02, abs=0.01)

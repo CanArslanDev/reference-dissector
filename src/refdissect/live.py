@@ -29,6 +29,11 @@ docs/07-building-in-live.md):
   is put back at 0.
 - Locators at fractional beats were refused ("Live did not create it");
   whole beats work.
+- Velocity sets a Simpler's level, dB = 0.4 x "Vol < Vel" x (velocity - 70)
+  - 0.096 over its Volume (Live 12.4.6), and "Vol < Vel" starts at 35 % or
+  45 % by how the Simpler was made: the build sets it on every Simpler
+  (render.VOL_VEL), and the plan's velocities follow the law (velocities,
+  velocity_808). A build with it has not been captured in Live yet.
 """
 
 from __future__ import annotations
@@ -42,7 +47,7 @@ import mido
 import numpy as np
 
 from .audio import PRE, SR, attack_time, read, rms_db, transpose, trim_onset
-from .render import glide_s, render_808
+from .render import VOL_VEL, glide_s, pad_settings, render_808, velocity_gain
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -88,12 +93,29 @@ def pad_pitch(best: dict) -> dict:
     return {"transpose": whole, "detune_cents": int(round(best.get("detune_cents", 100 * (st - whole))))}
 
 
-def velocities(gains: list[float], low: int = 35) -> list[int]:
+def velocities(gains: list[float], low: int = 35, vol_vel: float | None = None) -> list[int]:
+    """Velocities for hits of these gains: 127 at their 90th percentile and
+    none under low/127 of it. Without vol_vel a velocity is a linear level
+    (v/127; melodic's notes, for another instrument). With vol_vel,
+    Simpler's "Vol < Vel", a hit plays its gain under Live 12.4.6's law
+    (render.velocity_db): 0.4 x vol_vel dB a velocity step, so a hit at
+    half the gain is velocity 84 at 0.35, where v/127 gave it 64 and Live
+    plays 64 8.8 dB under 127."""
     g = np.asarray(gains, dtype=float)
     if not len(g):
         return []
     ref = np.percentile(g, 90) or 1.0
-    return [int(v) for v in np.clip(np.round(127 * g / ref), low, 127)]
+    if vol_vel is None:
+        return [int(v) for v in np.clip(np.round(127 * g / ref), low, 127)]
+    db = 20 * np.log10(np.clip(g / ref, low / 127, 1.0))
+    return [int(v) for v in np.round(127 + db / (0.4 * vol_vel))]
+
+
+def velocity_808(level: float, vol_vel: float = VOL_VEL) -> int:
+    """An 808 note's velocity for its peak over the line's median peak:
+    115 at the median and 0.4 x vol_vel dB a step from there, as Live
+    12.4.6 plays them (render.velocity_db), within 70-127."""
+    return int(np.clip(round(115 + 20 * np.log10(max(level, 1e-6)) / (0.4 * vol_vel)), 70, 127))
 
 
 def tune_808(own_midi: float, cents: float) -> tuple[int, int]:
@@ -210,7 +232,7 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
         # named after the song and the one-shot's content: the User Library keeps one file per name
         song = Path(stems_dir).resolve().parent.name
         track.update(sample=sample_808(song, synth), sample_path=synth["file"], transpose=semis,
-                     detune_cents=detune, root_midi=root, cents=round(100 * (own - root), 1),
+                     detune_cents=detune, vol_vel=VOL_VEL, root_midi=root, cents=round(100 * (own - root), 1),
                      tuning_cents=round(tuning, 1), heard_cents=None if heard is None else round(heard, 1))
         shift0 = semis + detune / 100 - 60
     leads: dict[float, float] = {}
@@ -231,7 +253,7 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
         start = n["t"] if legato_note or "t_attack" not in n or shot is None else n["t_attack"] - lead(n["pitch"])
         out.append({"pitch": n["pitch"], "start_time": round(max(0.0, start) * beats_per_second, 4),
                     "duration": round(max(0.05, (n["end"] - start) * beats_per_second), 4),
-                    "velocity": int(np.clip(round(115 * n["peak"] / med), 70, 127))})
+                    "velocity": velocity_808(n["peak"] / med)})
         slid.append(legato_note)
         if g:
             slides.append({"start_time": out[-1]["start_time"], "kind": g.get("kind", "legato"),
@@ -266,9 +288,10 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     producer-2's hat 3 semitones down had played at the hat's pitch, its
     own pitched copies 300 cents off). The pad plays the top match at its
     pitch: Transpose in whole semitones and Detune in whole cents
-    (pad_pitch), as Live keeps them. A match's layers (matches.json) are
-    not played yet. With melodic (melodic.json), each tonal stem's notes get
-    a MIDI track."""
+    (pad_pitch), as Live keeps them. Velocities play each hit's gain under
+    Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A match's
+    layers (matches.json) are not played yet. With melodic (melodic.json),
+    each tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -295,14 +318,14 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             note = PADS[role][used[role]]
             used[role] += 1
             best = m["top"][0]
-            pads[str(note)] = {"template": name, "path": best["path"], **pad_pitch(best),
+            pads[str(note)] = {"template": name, "path": best["path"], **pad_pitch(best), "vol_vel": VOL_VEL,
                                "ncc": best["ncc"], "verdict": m["verdict"], "role": role}
         else:
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
         hits = analysis["events"][name]
         notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) + shift for h in hits} - {0})}
-        for e, v in zip(hits, velocities([h["gain"] for h in hits])):
+        for e, v in zip(hits, velocities([h["gain"] for h in hits], vol_vel=VOL_VEL)):
             st = e.get("semitones", 0)
             if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
                 continue
@@ -352,7 +375,7 @@ def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
     return out
 
 
-def _render(notes: list[dict], sample_for, n: int, bps: float, cut: bool) -> np.ndarray:
+def _render(notes: list[dict], sample_for, gain_for, n: int, bps: float, cut: bool) -> np.ndarray:
     out = np.zeros(n, np.float32)
     for e in notes:
         x = sample_for(e)
@@ -363,26 +386,29 @@ def _render(notes: list[dict], sample_for, n: int, bps: float, cut: bool) -> np.
             x = x[: int(e["duration"] / bps * SR)]
         b = min(n, a + len(x))
         if b > a:
-            out[a:b] += x[: b - a] * (e["velocity"] / 127)
+            out[a:b] += x[: b - a] * gain_for(e)
     return out
 
 
 def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     """Track faders (dB) that put our parts at the level of the stems they
-    replace: our parts rendered offline at unity (Simpler at 0 dB, velocity as
-    a linear level; the 808 as render_plan plays it, Transpose, Detune and
-    Glide included, cut without a fade), compared by RMS over the whole
-    track."""
+    replace: our parts rendered offline at unity (Simpler at 0 dB, each
+    velocity at its level under Live's law at the pad's vol_vel, as
+    render_plan plays it; the 808 as render_plan plays it, Transpose,
+    Detune and Glide included, cut without a fade), compared by RMS over
+    the whole track."""
     bps = plan["tempo"] / 60
     n = int(analysis["source"]["duration_s"] * SR)
-    samples_by_pad = {}
+    samples_by_pad, vol_vel = {}, {}
     for note, pad in plan["tracks"]["drums"]["pads"].items():
+        vol_vel[int(note)] = pad_settings(pad)["vol_vel"]
         try:
             samples_by_pad[int(note)] = transpose(trim_onset(read(pad["path"])),
                                                   pad["transpose"] + pad.get("detune_cents", 0) / 100)
         except Exception:
             samples_by_pad[int(note)] = None
-    drums = _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]), n, bps, False)
+    drums = _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]),
+                    lambda e: velocity_gain(e["velocity"], "live", vol_vel[e["pitch"]]), n, bps, False)
     out = {"headroom_db": headroom_db}
     stems = plan["stems"]
     if "drums" in stems:
@@ -390,7 +416,7 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
         out["drums_track_db"] = round(ref - rms_db(drums) - headroom_db, 1)
     track808 = plan["tracks"]["808"]
     if "sample_path" in track808 and "bass" in stems:
-        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "linear")
+        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "live")
         out["808_track_db"] = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
     out["stems_track_db"] = -headroom_db
     return out
@@ -432,11 +458,13 @@ def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
 def simpler_808(t808: dict) -> dict:
     """The 808 Simpler's parameters as build_tracks sets them: Volume 0 dB,
     Transpose and Detune (tune_808: whole semitones and whole cents, which
-    Live 12.4.6 keeps as given), and with Glide on (voices 1) Glide Mode
-    "Glide" and the Glide Time. These are what render_plan and
-    estimate_from_plan assume; voices is a property of the device, not a
-    parameter (build sets it)."""
-    out = {"Volume": "0.0 dB", "Transpose": float(t808["transpose"]), "Detune": float(t808.get("detune_cents", 0))}
+    Live 12.4.6 keeps as given), "Vol < Vel" (vol_vel, the velocity law's
+    amount, a raw 0..1), and with Glide on (voices 1) Glide Mode "Glide"
+    and the Glide Time. These are what render_plan and estimate_from_plan
+    assume; voices is a property of the device, not a parameter (build
+    sets it)."""
+    out = {"Volume": "0.0 dB", "Transpose": float(t808["transpose"]), "Detune": float(t808.get("detune_cents", 0)),
+           "Vol < Vel": float(t808.get("vol_vel", VOL_VEL))}
     if glide_s(t808):
         out |= {"Glide Mode": "Glide", "Glide Time": f"{float(t808['glide_time_ms']):.1f} ms"}
     return out
@@ -448,7 +476,8 @@ def build_spec(plan: dict) -> list[dict]:
     the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers at 0 dB with
     warping off and each sound's transposition (a pad's Transpose and Detune),
-    faders from the plan's levels."""
+    "Vol < Vel" at the plan's vol_vel (VOL_VEL), so velocities play the
+    levels the plan assumes, and faders from the plan's levels."""
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -464,7 +493,8 @@ def build_spec(plan: dict) -> list[dict]:
                  "instrument": {"drum_rack": {
                      str(note): {"sample": Path(pad["path"]).name, "warping": False,
                                  "settings": {"Volume": "0.0 dB", "Transpose": float(pad["transpose"]),
-                                              "Detune": float(pad.get("detune_cents", 0))}}
+                                              "Detune": float(pad.get("detune_cents", 0)),
+                                              "Vol < Vel": float(pad.get("vol_vel", VOL_VEL))}}
                      for note, pad in drums["pads"].items()}},
                  "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
                  "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",

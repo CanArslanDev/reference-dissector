@@ -13,8 +13,10 @@ check:
   [detune_cents 0] semitones the way Simpler does with warping off
   (audio.transpose: pitch and length change together);
 - gain = track fader (build_spec's min(6, levels[...]) dB) x 10^(volume_db/20)
-  [volume_db 0: build_spec sets Simpler to 0 dB] x a velocity law [linear
-  v/127; Simpler's real curve is to be measured in Live];
+  [volume_db 0: build_spec sets Simpler to 0 dB] x the velocity's level
+  ["live": velocity_db, Live 12.4.6's law, at the pad's or the 808's
+  vol_vel, which build_spec sets as Simpler's "Vol < Vel" (VOL_VEL);
+  "linear", v/127, was the assumption before the law was measured];
 - pads are One-Shot [playback_mode "one_shot"]: a note's length does not cut
   the file; "classic" cuts it at the note end. Hits of one pad overlap and sum
   unless mono=True: whether Live's One-Shot retrigger cuts the previous hit is
@@ -37,7 +39,7 @@ check:
   reference's own and are not rendered.
 
 live.estimate_levels makes the same assumptions for its level estimate
-(velocity v/127, One-Shot pads, the 808 per note cut at its end) except two
+(velocity_db, One-Shot pads, the 808 per note cut at its end) except two
 that leave an RMS over a whole track as it is: it trims each pad's lead-in,
 which Live plays (it moves a hit, not its level), and cuts the 808 without a
 fade.
@@ -54,10 +56,14 @@ import soundfile as sf
 
 from .audio import SR, read, samples, transpose
 
+# Simpler's "Vol < Vel" (0..1) the build sets on every pad and on the 808, so that velocity_db holds however
+# the Simpler was made: Live 12.4.6 starts it at 0.35 on a Simpler made with insert_device and at 0.45 on a
+# pad loaded through the browser, ableton-live-mcp 2.2.0's only way to load a pad
+VOL_VEL = 0.35
 PAD = {"start_s": 0.0, "detune_cents": 0.0, "playback_mode": "one_shot", "choke_group": None, "volume_db": 0.0,
-       "velocity_curve": None}
+       "velocity_curve": None, "vol_vel": VOL_VEL}
 TRACK_808 = {"cents": 0.0, "detune_cents": 0.0, "start_s": 0.0, "volume_db": 0.0, "playback_mode": "classic",
-             "velocity_curve": None}
+             "velocity_curve": None, "vol_vel": VOL_VEL}
 
 
 def resolve(path: str | Path, root: str | Path | None = None) -> Path:
@@ -148,10 +154,23 @@ def as_played(x: np.ndarray, start_s: float, semitones: float) -> np.ndarray:
     return transpose(x[int(round(start_s * SR)):], semitones)
 
 
-def velocity_gain(velocity: int, curve: str | Callable = "linear") -> float:
-    """Linear gain of a velocity: "linear" (v/127), "flat" (1), or curve(v)."""
+def velocity_db(velocity: float, vol_vel: float = VOL_VEL) -> float:
+    """A velocity's level over Simpler's Volume (dB), as Live 12.4.6 plays
+    it: 0.4 x vol_vel ("Vol < Vel", 0..1) x (velocity - 70) - 0.096.
+    ableton-live-mcp's battery measured it within 0.002 dB over 6 amounts
+    and 18 velocities (2026-10-19): velocity 127 plays 7.9 dB over the
+    Volume at 0.35 and 10.2 dB at 0.45, velocity 70 at it. Velocity 35
+    plays 12.9 dB under 127 at 0.35, where v/127 put it 11.2 dB under."""
+    return 0.4 * vol_vel * (velocity - 70) - 0.096
+
+
+def velocity_gain(velocity: float, curve: str | Callable = "live", vol_vel: float = VOL_VEL) -> float:
+    """Linear gain of a velocity: "live" (velocity_db at vol_vel), "linear"
+    (v/127), "flat" (1), or curve(v)."""
     if callable(curve):
         return float(curve(velocity))
+    if curve == "live":
+        return 10 ** (velocity_db(velocity, vol_vel) / 20)
     if curve == "linear":
         return velocity / 127
     if curve == "flat":
@@ -218,11 +237,11 @@ def _drum_hits(plan: dict, shots: dict, settings: dict, velocity_curve, faders: 
             stop = min(stop, a + int(round(n["duration"] / bps * SR)))
         curve = s["velocity_curve"] or velocity_curve
         hits.append({"pad": key, "a": a, "stop": stop,
-                     "gain": g_track * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve)})
+                     "gain": g_track * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve, s["vol_vel"])})
     return hits
 
 
-def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable = "linear",
+def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable = "live",
                 root: str | Path | None = None, fade_ms: float = 5.0, cut_808: bool = True, mono: bool = False,
                 faders: bool = True, n_samples: int | None = None) -> dict:
     """pads/<note>.wav, drums.wav (their sum) and 808.wav in out_dir, and
@@ -294,5 +313,5 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut
             x = varispeed(shot[int(round(s["start_s"] * SR)):], chain_semitones(chain, s, bps, glide_s(track)))
         length = int(round((chain[-1]["start_time"] + chain[-1]["duration"] - first["start_time"]) / bps * SR))
         _place(out, _cut(x, length, fade) if cut else x, int(round(first["start_time"] / bps * SR)),
-               g * velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve))
+               g * velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve, s["vol_vel"]))
     return out

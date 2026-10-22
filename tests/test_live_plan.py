@@ -18,6 +18,10 @@ def test_no_overlaps_and_velocities():
     first = next(n for n in out if n["pitch"] == 38 and n["start_time"] == 0.0)
     assert first["duration"] < 0.5
     assert velocities([0.5, 1.0, 1.0]) == [64, 127, 127]
+    # under Live 12.4.6's law at "Vol < Vel" 35 %: half the gain is 6.02 dB down, 43 steps of 0.14 dB; the
+    # floor (35/127 of the 90th percentile) is 11.2 dB down
+    assert velocities([0.5, 1.0, 1.0], vol_vel=0.35) == [84, 127, 127]
+    assert velocities([0.01, 1.0], vol_vel=0.35) == [47, 127]
 
 
 def _fixture(tmp_path):
@@ -151,7 +155,8 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     plan = make_plan(analysis, matches, synth, tmp_path)
     plan["tracks"]["808"]["detune_cents"] = -12
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
-    assert t808["settings"] == {"Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0} and t808["voices"] is None
+    assert t808["settings"] == {"Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0, "Vol < Vel": 0.35}
+    assert t808["voices"] is None
     plan["tracks"]["808"].update(voices=1, glide_mode="Glide", glide_time_ms=60.7)
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
@@ -228,6 +233,33 @@ def test_the_808_one_shot_is_named_by_its_content(tmp_path, monkeypatch):
     assert make_plan(analysis, matches, synth, tmp_path)["tracks"]["808"]["sample"] != first
     with pytest.raises(RuntimeError, match="plan again"):
         asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+
+
+def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
+    """Every Simpler is sent "Vol < Vel" 0.35, and the velocities follow
+    Live 12.4.6's law there: hits at 1, 0.5 and 0.3 of the 90th
+    percentile's gain play 0, -6.02 and -10.46 dB from it (within half a
+    velocity step, 0.07 dB). The faders are worked out under the same law,
+    so the render puts each track on its stem's RMS less the headroom."""
+    from refdissect.audio import rms_db
+    from refdissect.live import build_spec
+    from refdissect.render import render_plan
+    analysis, matches, synth = _fixture(tmp_path)
+    gains = [1.0, 0.5, 0.3, 1.0, 1.0, 0.5, 0.3, 1.0]
+    analysis["events"] = {"sound_1": [{"t": 0.5 * k, "gain": g} for k, g in enumerate(gains)], "sound_2": []}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    spec = {t["name"]: t for t in build_spec(plan)}
+    assert spec["808 (synth)"]["settings"]["Vol < Vel"] == 0.35
+    assert {p["settings"]["Vol < Vel"] for p in spec["Drums (library)"]["instrument"]["drum_rack"].values()} == {0.35}
+    m = render_plan(plan, tmp_path / "r", n_samples=4 * SR)
+    drums = sf.read(tmp_path / "r" / m["drums"], dtype="float32")[0]
+    peaks = [np.abs(drums[int(0.5 * k * SR):int((0.5 * k + 0.25) * SR)]).max() for k in range(len(gains))]
+    assert 20 * np.log10(np.array(peaks) / max(peaks)) == pytest.approx(20 * np.log10(gains), abs=0.07)
+    stem = sf.read(tmp_path / "drums.wav", dtype="float32")[0]
+    assert rms_db(drums) == pytest.approx(rms_db(stem) - plan["levels"]["headroom_db"], abs=0.06)
+    bass = sf.read(tmp_path / "bass.wav", dtype="float32")[0]
+    t808 = sf.read(tmp_path / "r" / m["tracks"]["808"], dtype="float32")[0]
+    assert rms_db(t808) == pytest.approx(rms_db(bass) - plan["levels"]["headroom_db"], abs=0.1)
 
 
 def test_a_match_between_semitones_is_played_with_detune(tmp_path):
