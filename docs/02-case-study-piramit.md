@@ -197,7 +197,7 @@ Measured on the way (Live 12.4):
   - the click and a second kick no longer get pads;
 - 94 808 notes at Transpose +36 and Detune +2, one per note, no Glide;
 - three muted MIDI tracks (other, piano, vocals) with Drift as a placeholder;
-- 7 locators, the 808's fader at −6.6 dB (−6.2 before) and the drums' at −12.3 dB.
+- 7 locators, the 808's fader at −13.6 dB and the drums' at −20.2 dB. Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, under which velocity 127 plays 7.9 dB over the Volume; taken as linear levels (v/127), the same notes had the faders at −6.6 and −12.3 dB (the 808's at −6.2 dB before replica mode).
 
 See [07](07-building-in-live.md).
 
