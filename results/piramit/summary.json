@@ -1318,8 +1318,8 @@
   "808_notes": 94,
   "levels": {
    "headroom_db": 4.0,
-   "drums_track_db": -12.3,
-   "808_track_db": -6.6,
+   "drums_track_db": -20.2,
+   "808_track_db": -13.6,
    "stems_track_db": -4.0
   },
   "locators": [
