@@ -175,10 +175,10 @@ def test_a_close_match_names_the_role_in_the_snare_and_hat_bands():
 
 
 def test_heard_is_detects_matched_filter(noisy):
-    """_heard finds a sound where detect() finds it (the same filter,
-    threshold and gap), from xcorr and scipy alone: a hat placed at 24
-    moments of a quiet stem is heard at each of them; a snare that never
-    plays there is not heard."""
+    """_heard finds a sound where detect() finds it (the matched filter
+    detect() starts from, at its threshold), from xcorr and scipy alone: a
+    hat placed at 24 moments of a quiet stem is heard at each of them; a
+    snare that never plays there is not heard."""
     lib, sounds = noisy
     hat = lib.candidate(14, samples(40))
     x = np.random.default_rng(4).standard_normal(int(7 * SR)).astype(np.float32) * 0.002
