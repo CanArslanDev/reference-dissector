@@ -530,7 +530,7 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     to synth808.fit (maxiter, popsize: a smaller search for tests).
 
     The pitch is the template's settled pitch as bass808 measured it (the
-    QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.7 cents,
+    QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.8 cents,
     where the pYIN window read +33; or the asymptote of its fitted drop when
     no note rings that long), or the fit's f_end where the two agree within
     2 cents, or where the template only had its unsettled tail to read

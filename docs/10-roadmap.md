@@ -25,7 +25,6 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
 - **Sounds at any pitch.** The snare and hat bands are matched to a quarter cent (the speckle index), and pads play their match's Transpose and Detune. No pad that plays its sound's file is off pitch now; before Detune per pad, drum_pitch's snare played 30 cents off.
 - **Melodies and chords, started** (item 5 before). Basic Pitch runs per tonal stem: note F1 0.630; chords majmin 0.977 (4 beats). The plan carries the notes as muted MIDI tracks.
 - **Levels.** The plan's median distance from a perfect kit: 7.18 → 3.67 dB.
-- **808 slides, in part** (item 4 before). The plan and the build carry the 808's Detune, Glide Mode, Glide Time and one voice. The reader writes no legato notes by default: its slide guesses were right 6 times in 79.
 
 ## Targets
 
@@ -118,7 +117,7 @@ Measured on m2g; [12](12-replica-mode.md) has the details.
 | Residual templates on melodic-loop transients left in the drum stem | false hits 35.6 a beat on the layer lane's 22 beats (31.5 in that lane); 1.96 sounds a beat that play no truth sound (0.71 with a pad) | – |
 | Chords follow the sections, which follow the drum hits | full-2 majmin 0.999 → 0.961 in an intermediate run, with the same notes | ≥ 0.85 |
 | bass_low's 808 never settles: its template reads 44–60 cents sharp | written note right 0.487 on bass_low | ≥ 0.95 |
-| Legato notes are off by default; the opt-in rule was tuned on the beats it was measured on | legato recall 0 (the truth: 24 on 5 beats) | slides that beat merging on note F1 |
+| The 808's slides (item 4 before). Legato notes are off by default, so no plan plays a slide; the plan and the build carry Glide Mode, Glide Time and one voice for a line with three legato notes or more, not verified in Live. The rule this replaced was right 6 times in 79; the opt-in rule (`slides=True`) made 18 legato notes, 6 of them right, on the beats its thresholds were chosen on | legato recall 0 (the truth: 24 on 5 beats) | slides that beat merging on note F1 |
 | The 3 s one-shot leaves long legato chains' tails silent | not scored | – |
 | Library layers are not played; kick sources are off by default | 75 of 95 templates with the right file (identify lane's 8 scenarios) | – |
 | The plan holds no meter; tempo72's bar line is wrong; meter68 is read in 4/4 at x2/3; the seed-1 swing beats read straight 8ths | plan meter right 0.909, plan downbeat F 0.892; tempo72 downbeat F 0 | – |

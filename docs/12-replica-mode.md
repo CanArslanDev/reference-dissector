@@ -77,7 +77,7 @@ Its options:
 - `--scenarios a,b`: a subset.
 - `--jobs N`: beats in parallel processes. Each loads the library (about 0.5 GB) when match runs.
 - `--render`: renders each plan offline for the level scores, then deletes the audio.
-- `--resume`: skips the beats this tag has scored already.
+- `--resume`: skips the beats this tag has scored already; a beat that failed runs again.
 - `--steps`: a subset of analyze, melodic, match, fit-808, plan and score. Without `--reuse`, a step whose input no step makes is refused before anything runs.
 - `--reuse TAG`: copies the outputs of the steps not run from `runs/TAG/`, in place when TAG is the run's own tag. It refuses before running when a beat lacks those outputs, failed there, or analysed another model's stems.
   - A reused step that reads what a run step rewrites is marked `reused_stale`, and the warning and the report name it. melodic reads the 808 notes, match the drum templates, plan everything.
@@ -236,7 +236,7 @@ Means over the 22 scenarios of calibration v2. Columns are tags: `base` = base-h
 - **The 808** changed only in its lane. Its numbers are the same in m2 and m2g.
 - **Chords** rose from m1 to m2g because melodic now reads the new 808 notes as the chords' bass.
 - **Kick timing on htdemucs_ft** was already near 0 before (base-ft +2.0 ms). On htdemucs drums a kick's body comes 26 ms after its click, as the rest of the kick goes to the bass stem, and the old templates timed kicks on their body.
-- **m2 and m2-ft** (`suite-m2.json`, `suite-m2-ft.json`) measured the first merge (ba7b69d), before five merge fixes: drums 0.847 / 0.600, open hat 0.901, largest pad pitch error 7.5 cents.
+- **m2 and m2-ft** (`suite-m2.json`, `suite-m2-ft.json`) measured the first merge (ba7b69d), before five merge fixes: drums 0.847 / 0.600, open hat 0.901, and pads up to 300 cents off pitch (producer-2; drum_pitch-2: 30 cents). For that last number `suite-m2.json` gives 7.5 cents, a mean over scenarios of each beat's largest error.
 
 **Each lane alone**, on m1's other steps:
 - **Drum discovery** (m1 → l1a-fix, 48 beats, `suite-l1a-fix.json`):
@@ -249,7 +249,7 @@ Means over the 22 scenarios of calibration v2. Columns are tags: `base` = base-h
   - false hits per beat: 102 → 32.
 
   Over all 48 beats (`suite-l1b-fix.json`): drums 0.431 → 0.530 and 0.319 → 0.396.
-- **The 808 reader**, on the 10 scenarios with an 808 to read (24 beats): note F1@50 0.289 → 0.918 at analysis, 0.230 → 0.902 in the plan (m1 → m2g; the merge left the 808's numbers as its lane left them).
+- **The 808 reader**, on the 808 lane's 10 scenarios (bass_low, glides, kick808, v1, v1orig, full, producer, melodic, tempo72, tempo160; 24 beats): note F1@50 0.289 → 0.918 at analysis, 0.230 → 0.902 in the plan (m1 → m2g; the merge left the 808's numbers as its lane left them).
 - **Identification** (identify-fix, 20 beats of 8 scenarios, `suite-identify-fix.json`):
   - templates whose top match is their sound's own file: 49 of 78 → 55 of 80;
   - drum_pitch's largest pad pitch error: 30 → 0 cents;
@@ -292,7 +292,7 @@ All measured on the suite (m2g unless named).
   - On layers-2 a merge moved the snare to its less clean template (clean 0.44, under make_plan's 0.5), so no pad plays it.
   - Merges, composites and `distinct()` choose between templates by energy and hit count, not by alignment.
 - **Hat timing.** The p90 is 3.3 ms (2.55 ms in the discovery lane).
-  - Hats held by a snare's own top end at 15–24 ms remain on melodic-1 (10.9 ms), leadin-1 (8.3 ms), tempo160-1 (10.4 ms) and producer (5.3 ms).
+  - Hats held by a snare's own top end at 15–24 ms remain on melodic-1, leadin-1 and tempo160-1, whose hat p90s are 21.6, 16.6 and 20.7 ms (their seed-2 beats: under 0.1 ms), and in producer (5.3 ms, the scenario's mean).
   - bass_low's hats are almost missing: F1@20 0.006, p90 32.0 ms.
 - **A sound that always plays with another has no template of its own.** The layers scenario's clap sits on every snare, 0–8 ms late, and scores 0. Claps are 0.500 over the suite.
 - **Pitched copies of residual templates are off.** Re-planned on 20 beats, allowing them gave rolls-2 +0.054 and producer-2 +0.051, but rolls-1 −0.043.

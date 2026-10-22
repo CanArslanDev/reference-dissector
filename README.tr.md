@@ -2,7 +2,7 @@
 
 Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Adımlar:
 
-1. Tempo gridini, ölçüyü (4/4, 3/4, 6/8) ve akordu bulur.
+1. Tempo gridini, ölçüyü ve akordu bulur.
 2. Her davul vuruşunu (üst üste binenler dahil) ve 808 notalarını cent hassasiyetinde çıkarır.
 3. Melodik katmanları ve akorları çıkarır.
 4. Kütüphanendeki aynı sample'ları ya da en yakınlarını, perdeleri kaydırılmış olsa bile tanır.
