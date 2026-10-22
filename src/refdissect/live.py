@@ -71,6 +71,19 @@ def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
     return sorted(out, key=lambda n: (n["start_time"], n["pitch"]))
 
 
+def pad_pitch(best: dict) -> dict:
+    """A match's transposition (matches.json top entry) as Simpler plays it:
+    transpose in whole semitones and detune_cents in whole cents (Live
+    12.4.6 keeps whole cents of Detune, -50..+50). The speckle search finds
+    noisy sounds to a quarter cent: the calibration's detuned snare at -0.70
+    semitones is Transpose -1, Detune +30, where Transpose alone played it
+    30 cents off. Matches written before match v2 carry whole semitones
+    only, and get Detune 0."""
+    st = float(best["semitones"])
+    whole = int(best.get("transpose", round(st)))
+    return {"transpose": whole, "detune_cents": int(round(best.get("detune_cents", 100 * (st - whole))))}
+
+
 def velocities(gains: list[float], low: int = 35) -> list[int]:
     g = np.asarray(gains, dtype=float)
     if not len(g):
@@ -224,8 +237,11 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     A detected sound gets a Drum Rack pad when it was detected often and
     cleanly and the library has something close (NCC >= min_ncc), or when
     it is a kick or snare (the backbone, played with the closest sound even
-    if far). A sound found twice (same_as) shares the first one's pad.
-    With melodic (melodic.json), each tonal stem's notes get a MIDI track."""
+    if far). A sound found twice (same_as) shares the first one's pad. The
+    pad plays the top match at its pitch: Transpose in whole semitones and
+    Detune in whole cents (pad_pitch), as Live keeps them. A match's layers
+    (matches.json) are not played yet. With melodic (melodic.json), each
+    tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -249,7 +265,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             note = PADS[role][used[role]]
             used[role] += 1
             best = m["top"][0]
-            pads[str(note)] = {"template": name, "path": best["path"], "transpose": int(round(best["semitones"])),
+            pads[str(note)] = {"template": name, "path": best["path"], **pad_pitch(best),
                                "ncc": best["ncc"], "verdict": m["verdict"], "role": role}
         else:
             continue  # nothing in the library is close: left out rather than played wrong
@@ -332,7 +348,8 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     samples_by_pad = {}
     for note, pad in plan["tracks"]["drums"]["pads"].items():
         try:
-            samples_by_pad[int(note)] = transpose(trim_onset(read(pad["path"])), pad["transpose"])
+            samples_by_pad[int(note)] = transpose(trim_onset(read(pad["path"])),
+                                                  pad["transpose"] + pad.get("detune_cents", 0) / 100)
         except Exception:
             samples_by_pad[int(note)] = None
     drums = _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]), n, bps, False)
@@ -400,7 +417,8 @@ def build_spec(plan: dict) -> list[dict]:
     (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers at 0 dB with
-    warping off and each sound's transposition, faders from the plan's levels."""
+    warping off and each sound's transposition (a pad's Transpose and Detune),
+    faders from the plan's levels."""
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -415,7 +433,8 @@ def build_spec(plan: dict) -> list[dict]:
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
                      str(note): {"sample": Path(pad["path"]).name, "warping": False,
-                                 "settings": {"Volume": "0.0 dB", "Transpose": float(pad["transpose"])}}
+                                 "settings": {"Volume": "0.0 dB", "Transpose": float(pad["transpose"]),
+                                              "Detune": float(pad.get("detune_cents", 0))}}
                      for note, pad in drums["pads"].items()}},
                  "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
                  "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",
