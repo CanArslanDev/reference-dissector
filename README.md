@@ -17,18 +17,18 @@ The work started from one question: *can an AI that cannot hear tell whether the
 
 ## Results at a glance
 
-**PIRAMIT** (126 s, Demucs stems), from `refdissect analyze`, `match` and `fit-808`:
+**PIRAMIT** (126 s, Demucs stems), from `refdissect analyze`, `melodic`, `match`, `fit-808` and `plan` with replica mode (the run of 2026-10-22; [02](docs/02-case-study-piramit.md) gives the run before replica mode beside it):
 
 | What | Found |
 |---|---|
-| Tempo grid | **137.00 BPM**, first beat 31.9 ms in. Every bar's onsets sit within a few ms of it (p90 4.6–11.8 ms). The 136.36 BPM a beat tracker gave drifts by up to 49 ms. |
-| Tuning | The melodic stems at **A440** (other −2, piano +1.5 cents). The **808 alone sits at +33 cents**: its sample is detuned, not the track. (An earlier version read +0.28 semitones for everything; that was `librosa.estimate_tuning`'s error, see [01](docs/01-pipeline.md#tuning-gridtuning).) |
-| Hi-hat | **The same sample** as a hat in the local library. NCC 0.981; it wins 187 of 189 hits; null-test residual −14.3 dB (next best −7.4 dB). |
-| Snare (even bars) | **The same sample**, pitched **−1 semitone**. NCC 0.953; it wins 27 of 27 hits; residual −10.4 dB (next best −6.4 dB). |
-| Snare (odd bars) | Not in the library: the best match is NCC 0.47. |
-| 808 | 126 notes, 107 of them on C1 (the 808 sits +33 cents sharp). A fitted synth voice reaches NCC 0.975 and a 0.9 dB envelope error, against the best of 865 library 808s at 0.947 and 2.0 dB. The library 808 is closer in the upper harmonics: 2.3 dB off, against 7.7 dB for the synth. |
-| Sections | A 1–24 · B 25–28 · C 29–32 · A 33–47 · D 48–51 · E 52–56 (breakdown) · A 57–71 · F 72–73 |
-| Live | `refdissect live-build` builds it into an empty Live set with one `build_tracks` call: 6 Drum Rack pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators, in 4.9 s on Live 12.4.2 (9.7 s track by track before). |
+| Tempo grid | **137.00 BPM** (136.999), 4/4, first bar line 23.4 ms in. beat_this's 144 beats lie on one line at 68.498 BPM, and 100–180 BPM takes the octave above. Every bar's onsets sit within a few ms of the grid (p90 4.7–11.3 ms). At the 136.36 BPM a beat tracker gave, they drift 8 ms a bar: 50 ms off by bar 7, 0.59 s by the end (computed). |
+| Tuning | The melodic stems at **A440** (other −2, piano +1.5 cents). The **808 alone sits at +11.8 cents**: its sample is detuned, not the track. That is its template's settled pitch (32.93 Hz); the +33 cents read before replica mode heard the 808's pitch drop. (An earlier version read +0.28 semitones for everything; that was `librosa.estimate_tuning`'s error, see [01](docs/01-pipeline.md#tuning-gridtuning).) |
+| Hi-hat | A hat from the local library, at its own pitch. NCC 0.984; it wins 310 of 327 hits; null-test residual −14.9 dB (next best −10.9 dB). The verdict is "same family", not "same sample" as before replica mode: searched at any pitch, another kit's hat 3 semitones up reaches 0.958, and the margin fell from 0.078 to 0.025. The joint fit found 54 of its 389 hits under other sounds, 36 of them under the snares. |
+| Snare (odd bars) | A library snare pitched **−1 semitone** (Transpose −1, Detune 0). NCC 0.923; it wins 28 of 28 hits; residual −8.3 dB (next best −7.1 dB). The same file plays at its own pitch in bars 24–31 (NCC 0.986, 30 of 30 hits, residual −15.7 dB), on a pad of its own. Before replica mode this table had odd and even bars swapped. |
+| Snare (even bars) | Not in the library: the best match is NCC 0.47. |
+| 808 | 94 notes, 79 of them on C1. **Wrong:** one B0 note is held 15.3 s from bar 48 to bar 57, over a 1.0 s and a 7.2 s silence and four notes the 808 plays alone (not fixed). A synth voice fitted to the template's 53 notes reaches NCC 0.938 and a 1.3 dB envelope error, against the best of 865 library 808s at 0.894 and 1.4 dB. The library 808 is closer in the upper harmonics: 8.7 dB off, against 12.9 dB for the synth. The fit starts at 120 Hz with a 0.3 ms attack, both on its search's bounds: the shape of a kick's sweep (not checked by ear). |
+| Sections | A 1–24 · B 25–28 · C 29–32 · A 33–48 · D 49–56 · A 57–71 · E 72–73. D merges two parts the stem shows, the 808 alone in bars 49–51 and the breakdown in 52–56, because the held 808 note starts in bar 48. |
+| Live | Planned, not built: 607 drum notes on 7 Drum Rack pads, each at its match's Transpose and Detune; 94 808 notes at Transpose +36 and Detune +2; three muted melodic tracks; 7 locators. Before replica mode, `refdissect live-build` built the earlier plan (6 pads, 549 drum notes, 126 808 notes, reference stems for A/B, 8 locators) into an empty Live set with one `build_tracks` call, in 4.9 s on Live 12.4.2 (9.7 s track by track before). |
 
 **Replica mode, on the calibration-v2 suite** (`refdissect suite`; [03](docs/03-calibration.md), [12](docs/12-replica-mode.md)).
 - 48 synthetic beats in 22 scenarios: 72–160 BPM, 3/4 and 6/8, swing, rolls, layered hits, flams, pitched copies, 808 glides, melodic layers, lead-ins.
@@ -84,7 +84,7 @@ song.mp3 ──Demucs──▶ stems ──▶ grid + tuning ──▶ drum temp
 - **Identification**: normalized cross-correlation (NCC) against every library one-shot, in three bands, over ±30 ms of lag.
   - In the snare and hat bands it works at any pitch, to a quarter cent. A speckle index, the fine structure of a noisy sample's spectrum, proposes the file and its transposition. Kicks keep whole semitones.
   - Identities are handed out from the strongest match down, so a hat that always plays along with a kick is not taken for the kick.
-  - The verdict uses NCC, the margin over the next *different* sound, per-hit votes and a null test. A pad plays its match with Simpler's Transpose and Detune.
+  - The verdict uses NCC, the margin over the next *different* sound and per-hit votes; a null test is reported beside it. A pad plays its match with Simpler's Transpose and Detune.
 - **808**: notes are read as transpositions of the song's own 808: a template learnt from its long notes, preferably those that start on kicks. A note's written pitch is its settled pitch less the 808's tuning.
   - A sine + glide + envelope + tanh-drive voice is fitted to the template's notes by differential evolution. It is scored on waveform, harmonics and envelope, not on correlation alone.
   - Simpler's Transpose and Detune put the one-shot on the written notes.

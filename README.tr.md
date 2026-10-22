@@ -15,18 +15,21 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 
 ## Öne çıkan sonuçlar
 
-**PIRAMIT:**
-- **Tempo:** 137,00 BPM. Beat tracker'ın 136,36'sı şarkı sonunda 49 ms kayıyor.
-- **Akort:** melodik kanallar A440'ta (other −2, piano +1,5 cent). Sadece **808 +33 cent**: akortsuz olan şarkı değil, 808 sample'ı. Prototipteki 808'in "C mi C# mı" karışıklığı buradan geliyor. (Önceki sürüm her şeyi +0,28 yarım ton okuyordu; bu `librosa.estimate_tuning`'in hatasıydı.)
-- **Hi-hat:** Kütüphanedeki bir sample'ın kendisi.
-  - Benzerlik (NCC) 0,981.
-  - 189 vuruşun 187'sinde en iyi eşleşme o.
-  - Referanstan çıkarılınca kalan kısım −14,3 dB.
-- **Çift ölçülerin snare'i:** Kütüphanedeki bir sample'ın 1 yarım ton aşağı çekilmiş hali.
-  - Benzerlik 0,953.
-  - 27/27 vuruşta en iyi eşleşme.
-- **Tek ölçülerin snare'i:** Kütüphanede yok; en yakını 0,47.
-- **808:** 126 nota, %83'ü C1. Sentezlenen ses dalga biçimi ve zarfta kütüphanedeki en iyi 808'den daha yakın. Harmoniklerde (distortion) ise kütüphanedeki 808 daha yakın.
+**PIRAMIT** (replika moduyla, 22.10.2026 çalıştırması):
+- **Tempo:** 137,00 BPM (136,999), ilk ölçü çizgisi 23,4 ms'de. Beat tracker'ın verdiği 136,36 BPM'de vuruşlar ölçü başına 8 ms kayıyor: 7. ölçüde 50 ms, şarkı sonunda 0,59 s (hesaplandı, ölçülmedi).
+- **Akort:** melodik kanallar A440'ta (other −2, piano +1,5 cent). Sadece **808 +11,8 cent**: akortsuz olan şarkı değil, 808 sample'ı. Bu, 808 şablonunun oturduğu perde (32,93 Hz). Replika modundan önce okunan +33 cent, 808'in başındaki perde düşüşünü de duyuyordu. Prototipteki "C mi C# mı" karışıklığı da notaların bu düşüşle, C'nin 30 cent kadar üstünde okunmasından geliyor. (Önceki sürüm her şeyi +0,28 yarım ton okuyordu; bu `librosa.estimate_tuning`'in hatasıydı.)
+- **Hi-hat:** Kütüphanedeki bir hat, kendi perdesinde.
+  - Benzerlik (NCC) 0,984.
+  - 327 vuruşun 310'unda en iyi eşleşme o.
+  - Referanstan çıkarılınca kalan kısım −14,9 dB (sonraki aday −10,9 dB).
+  - Karar artık "same family" (aynı aile), "same sample" (aynı sample) değil: her perdede arayınca başka bir kitin 3 yarım ton yukarıdaki hat'i 0,958'e çıkıyor ve fark (margin) 0,078'den 0,025'e düşüyor.
+- **Tek ölçülerin snare'i:** Kütüphanedeki bir sample'ın 1 yarım ton aşağı çekilmiş hali.
+  - Benzerlik 0,923.
+  - 28/28 vuruşta en iyi eşleşme.
+  - Aynı dosya 24–31. ölçülerde kendi perdesinde çalıyor (benzerlik 0,986).
+- **Çift ölçülerin snare'i:** Kütüphanede yok; en yakını 0,47.
+- Önceki sürümde tek ve çift ölçüler ters yazılmıştı.
+- **808:** 94 nota, 79'u C1. **Hatalı:** 48. ölçüden 57. ölçüye tek bir B0 notası 15,3 s tutuluyor; arada 1,0 ve 7,2 saniyelik iki sessizlik ve 808'in tek başına çaldığı dört nota var. Henüz düzeltilmedi. Sentezlenen ses dalga biçimi ve zarfta kütüphanedeki en iyi 808'den daha yakın (NCC: sentez 0,938, kütüphane 0,894; zarf sapması: 1,3 ve 1,4 dB). Üst harmoniklerde (distortion) ise kütüphanedeki 808 daha yakın (sapma: kütüphane 8,7 dB, sentez 12,9 dB).
 
 **Replika modu, kalibrasyon v2 (48 sentetik beat, 22 senaryo):**
 - Puanlar katı: ofset çıkarılmaz, bir vuruş sesin başladığı yerin 20 ms içindeyse sayılır.
