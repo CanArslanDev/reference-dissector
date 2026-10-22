@@ -271,7 +271,7 @@ But its 808 notes are worse (0.936 → 0.924 and 0.926 → 0.910), and so are it
 
 The first merge gives the same picture (m2 against m2-ft). htdemucs stays the default.
 
-**The 808 reader**, on the 10 scenarios with an 808 to read (24 beats), m1 → m2g. The merge left the 808's numbers as its lane left them.
+**The 808 reader**, on the 808 lane's 10 scenarios (bass_low, glides, kick808, v1, v1orig, full, producer, melodic, tempo72, tempo160; 24 beats), m1 → m2g. Every scenario has an 808; these are the ones its lane was measured on. The merge left the 808's numbers as its lane left them.
 - note F1@50: 0.289 → 0.918 at analysis, 0.230 → 0.902 in the plan;
 - note F1@20: 0.181 → 0.903 and 0.167 → 0.887;
 - onset F1@20: 0.282 → 0.937;

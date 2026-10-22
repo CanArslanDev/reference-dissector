@@ -216,7 +216,7 @@ This is a working pipeline with measured limits, not a finished product:
 - **The plan trails the analysis.** Its 12-hit pad gate leaves open hats at 0.043, and drum notes do not yet take out each pad sample's own attack.
 - **The build in Live is not verified for replica mode.** Detune per pad, the 808's Detune and Glide, and the build as a whole have not been recorded in Live. The plan's levels assume a velocity law that Live 12.4.6 does not follow.
 - **Melodies are transcribed but not played.** They go to muted placeholder tracks, and the original melodic stems play under the rebuilt beat.
-- **The 808's slides are off by default.** The reader writes no legato notes: its slide guesses were right 6 times in 79.
+- **The 808's slides are off by default.** The reader writes no legato notes. The rule this replaced, which called every unattacked pitch move a slide, was right 6 times in 79; the opt-in rule (`slides=True`) made 18 legato notes, 6 of them right, on the beats its thresholds were chosen on.
 
 See the [roadmap](docs/10-roadmap.md).
 

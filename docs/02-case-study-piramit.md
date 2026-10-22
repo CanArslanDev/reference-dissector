@@ -3,7 +3,7 @@
 A Turkish trap track (album *VERITAS II*), 2:06.
 - **Goal.** Take it apart and build a near replica in Ableton Live from a personal sample library and Live's own devices.
 - **Starting point.** The Demucs stems and a prototype whose beat tracker gave 68.18 BPM.
-- **Where the numbers come from.** The run of 2026-10-22 with replica mode: `analyze`, `melodic`, `match`, `fit-808` and `plan` at 16bd328, on the same stems. `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
+- **Where the numbers come from.** The run of 2026-10-22 with replica mode: `analyze`, `melodic`, `match`, `fit-808` and `plan` with the code of 9ccc759 (the code the suite's m2g run measured), on the same stems. `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
 - **No truth.** Nobody has transcribed PIRAMIT by hand. Where the two runs differ, this page says which one is right only where a measurement on the stems shows it; everything else is not verified.
 - **What is not here.** The song, its stems and the note-by-note transcription stay local: see [09](09-data-and-copyright.md).
 
@@ -111,7 +111,7 @@ What the table says about the beat:
   - Not fixed.
 - **Silences.** The stem's 808 rests in bars 52–56: the breakdown.
 - **The template.** 53 long C1 notes, all starting on a kick, averaged into a 1.5 s template. Before replica mode, 74 C1 notes that rang 600 ms alone were the reference.
-- **Pitch drop.** The template's period-by-period pitch reads 5.0 semitones over its settled pitch at 50 ms (about 44 Hz; the first reading needs two zero crossings), 1.8 at 70 ms, 0.9 at 80 ms and 0.16 at 200 ms. From 250 ms to 1.0 s it stays within 2 cents of 32.93 Hz. Before replica mode this page read 42–44 Hz falling to 33.2 Hz in about 60 ms.
+- **Pitch drop.** The template's period-by-period pitch reads 5.0 semitones over its settled pitch at 50 ms (about 44 Hz; the first reading needs two zero crossings), 1.8 at 70 ms, 0.9 at 80 ms and 0.16 at 200 ms. From 250 ms to 1.0 s it stays within 8 cents of 32.93 Hz (−7.3 to +4.2 cents; median 0.9 cents off). Before replica mode this page read 42–44 Hz falling to 33.2 Hz in about 60 ms.
 
 **Fitted voice** (on drums + bass, so the attack is in):
 
