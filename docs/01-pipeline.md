@@ -304,7 +304,7 @@ On the suite (m2g), strict F1@20 over drum hits and 808 onsets is 0.886 at analy
 
 ## live-build
 
-See [07](07-building-in-live.md). It refuses unless every track in the open set is empty. Empty tracks are reused and the rest created, so nothing is overwritten.
+See [07](07-building-in-live.md). It refuses unless every track in the open set is empty, then builds every track in one `build_tracks` call; empty tracks already in the set are left as they are. No replica-mode plan has been built in Live yet.
 
 ## calibrate and suite
 
