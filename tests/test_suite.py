@@ -5,7 +5,9 @@ notes), so no sample library, Demucs or model download is needed; and the
 export of the means, which must name no file."""
 
 import functools
+import hashlib
 import json
+import re
 import runpy
 import shutil
 from pathlib import Path
@@ -318,3 +320,29 @@ def test_the_export_keeps_means_per_scenario_only(tmp_path):
     assert (out["options"], out["steps"], out["reuse"]) == (agg["options"], agg["steps"], agg["reuse"])
     for bad in ("/Volumes/Samples/kick", "~/Music/x", "/Applications/Some App.app/x", "a.m4a"):
         assert ns["LOCAL"].search(json.dumps({"x": bad})), bad
+
+
+def test_public_names_are_keyed(tmp_path):
+    """A personal library's file goes out as its role and an HMAC of its
+    path under the export key: the same name on every export with one key,
+    another under another key, never the plain SHA-1 a list of the
+    library's files gives back. The closest 808, kept by its bare file
+    name, is named by its path in the 808 index; Core Library files keep
+    their names."""
+    ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
+    key = ns["export_key"](tmp_path)
+    assert len(key) == 32 and (tmp_path / "work" / "export-key").is_file() and ns["export_key"](tmp_path) == key
+    path = "/Users/someone/Music/Ableton/User Library/Some Kit/snare 1.wav"
+    name = ns["public_name"](path, "snare", key)
+    assert re.fullmatch(r"user library snare #[0-9a-f]{8}", name)
+    assert name == ns["public_name"](path, "snare", key) != ns["public_name"](path, "snare", b"another key")
+    assert hashlib.sha1(path.encode()).hexdigest()[:6] not in name
+    with pytest.raises(ValueError, match="export key"):
+        ns["public_name"](path, "snare", b"")
+    core = "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library/Samples/kick.wav"
+    assert ns["public_name"](core, "kick", key) == "Core Library: kick.wav"
+    index = tmp_path / "library_808.npz"
+    np.savez(index, paths=np.array(["/Users/someone/Samples/808s/808 low.wav", "/Users/someone/Samples/808 b.wav"]))
+    assert ns["library_path"](index, "808 low.wav") == "/Users/someone/Samples/808s/808 low.wav"
+    assert ns["library_path"](index, "808 c.wav") == "808 c.wav"  # not in the index: the name itself
+    assert ns["library_path"](tmp_path / "none.npz", "808 low.wav") == "808 low.wav"
