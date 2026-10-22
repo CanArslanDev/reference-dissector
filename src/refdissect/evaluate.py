@@ -290,7 +290,8 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     808 before it, the band puts it back where the snare starts (calibration
     snares: 21-24 ms early by the full band, -0.6 to +1.8 ms by the snare
     band, 12 analyses). 808: notes_808 (bass808's: t_attack, end, midi_float
-    the pitch heard, midi_settled, glide; an analysis from before bass808 has
+    the pitch heard, midi_settled, pitch the note written, glide; an
+    analysis from before bass808 has
     no t_attack, and its t, an onset backtracked in the 808 band, is taken
     as the attack). Rhythm: the grid as
     grid.estimate left it (_analysis_time): tempo, meter, first bar line,
@@ -312,7 +313,7 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
                           "gain": e.get("gain", 1.0), "velocity": None, "layer_of": None, "flags": []})
     bass = [{"sound": "808", "t": n["t"], "t_attack": n.get("t_attack", n["t"]), "end": n["end"],
              "midi": float(n.get("midi_float", n.get("pitch"))), "midi_settled": n.get("midi_settled"),
-             "glide": _glide(n.get("glide")), "with_kick": False, "gain": n.get("peak", 1.0),
+             "pitch": n.get("pitch"), "glide": _glide(n.get("glide")), "with_kick": False, "gain": n.get("peak", 1.0),
              "flags": list(n.get("flags", [])) + ([f"slide:{n['slide']:+.1f}"] if abs(n.get("slide", 0.0)) >= 1.5
                                                  else [])}
             for n in analysis.get("notes_808", [])]
@@ -370,7 +371,7 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
                                         "to_midi": round(own + pitch_808(s, n["pitch"])[0], 4), "t": round(t, 5),
                                         "ms": round(1000 * glide_s(t808), 1), "shape": "lin"}
             bass.append({"sound": "808", "t": round(t, 5), "t_attack": round(t + (leads[shift] if not k else 0.0), 5),
-                         "end": round(stop, 5), "midi": round(float(midi), 4),
+                         "end": round(stop, 5), "midi": round(float(midi), 4), "pitch": int(n["pitch"]),
                          "midi_settled": round(own + pitch_808(s, n["pitch"])[0], 4), "glide": glide,
                          "with_kick": False, "gain": round(gain * v, 5), "flags": ["legato"] if k else []})
     at_root = as_played(shot, 0.0, pitch_808(s, s["root_midi"])[0])
@@ -386,14 +387,16 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     Drum note: t = start_time * 60 / tempo; t_attack = t + attack_time(the
     pad's sample as played: from frame 0, or from start_s, transposed by
     transpose + detune_cents/100 semitones) in the pad role's band; sound id
-    = the pad's note, role = the pad's. 808 note: the one-shot transposed by
-    (pitch - 60) + transpose + detune_cents/100 semitones, attack read in the
-    808 band, ending at the note end. It settles at root_midi + cents/100 +
-    that shift (midi_settled; render.pitch_808: pitch + cents/100 with the
-    build's Transpose; a plan without cents gets the one-shot's own,
-    scenarios.tuning), and sounds (midi) as a truth's note does: the one-shot's
-    own pitch drop (its pitch curve, read at the note's rate) through
-    scenarios.sounding over the note's length. With Glide on, a note that
+    = the pad's note, role = the pad's. 808 note (pitch: the MIDI note
+    written): the one-shot transposed by (pitch - 60) + transpose +
+    detune_cents/100 semitones, attack read in the 808 band, ending at the
+    note end. It settles at root_midi + cents/100 + that shift
+    (midi_settled; render.pitch_808: pitch plus the 808's tuning and
+    heard_cents with tune_808's Transpose and Detune; a plan without cents
+    gets the one-shot's own, scenarios.tuning), and sounds (midi) as a
+    truth's note does: the one-shot's own pitch drop (its pitch curve, read
+    at the note's rate) through scenarios.sounding over the note's length.
+    With Glide on, a note that
     starts while the one before is held (render.chains_808) is a legato
     note: no attack (t_attack = t), the voice sliding to its pitch over the
     Glide Time with the one-shot read on, its glide in the schema's form.
@@ -622,18 +625,23 @@ def tuning_808(notes: list[dict]) -> float | None:
 def _settled(ref: list[dict], mine: list[dict], pairs) -> dict | None:
     """Over the notes matched within 50 ms: how far the settled pitch
     (midi_settled) is from the truth's (cents), the share within 50 cents,
-    and the share whose written pitch (the settled pitch less its side's
-    own tuning_808, rounded: the MIDI note a plan writes) is the truth's.
-    The heard pitch (cents) cannot see a whole line written a semitone high
-    on a tuning read 40 cents off: on bass_low-1 note F1@50 read 0.994 with
-    every note written one semitone high."""
+    and the share whose written pitch (the MIDI note an estimate writes,
+    its "pitch"; else, as for a truth, the settled pitch less the side's
+    own tuning_808, rounded) is the truth's. The heard pitch (cents) cannot
+    see a whole line written a semitone high on a tuning read 40 cents
+    off: on bass_low-1 note F1@50 read 0.994 with every note written one
+    semitone high. A plan's settled pitch carries its heard Detune (up to
+    71 cents), which can take it past half a semitone from the note."""
     pairs = [(i, j) for i, j in pairs if ref[i].get("midi_settled") is not None
              and mine[j].get("midi_settled") is not None]
     if not pairs:
         return None
     tr, te = tuning_808(ref), tuning_808(mine)
+
+    def written(n: dict, tuning: float) -> int:
+        return int(n["pitch"]) if n.get("pitch") is not None else round(n["midi_settled"] - tuning)
     c = np.array([100 * (mine[j]["midi_settled"] - ref[i]["midi_settled"]) for i, j in pairs])
-    written = [round(mine[j]["midi_settled"] - te) == round(ref[i]["midi_settled"] - tr) for i, j in pairs]
+    written = [written(mine[j], te) == written(ref[i], tr) for i, j in pairs]
     return {"n": len(c), "median": round(float(np.median(c)), 1), "median_abs": round(float(np.median(np.abs(c))), 1),
             "within_50": round(float(np.mean(np.abs(c) <= 50)), 4), "written_equal": round(float(np.mean(written)), 4),
             "tuning_cents": {"truth": round(100 * tr, 1), "est": round(100 * te, 1)}}

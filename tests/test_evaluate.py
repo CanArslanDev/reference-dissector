@@ -148,6 +148,12 @@ def test_an_808_heard_right_but_written_a_semitone_high_and_its_legato_notes():
     for e in est["bass808"]:
         e["midi_settled"] -= 0.597
     assert evaluate.bass_scores(ref, est)["settled"]["written_equal"] == 1.0
+    for e in est["bass808"]:  # a plan's heard Detune past half a semitone: its own MIDI notes are what it wrote
+        e["midi_settled"] += 0.6
+        e["pitch"] = round(e["midi_settled"] - 0.6 - 0.11)
+    assert evaluate.bass_scores(ref, est)["settled"]["written_equal"] == 1.0
+    for e in est["bass808"]:
+        e["midi_settled"] -= 0.6
     assert evaluate.bass_scores(ref, est)["legato"] == {"n_truth": 0, "n_est": 0, "matched": 0, "precision": None,
                                                         "recall": None}
     for n in ref["bass808"][2:4] + est["bass808"][2:5]:
