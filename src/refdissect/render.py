@@ -268,15 +268,17 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
         except (OSError, RuntimeError):
             missing.append(str(t808["sample_path"]))
         else:
-            _write(out / "808.wav", _render_808(t808, shot, n, bps, fade, cut_808,
+            _write(out / "808.wav", render_808(t808, shot, n, bps, fade, cut_808,
                                                 10 ** (manifest["faders_db"]["808"] / 20), velocity_curve))
             manifest["tracks"]["808"] = "808.wav"
     (out / "render.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
 
 
-def _render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut: bool, gain: float,
-                velocity_curve: str | Callable) -> np.ndarray:
+def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut: bool, gain: float,
+               velocity_curve: str | Callable) -> np.ndarray:
+    """The 808 track (n samples, at `gain`): one voice per chain (chains_808), each
+    cut `fade` samples after its last note's end when cut."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)
     cache: dict[float, np.ndarray] = {}

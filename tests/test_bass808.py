@@ -196,6 +196,27 @@ def test_tune_808_splits_a_fraction_into_transpose_and_detune():
     assert abs(30.62 + (24 - 60) + semis + detune / 100 - 24) <= 0.005
 
 
+def test_plan_808_durations_leave_no_overlap_to_glide(tmp_path):
+    """With Glide on, an overlap is a slide: a note 0.031 beat before the
+    next (no legato) ends before it, where a 0.05-beat floor used to hold
+    it over (6 pairs on bass_low-2, htdemucs_ft); the legato notes' notes
+    before still hold over them."""
+    from refdissect.live import plan_808
+    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.0, "ms": 60.0, "shape": "lin", "kind": "legato"}
+    legato = [{"t": t, "t_attack": t, "end": t + 0.3, "pitch": 29, "peak": 1.0, "flags": ["legato"],
+               "glide": dict(glide, t=t)} for t in (1.0, 2.0, 3.0)]
+    plain = [{"t": t, "t_attack": t, "end": t + 0.4, "pitch": 24, "peak": 1.0} for t in (0.5, 1.5, 2.5)]
+    tight = [{"t": 3.6, "t_attack": 3.6, "end": 3.62, "pitch": 19, "peak": 1.0},
+             {"t": 3.6155, "t_attack": 3.6155, "end": 4.0, "pitch": 9, "peak": 1.0}]
+    notes = sorted(plain + legato + tight, key=lambda n: n["t"])
+    track = plan_808({"tuning": {"808": 0.0}, "notes_808": notes}, None, tmp_path / "stems", 2.0)
+    out = track["notes"]
+    assert track["voices"] == 1 and [n["pitch"] for n in out] == [n["pitch"] for n in notes]
+    for a, b, n in zip(out, out[1:], notes[1:]):
+        ends = a["start_time"] + a["duration"]
+        assert ends > b["start_time"] if "legato" in n.get("flags", []) else ends < b["start_time"]
+
+
 def test_plan_808_writes_the_notes_where_they_attack(tmp_path):
     """The plan's notes are the written pitches at their own lengths, each
     moved so that the one-shot, played at the note's pitch, attacks where the
@@ -227,8 +248,9 @@ def test_plan_808_writes_the_notes_where_they_attack(tmp_path):
 def test_plan_808_detunes_the_one_shot_to_the_pitch_heard(tmp_path):
     """Notes heard 15 cents over their settled pitch (an 808 still falling
     over the read window) played by a one-shot that does not fall: Detune
-    +15, and estimate_from_plan hears them there; notes that disagree (half
-    at their settled pitch, half a semitone over) leave Detune alone."""
+    +15, and estimate_from_plan hears them there. Detune is one per
+    Simpler: it follows the line's most common pitch (5 notes heard +15)
+    over the others (3 notes a fifth up heard +50)."""
     import soundfile as sf
 
     from refdissect.evaluate import estimate_from_plan
@@ -238,17 +260,19 @@ def test_plan_808_detunes_the_one_shot_to_the_pitch_heard(tmp_path):
     sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
     synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
 
-    def notes(heard):
-        return [{"t": 0.5 * i, "t_attack": 0.5 * i + 0.005, "end": 0.5 * i + 0.4, "pitch": 24, "peak": 1.0,
-                 "midi_settled": 24.0, "midi_float": 24.0 + h} for i, h in enumerate(heard)]
+    def notes(heard, pitches=None):
+        pitches = pitches or [24] * len(heard)
+        return [{"t": 0.5 * i, "t_attack": 0.5 * i + 0.005, "end": 0.5 * i + 0.4, "pitch": p, "peak": 1.0,
+                 "midi_settled": float(p), "midi_float": p + h} for i, (h, p) in enumerate(zip(heard, pitches))]
 
     track = plan_808({"tuning": {"808": 0.0}, "notes_808": notes([0.15] * 8)}, synth, tmp_path / "stems", 2.0)
     assert (track["transpose"], track["detune_cents"]) == (36, 15) and track["heard_cents"] == pytest.approx(15, abs=1)
     plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
             "levels": {}}
     assert [n["midi"] for n in estimate_from_plan(plan)["bass808"]] == pytest.approx([24.15] * 8, abs=0.01)
-    track = plan_808({"tuning": {"808": 0.0}, "notes_808": notes([0.0, 0.5] * 4)}, synth, tmp_path / "stems", 2.0)
-    assert (track["transpose"], track["detune_cents"], track["heard_cents"]) == (36, 0, None)
+    mixed = notes([0.15, 0.5, 0.15, 0.5, 0.15, 0.15, 0.5, 0.15], [24, 31, 24, 31, 24, 24, 31, 24])
+    track = plan_808({"tuning": {"808": 0.0}, "notes_808": mixed}, synth, tmp_path / "stems", 2.0)
+    assert (track["transpose"], track["detune_cents"]) == (36, 15) and track["heard_cents"] == pytest.approx(15, abs=1)
 
 
 def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
@@ -264,15 +288,18 @@ def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     hz = 32.70
     shot = tmp_path / "808 (synth).wav"
     sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
-    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.0, "ms": 80.0, "shape": "lin", "kind": "legato"}
-    analysis = {"tuning": {"808": 0.0},
-                "notes_808": [{"t": 0.5, "t_attack": 0.505, "end": 1.0, "pitch": 24, "peak": 1.0},
-                              {"t": 1.0, "t_attack": 1.0, "end": 1.6, "pitch": 29, "peak": 1.0, "glide": glide,
-                               "flags": ["legato"]}]}
+    def pair(t, to):
+        return [{"t": t, "t_attack": t + 0.005, "end": t + 0.5, "pitch": 24, "peak": 1.0},
+                {"t": t + 0.5, "t_attack": t + 0.5, "end": t + 1.1, "pitch": to, "peak": 1.0, "flags": ["legato"],
+                 "glide": {"from_midi": 24.0, "to_midi": float(to), "t": t + 0.5, "ms": 80.0, "shape": "lin",
+                           "kind": "legato"}}]
+    analysis = {"tuning": {"808": 0.0}, "notes_808": pair(0.5, 29) + pair(2.0, 27) + pair(3.5, 31)}
     synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    lone = plan_808(dict(analysis, notes_808=analysis["notes_808"][:2]), synth, tmp_path / "stems", 2.0)
+    assert "voices" not in lone and lone["notes"][0]["start_time"] + lone["notes"][0]["duration"] < 2.0  # GLIDE_LEAST
     track = plan_808(analysis, synth, tmp_path / "stems", 2.0)
     assert (track["voices"], track["glide_mode"], track["glide_time_ms"]) == (1, "Glide", 80.0)
-    first, second = track["notes"]
+    first, second = track["notes"][:2]
     assert second["start_time"] == 2.0 and first["start_time"] + first["duration"] == pytest.approx(
         2.0 + 2 * LEGATO_S, abs=1e-3)
     plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
@@ -288,14 +315,16 @@ def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     assert env[int(0.98 * SR):int(1.05 * SR)].min() > 0.5 * env[int(0.9 * SR)]  # no cut, no new attack
 
 
-def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path):
+def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path, monkeypatch):
     """A chain held past the end of its one-shot (0.5 s here) is silent from
     there on: a legato note that starts after it is left out of what Live
     plays, not given a pitch it never sounds at."""
     import soundfile as sf
 
+    from refdissect import live
     from refdissect.evaluate import estimate_from_plan
     from refdissect.live import plan_808
+    monkeypatch.setattr(live, "GLIDE_LEAST", 1)
     hz = 32.70
     shot = tmp_path / "808 (synth).wav"
     sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 0.5), SR, subtype="FLOAT")
