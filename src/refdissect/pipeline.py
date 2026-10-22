@@ -183,16 +183,20 @@ def _entry(r: dict) -> dict:
     return out
 
 
-def _search(library: Library, t: np.ndarray, b: str, tonal: bool, detune: float | None) -> tuple[list[dict], str]:
+def _search(library: Library, t: np.ndarray, b: str, detune: float | None) -> tuple[list[dict], str]:
     """One template window ranked in one band (its best 40), and how. The
     snare and hat bands: by the speckle index at any pitch, with the
     whole-semitone search's best 20 tried at their speckle transposition
-    too (Library.match_fine). The kick band, every band of a tonal template
-    (one found in the low band: role guesses are no help, 51 of 71 hat
-    templates of a 48-beat suite run were guessed kicks), and every band
-    without a speckle index: whole semitones, as before (a fine search let
-    other kicks at fractional transpositions beat the right one)."""
-    if not tonal and b in library.speckles:
+    too (Library.match_fine). The kick band, and every band without a
+    speckle index: whole semitones, as before (a fine search let other
+    kicks at fractional transpositions beat the right one). Templates found
+    in the low band kept whole semitones in every band too, but
+    discover() finds snares there: drum_pitch-2's snare, 0.70 semitones
+    down, was matched in the kick band at -1 (NCC 0.883), 30 cents off; the
+    snare band finds it at -0.70 (0.916). Over the 67 low-band templates of
+    48 suite beats, the fine search moved that one and changed no other
+    template's file, nor its pitch by more than a cent."""
+    if b in library.speckles:
         return library.match_fine(t, b, semitones=range(-3, 4), union=20, top=40), "speckle"
     semis = range(-4, 5) if b == "kick" else range(-3, 4)
     best = None
@@ -313,7 +317,7 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
     rest = (tb - g * atom[0]).astype(np.float32)
     seen, partners = {main["i"]}, []
-    for r in library.distinct(ranked, n, keep=pool) + library.distinct(_search(library, rest, b, False, None)[0], n,
+    for r in library.distinct(ranked, n, keep=pool) + library.distinct(_search(library, rest, b, None)[0], n,
                                                                         keep=pool):
         if r["i"] not in seen and not library.same(r["i"], main["i"], n):
             seen.add(r["i"])
@@ -392,9 +396,9 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
 
     Every template is matched in all three bands (_search): in the snare and
     hat bands at any pitch through the speckle index (when the library has
-    one), in the kick band, and for templates found in the low band in every
-    band, by whole semitones. A template often holds two sounds that always
-    play together (a hat on every kick): each band shows one of them.
+    one), in the kick band by whole semitones. A template often holds two
+    sounds that always play together (a hat on every kick): each band shows
+    one of them.
     Identities are handed out from the strongest match down; a sample
     already given to another template goes to this one too only if it
     matches it just as well (>= 0.9: the same sound found twice, `same_as`),
@@ -420,12 +424,12 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     ranked_by: dict[tuple[str, str], list[dict]] = {}
     windows: dict[tuple[str, str], np.ndarray] = {}
     method: dict[tuple[str, str], str] = {}
-    for name, info in templates.items():
+    for name in templates:
         full = _template(work, name)
         by_band[name] = {}
         for role in ("kick", "snare", "hat"):
             t = windows[name, role] = full[: samples(LENGTH_MS[role])]
-            ranked_by[name, role], method[name, role] = _search(library, t, role, info["band"] == "low", detune)
+            ranked_by[name, role], method[name, role] = _search(library, t, role, detune)
             by_band[name][role] = library.distinct(ranked_by[name, role], len(t))
     claims: dict[str, tuple[str, float]] = {}
     chosen: dict[str, str] = {}
