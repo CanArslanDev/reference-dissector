@@ -28,7 +28,7 @@ import numpy as np
 
 from . import __version__
 from . import scenarios as S
-from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples
+from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples, transpose
 from .calibrate import _f1
 from .grid import BAR_SLACK
 from .render import as_played, fader_db, pad_settings, pitch_808, resolve, settings_808, velocity_gain
@@ -259,6 +259,16 @@ def _plan_melodic(plan: dict, bps: float) -> dict:
                             key=lambda n: (n["t"], n["layer"], n["midi"]))}
 
 
+def _lead(info: dict, audio: np.ndarray | None, role: str, semitones: int) -> float:
+    """Seconds from a template's hit time t (PRE into its window) to where
+    its sound starts: the template's attack_s (discover found it on all its
+    hits), else attack_time of the template; for a pitched copy, the
+    template transposed that far, as Simpler plays it."""
+    if info.get("attack_s") is not None:
+        return info["attack_s"] * 2 ** (-semitones / 12) - PRE / SR
+    return attack_time(transpose(audio, semitones), role) - PRE / SR if audio is not None else 0.0
+
+
 def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dict:
     """What the analysis heard, as an estimate.
 
@@ -278,7 +288,13 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     attack). Rhythm: the grid as
     grid.estimate left it (_analysis_time): tempo, meter, first bar line,
     swing and tempo map. Melodic notes and chords: melodic.json (_melodic);
-    without it the estimate carries neither, and they are not scored."""
+    without it the estimate carries neither, and they are not scored.
+
+    A hit of a pitched copy (its event carries semitones, layers.explain)
+    is a sound of its own, <name><semitones:+d>, as a scenario's pitched
+    copies are, attacking where the template transposed that far (as
+    Simpler plays it) attacks. Hits found under another sound are flagged
+    "layer", a flam's grace note "flam"."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
@@ -286,16 +302,19 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     for name, info in analysis["templates"].items():
         role = _drum_role((matches.get(name) or {}).get("role") or info.get("role_guess"))
         path = work / "templates" / f"{name}.npy"
-        if info.get("attack_s") is not None:
-            lead = info["attack_s"] - PRE / SR
-        else:
-            lead = attack_time(np.load(path), role) - PRE / SR if path.is_file() else 0.0
-        sounds[name] = {"role": role, "path": str(path), "sha256": _sha256(path), "semitones": 0.0, "cents": 0.0,
-                        "attack_s": round(lead, 5)}
-        for e in analysis["events"].get(name, []):
-            drums.append({"sound": name, "role": role, "t": e["t"],
-                          "t_attack": round(max(0.0, e.get("t_attack", e["t"] + lead)), 5),
-                          "gain": e.get("gain", 1.0), "velocity": None, "layer_of": None, "flags": []})
+        audio = np.load(path) if path.is_file() else None
+        for e in [{"semitones": 0}] + analysis["events"].get(name, []):
+            st = int(e.get("semitones", 0))
+            sid = f"{name}{st:+d}" if st else name
+            if sid not in sounds:
+                sounds[sid] = {"role": role, "path": str(path), "sha256": _sha256(path), "semitones": float(st),
+                               "cents": 0.0, "attack_s": round(_lead(info, audio, role, st), 5)}
+            if "t" not in e:
+                continue
+            flags = ["layer"] * (e.get("source") == "layer") + ["flam"] * ("flam_of" in e)
+            drums.append({"sound": sid, "role": role, "t": e["t"],
+                          "t_attack": round(max(0.0, e.get("t_attack", e["t"] + sounds[sid]["attack_s"])), 5),
+                          "gain": e.get("gain", 1.0), "velocity": None, "layer_of": None, "flags": flags})
     bass = [{"sound": "808", "t": n["t"], "t_attack": n.get("t_attack", n["t"]), "end": n["end"],
              "midi": float(n.get("midi_float", n.get("pitch"))), "glide": None, "with_kick": False,
              "gain": n.get("peak", 1.0),

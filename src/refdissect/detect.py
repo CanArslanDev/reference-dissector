@@ -11,10 +11,11 @@ Drums, in two passes:
    Templates are aligned on where the sound starts in its role's band
    (hits.RISE), so a hit's time is its attack: t_attack.
 2. detect(): each template slides over the whole stem (matched filter); its
-   peaks above a threshold are its hits, with a level. Where two templates of
-   one band claim the same moment, the better match keeps it. count_once()
-   then keeps each hit once: not a view's hits again, nor a template's own
-   ring.
+   peaks above a threshold are candidate hits, and every moment is fit with
+   all the templates that play near it (layers.explain), so a moment can hold
+   several sounds (a hat under a snare) and one sound twice (a flam).
+   count_once() then keeps each hit once: not a view's hits again, nor a
+   template's own ring.
 
 The templates come from the song itself, so the second pass finds a sound
 even where the first could not see it (under other hits, off the grid).
@@ -31,6 +32,7 @@ import librosa
 import numpy as np
 from scipy.signal import find_peaks
 
+from . import layers
 from .audio import PRE, SR, band, samples
 from .grid import Grid
 from .hits import RISE, Group, aligned_template, group, merge, onsets, rise, starts, strength_peaks
@@ -607,47 +609,24 @@ def count_once(events: dict[str, list[dict]], templates: list[Template],
     return out
 
 
+def explain(drums: np.ndarray, templates: list[Template], thresholds: dict | None = None,
+            min_gain: float = layers.MATCHED_GAIN) -> layers.Explained:
+    """layers.explain with this module's attack lengths and thresholds: the
+    hits and what decided them (duplicates, held sounds, nulls)."""
+    return layers.explain(drums, templates, DETECT_MS, {**THRESHOLD, **(thresholds or {})}, min_gain=min_gain)
+
+
 def detect(drums: np.ndarray, templates: list[Template], thresholds: dict | None = None,
-           same_hit_ms: float = 15, min_gain: float = 0.25) -> dict[str, list[dict]]:
-    """Every hit of every template: {name: [{t, t_attack, ncc, gain}]} (t in
-    seconds, PRE after the template's window starts; t_attack where the
-    sound starts, attack_s in)."""
-    thresholds = {**THRESHOLD, **(thresholds or {})}
-    raw: dict[str, list[dict]] = {}
-    for tp in templates:
-        score, gain = sliding_ncc(drums, tp.audio[: samples(DETECT_MS[tp.band])], tp.band)
-        peaks, props = find_peaks(score, height=thresholds[tp.band], distance=samples(MIN_GAP_MS[tp.band]))
-        found = [{"t": round((p + PRE) / SR, 4), "t_attack": round(p / SR + tp.attack_s, 4), "ncc": round(float(h), 3),
-                  "gain": round(float(gain[p]), 4)} for p, h in zip(peaks, props["peak_heights"])]
-        # NCC ignores level: the quiet ringing tail of a low hit matches its own
-        # template too. Hits far below the template's usual level are dropped.
-        if found:
-            usual = float(np.median([e["gain"] for e in found]))
-            found = [e for e in found if e["gain"] >= min_gain * usual]
-        if tp.band == "low":  # and a ringing tail behind a louder hit of the same sound
-            kept: list[dict] = []
-            for e in found:
-                if kept and e["t"] - kept[-1]["t"] < 0.25 and e["gain"] < 0.5 * kept[-1]["gain"]:
-                    continue
-                kept.append(e)
-            found = kept
-        raw[tp.name] = found
-    # within a band, one moment belongs to the template that matches it best
-    out = {k: [] for k in raw}
-    by_band: dict[str, list[tuple[str, dict]]] = {}
-    for tp in templates:
-        by_band.setdefault(tp.band, []).extend((tp.name, e) for e in raw[tp.name])
-    for events in by_band.values():
-        events.sort(key=lambda ne: ne[1]["t"])
-        i = 0
-        while i < len(events):
-            j = i
-            while j + 1 < len(events) and events[j + 1][1]["t"] - events[i][1]["t"] <= same_hit_ms / 1000:
-                j += 1
-            name, e = max(events[i:j + 1], key=lambda ne: ne[1]["ncc"])
-            out[name].append(e)
-            i = j + 1
-    return out
+           min_gain: float = layers.MATCHED_GAIN) -> dict[str, list[dict]]:
+    """Every hit of every template: {name: [{t, t_attack, ncc, gain, source,
+    ...}]} (t in seconds, PRE after the template's window starts; t_attack
+    where the sound starts, attack_s in; gain its level, 1 = as loud as the
+    template). Each moment is fit with every template that plays near it
+    (layers.explain): a hat under a snare, a clap on a snare or a flam's
+    grace note are hits of their own, source "layer" where only the fit
+    found them (under: the template they were under), with semitones for a
+    pitched copy and flam_of for a grace note."""
+    return explain(drums, templates, thresholds, min_gain).events
 
 
 def peak_score_histogram(drums: np.ndarray, tp: Template) -> list[int]:

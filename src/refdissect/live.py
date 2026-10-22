@@ -32,6 +32,8 @@ from .audio import PRE, SR, read, rms_db, transpose, trim_onset
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
+# a pitched copy of a sound (detect: events with semitones) plays on a pad of its own, transposed
+PITCHED_PADS = list(range(54, 82))
 STEMS_MUTED = {"drums", "bass", "vocals"}  # replaced by ours, or not part of the beat
 DEFAULT_USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
 GENERATED = Path("Samples") / "AbletonMCP Generated"
@@ -104,11 +106,14 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
         hits = analysis["events"][name]
-        # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
-        lead = info.get("attack_s", PRE / SR) - PRE / SR
+        notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) for h in hits} - {0})}
         for e, v in zip(hits, velocities([h["gain"] for h in hits])):
-            t = e.get("t_attack", e["t"] + lead)
-            drum_notes.append({"pitch": note, "start_time": round(t * beats_per_second, 4), "duration": 1.0,
+            st = e.get("semitones", 0)
+            if st not in notes:  # a copy without a free pad is left out, not played unpitched
+                continue
+            # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
+            t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
+            drum_notes.append({"pitch": notes[st], "start_time": round(t * beats_per_second, 4), "duration": 1.0,
                                "velocity": v})
     notes808 = analysis["notes_808"]
     peaks = np.array([n["peak"] for n in notes808]) if notes808 else np.array([1.0])
@@ -146,6 +151,24 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
+
+
+def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
+    """A pad per pitched copy of the sound on pad `note`: the same sample,
+    transposed `semitones` further, on the next free PITCHED_PADS note (or
+    the pad that already plays it so). Returns {semitones: note}."""
+    out = {}
+    base = pads[str(note)]
+    for st in sorted(semitones):
+        transpose_to = int(base["transpose"] + st)
+        same = next((int(k) for k, v in pads.items() if v["path"] == base["path"] and v["transpose"] == transpose_to),
+                    None)
+        free = same or next((k for k in PITCHED_PADS if str(k) not in pads), None)
+        if free is None:
+            break
+        pads.setdefault(str(free), {**base, "transpose": transpose_to, "semitones": int(st)})
+        out[st] = free
+    return out
 
 
 def _render(notes: list[dict], sample_for, n: int, bps: float, cut: bool) -> np.ndarray:

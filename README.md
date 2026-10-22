@@ -127,6 +127,7 @@ src/refdissect/
   hits.py        onsets, grouping hits by waveform, averaging into templates
   grid.py        tempo/phase fit, per-beat offsets, tuning
   detect.py      template discovery, matched-filter detection, 808 notes
+  layers.py      every drum moment fit with every template: layers, flams, rolls, pitched copies
   library.py     inventory, index, matching (NCC + semitone shortlist), votes, null test, verdicts
   describe.py    producer-facing descriptors: pitch/cents, glide, decay, harmonics, brightness
   synth808.py    the 808 voice, its fit, one-shots
