@@ -518,6 +518,13 @@ def _bass(b: dict) -> dict:
         out |= {"808.error_median_ms": b["error_ms"]["median"], "808.error_p90_ms": b["error_ms"]["p90_abs"]}
     if b.get("cents"):
         out |= {"808.cents_median": b["cents"]["median"], "808.cents_median_abs": b["cents"]["median_abs"]}
+    if b.get("settled"):
+        out |= {"808.settled_cents_median_abs": b["settled"]["median_abs"],
+                "808.settled_within_50": b["settled"]["within_50"], "808.written_equal": b["settled"]["written_equal"]}
+    if b.get("legato"):
+        lg = b["legato"]
+        out |= {"808.legato_est": lg["n_est"], "808.legato_truth": lg["n_truth"],
+                "808.legato_precision": lg["precision"], "808.legato_recall": lg["recall"]}
     return out
 
 
@@ -643,6 +650,14 @@ TABLES = (  # (part, key, title, digits)
     ("analysis", "808.note_f1_50", "808 note F1 (50 ms, 50 cents), analysis", 3),
     ("analysis", "808.cents_median_abs", "808 pitch, median |cents| of matched notes, analysis", 1),
     ("plan", "808.note_f1_50", "808 note F1 (50 ms, 50 cents), plan", 3),
+    ("plan", "808.cents_median_abs", "808 pitch, median |cents| of matched notes, plan", 1),
+    ("analysis", "808.settled_within_50", "808 settled pitch within 50 cents (share of matched notes), analysis", 3),
+    ("analysis", "808.written_equal", "808 written pitch right (share of matched notes), analysis", 3),
+    ("plan", "808.written_equal", "808 written pitch right (share of matched notes), plan", 3),
+    ("analysis", "808.legato_est", "808 legato notes per beat, analysis", 1),
+    ("analysis", "808.legato_truth", "808 legato notes per beat, truth", 1),
+    ("analysis", "808.legato_precision", "808 legato notes, precision (where the analysis has some), analysis", 3),
+    ("analysis", "808.legato_recall", "808 legato notes, recall (where the truth has some), analysis", 3),
     ("analysis", "rhythm.octave_x1", "Tempo in the right octave (share of beats)", 2),
     ("analysis", "rhythm.downbeat_error_ms_abs", "First downbeat, |error| modulo a bar (ms)", 1),
     ("analysis", "rhythm.beat_f", "Beat F (70 ms)", 3),
