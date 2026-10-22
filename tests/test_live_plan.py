@@ -1,8 +1,9 @@
 import mido
 import numpy as np
+import pytest
 import soundfile as sf
 
-from refdissect.audio import SR
+from refdissect.audio import PRE, SR
 from refdissect.live import make_plan, no_overlaps, velocities, write_midi
 
 
@@ -50,6 +51,20 @@ def test_plan(tmp_path):
     assert plan["stems"]["drums"]["mute"] and not plan["stems"]["other"]["mute"]
     assert plan["locators"] == [["A (1)", 0.0]]
     assert "drums_track_db" in plan["levels"] and "808_track_db" in plan["levels"]
+
+
+def test_drum_notes_go_where_their_hits_attack(tmp_path):
+    """A template whose hits start 19 ms before its window says (attack_s
+    under PRE: detect.starts_before) has its notes there: at t_attack, or
+    at t plus that lead when a hit carries only t."""
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["templates"]["sound_1"]["attack_s"] = PRE / SR - 0.019
+    analysis["events"]["sound_1"] = [{"t": 0.1 + 0.5 * k, "gain": 1.0} for k in range(8)]
+    first = min(n["start_time"] for n in make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"])
+    assert first == pytest.approx((0.1 - 0.019) * 2, abs=1e-4)  # beats at 120 BPM
+    analysis["events"]["sound_1"][0]["t_attack"] = 0.09
+    first = min(n["start_time"] for n in make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"])
+    assert first == pytest.approx(0.18, abs=1e-4)
 
 
 def test_locators_on_the_bar_lines(tmp_path):
