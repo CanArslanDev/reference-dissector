@@ -45,23 +45,52 @@ The 808 has a tuning of its own (`detect.pitch_offset`, the circular mean of its
    - `low` (< 200 Hz) finds kicks under hats and snares.
    - `snare` (120 Hz–14 kHz).
    - `hat` (> 3.5 kHz).
-2. **Onsets on the grid.** In each band: onset-strength peaks within 12 ms of a sixteenth-note grid line.
-3. **Group per slot.** Per grid slot (16 per bar), hits are grouped greedily by waveform (`hits.group`). Each hit joins the group whose running average it matches best (NCC of the first 40–80 ms) if that reaches 0.6. Groups with at least 8 hits are kept.
+2. **Where onsets start.** Each onset-strength peak of a band is moved back to where its sound starts (`hits.rise`): from the quietest point in the 30 ms before it, the first point where the 1 ms envelope reaches 30 % of its peak. The low band also reads the snare band and looks back 45 ms: on htdemucs drums a kick's body comes 26 ms after its click, the rest of it went to the bass stem. What still rings from the hit before is left out.
+3. **Places in the beat.** The starts are clustered by where they fall in the beat (±12 ms), densest first. Straight or swung 16ths, triplets and 32nds are places of their own wherever the song puts them, in any meter. Per place, hits are grouped greedily by waveform (`hits.group`, NCC ≥ 0.6). A group needs 3 hits, or one per 4 bars in a longer song. With 8 hits per 16th slot within ±12 ms, an 8-bar beat at 95 BPM got no template at all, and a rim only on swung 16ths (62 %) none.
 4. **Merge** groups within a band whose averages match (NCC ≥ 0.8 over 100 ms).
-5. **Drop duplicates across bands.** A candidate whose detections mostly coincide (≥ 60 % within 15 ms) with a larger candidate's, *and* whose waveform matches it (NCC ≥ 0.6) in *both* candidates' bands, is the same sound found twice. Coinciding alone is not enough: a snare that always lands on a hat shares every moment with the hat and looks like it in the hat band.
-6. **Template.** Each survivor's hits are lined up and averaged (`hits.onset_template`) with the attack placed exactly 5 ms into the window.
-   - The attack is the first point where the 1 ms envelope reaches 30 % of the peak.
-   - This matters for matching: hit times from onset-strength peaks sit several ms off the attack, and a template 12 ms off matched its true sample at NCC 0.15 instead of 0.85.
-7. **Names and roles.** Templates are named `sound_1`, `sound_2`, … by number of detections. The role is only a guess here (`kick`/`snare`/`hat`, from the energy the hits add over the 60 ms before them). Matching decides it later.
+5. **Hits that start something.** Each candidate's template slides over the stem. One rings rather than starts when its hits sit on an onset (within 10 ms) less than 30 % of the time, or when they have no attack in the hat band (under 5 %) and something starts 15–45 ms before 30 % of them or more: an 808 matched once a period in the snare band, or a kick's body after its click.
+   - A clean candidate (NCC ≥ 0.8 on 80 % of its hits) with nothing starting just before it may sit 15 ms from its onsets. Its template starts where its role's band climbs from the floor, an onset where its band reaches 30 % of its peak: on leadin-1 the snare's template started 13 ms before its hat-band onsets, and the snare was lost.
+   - A kick without a click has no top either, but nothing starts just before it. Between 8th hats, or with no hats at all, it was lost (F1 0 on synthetic beats).
+6. **One template per sound.** Candidates are taken in order of clean hits (NCC ≥ 0.8; squared, over all their hits). A candidate is the same sound as a kept one that finds most of its hits when their gains move together (r ≥ 0.6 for the same guessed role, 0.8 otherwise), or when, in the band of its role, the kept template has its shape at its level and either the two find each other's hits or they guess the same role and the kept one holds its level where it was found too.
+   - A kick under some of the hats stays a kick: the hat template holds it 6–11 dB down in the low band.
+   - A crash on every kick stays a crash: the kick does not hold it in the hat band.
+   - A view that finds 3 hits or more that nobody else does (a kick in the hat band where an 808 hid its low band) is kept as `same_sound_as`, and the hits it shares are counted once (`count_once`). Hits it finds again within 50 ms of its holder's are not new ones. A candidate with fewer new hits is left out: kept as a sound of its own, it played its holder's hits a second time.
+   - Of two candidates of different roles locked at one lag of 15–60 ms, the quieter goes: on two beats something 42 ms before every snare that was no hit.
+7. **Residual pass.** Onsets that no template of their band explains (no hit within 10 ms) are grouped wherever they sit, 3 hits or more (one per 16 bars in a longer song), and go through 5 and 6: rare sounds, crashes, fills.
+   - With 3 hits in any song, the residual templates grew with its length. One per 16 bars took PIRAMIT from 15 to 10, HAYIR DEMELIYDIM from 7 to 5, and a v1 beat tiled 6 times (192 s) from 23 to 11 (its extra templates 14 → 9).
+   - What recurs in every 16 bars stays: a producer beat tiled 6 times kept its 19. On those two tiled beats 2 and 4 extra templates still get a drum pad, as kicks or snares (`live.make_plan`; library NCC 0.53–0.83).
+8. **Template.** Each survivor's hits are lined up with the sound's start 5 ms into the window (`hits.aligned_template`), read in the band of its guessed role: the snare band leaves out the kick or 808 before a snare. They are averaged, or their median taken in the hat band (on 30 calibration beats the median made hat templates 6.5 dB cleaner against their true files). analysis.json gives each template's `attack_s`, `same_sound_as` and which pass `found` it, and each hit its `t_attack`.
+   - In the full band the attack sat on the kick or 808 before the snare: all six calibration snares were placed 13–24 ms early. On 32 suite beats (mean over 14 scenarios of each sound's median error) the plan's snares moved from 11.6 ms early to 1.4 ms late, its kicks from 9.6 to 2.4 ms late, and the analysis's kicks from 22.6 to 0.9 ms late.
+   - A template can start on its sound's body (`detect.starts_before`). Where at least half of its hits start 3 ms or more earlier in the hat, snare or kick band, and a fifth more of them than at its own start, its `attack_s` moves there; its window stays where the matched filter finds the hits, and the plan's notes go to `t_attack`. On 48 suite beats this moved 10 templates 3–22 ms, 8 of them nearer the truth: dynamics-2's kick from 16.7 ms late to 1.6 ms early.
+9. **Names and roles.** Templates are named `sound_1`, `sound_2`, … by number of detections. The role is only a guess here (`kick`/`snare`/`hat`): the median over the hits of the share of energy each adds below 150 Hz and above 5 kHz over the 60 ms before it. Summed instead, the kicks under some hats decided: 33 of the 56 templates that played a hat on 32 suite beats read as kicks (8 of 84 now; 71 % of all guesses right, 57 % before). Matching decides it later.
+
+On those 32 beats (14 scenarios, htdemucs stems), against the code before (16th slots ±12 ms, 8 hits a slot, the cross-band duplicate test, the full-band attack), strict F1@20 per role, mean over scenarios: kick 0.26 → 0.87, snare 0.85 → 0.96, hat 0.45 → 0.75, open hat 0.23 → 0.97, clap 0.61 → 0.67, crash 0 → 0.47 in the analysis; kick 0.17 → 0.80, snare 0.58 → 0.79, hat 0.50 → 0.72 in the plan (`results/calibration/suite-l1a-after2.json`). 88 % of the true sounds get a template (59 % before), at 1.2 templates each (1.4 before); the residual pass also keeps 2.2 templates a beat that play no true hit (on the v1 beats, transients of the melodic loop that htdemucs left in the drum stem).
+
+After the review fixes (each hit once, hits that start something, templates that start where their hits do, the residual pass's minimum), on all 48 suite beats (22 scenarios), against the code before them, strict F1@20, mean over scenarios (`results/calibration/suite-l1a-pre.json`, `suite-l1a-fix.json`):
+
+| | Analysis, before | Analysis, after | Plan, before | Plan, after |
+|---|---|---|---|---|
+| drums | 0.816 | 0.830 | 0.538 | 0.547 |
+| kick | 0.833 | 0.871 | 0.791 | 0.809 |
+| snare | 0.926 | 0.949 | 0.811 | 0.834 |
+| tom | 0.37 | 0.48 | 0.37 | 0 |
+
+- Kicks are found 0.04 ms late (median), not 0.89; p90 9.2 ms, not 11.4. The plan's kicks: p90 9.1 → 9.0 ms.
+- leadin's snare: 0.50 → 1.00. full's kick: 0.64 → 0.80 (0.72 before the lane): its snare-band view had played each kick again 37 ms late.
+- Plan levels against a perfect kit: 3.90 → 3.62 dB.
+- The plan's tom is lost: rare-1's tom template no longer counts its own ring (17 hits → 10, NCC ≥ 0.8 on 53 % → 90 %), and the plan gives a pad only from 12 hits.
+- melodic-1's kick stays 14.7 ms late (18.6 ms in the plan): its click shows in the hat band, but at no one place on most of its hits.
+- Extra templates: 2.14 → 2.21 a beat in the analysis, 0.68 in the plan both times.
 
 ### Hits (`detect.detect`)
 
-**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are hits; the least-squares gain at the peak is the hit's level.
+**Matched filter.** Each template's first 40–80 ms (the attack, see below) slides over the whole drum stem in its band (`xcorr.sliding_ncc`). Peaks above 0.6 (0.65 for hats) are hits; the least-squares gain at the peak is the hit's level. Each hit carries `t`, 5 ms after the window starts, and `t_attack`, where the sound starts: the template's `attack_s` after it. A hit without `t_attack` is timed by its template's `attack_s` too (`evaluate.estimate_from_analysis`). Timed by `audio.attack_time` on the averaged template instead, the kicks of 32 suite beats came 15.7 ms late (drums F1@20 0.810 → 0.717).
 
-Three cleanups:
+Four cleanups:
 - **Quiet tails.** Hits below 25 % of the template's median gain are dropped. NCC ignores level, so a ringing tail matches its own template too.
 - **Low band.** Hits are at least 100 ms apart, and a hit less than half as loud within 250 ms after a louder one is its tail.
 - **Overlaps within a band.** A moment claimed by two templates goes to the better match.
+- **Each hit once** (`count_once`). A view's hits within 50 ms of its main's are the main's: a view finds its main's hits again at one lag (36–39 ms on 4 suite beats; within 15 ms, full-1's view of the kick kept 43 hits 37 ms late). A template's own ring is no hit either: within 250 ms of an earlier hit, no louder than that hit's ring would be there (the template's level at that lag, never rising again), where nothing starts in its band. A tonal snare's template had matched its own ring 101 times for 32 snares.
 
 **Why the attack only.** Patterns repeat, so whatever always follows a hit is in its average too: the kick two sixteenths after a snare, for example. With a 300 ms window, that louder kick decided the matched filter: the snare's "hits" landed 352 ms early.
 

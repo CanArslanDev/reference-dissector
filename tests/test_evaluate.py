@@ -346,6 +346,24 @@ def test_estimate_from_analysis_reads_the_attack_in_the_roles_band(kit, tmp_path
     assert est["time"]["downbeats_s"][:2] == [0.01, 2.01] and len(est["time"]["beats_s"]) == 8
 
 
+def test_estimate_from_analysis_takes_the_templates_own_attack(kit, tmp_path):
+    """A template that says where its sound starts (attack_s, as discover()
+    reads it on all its hits) times hits that carry no t_attack there, not
+    where attack_time reads its averaged audio (20 ms later here): an
+    analysis from a detect() that writes only t keeps discover()'s timing."""
+    template = np.r_[np.zeros(PRE + samples(20), np.float32), kit["snare"]]
+    (tmp_path / "templates").mkdir()
+    np.save(tmp_path / "templates" / "sound_1.npy", template)
+    analysis = {"source": {"duration_s": 4.0}, "grid": {"bpm": 120.0, "phase": 0.01, "beats_per_bar": 4},
+                "templates": {"sound_1": {"role_guess": "snare", "attack_s": PRE / SR + 0.003}},
+                "events": {"sound_1": [{"t": 1.0, "ncc": 0.9, "gain": 1.0}, {"t": 2.0, "t_attack": 2.001}]},
+                "notes_808": []}
+    (tmp_path / "analysis.json").write_text(json.dumps(analysis))
+    est = validate(evaluate.estimate_from_analysis(tmp_path))
+    assert [e["t_attack"] for e in est["drums"]] == [pytest.approx(1.003, abs=1e-5), 2.001]
+    assert est["sounds"]["sound_1"]["attack_s"] == pytest.approx(0.003, abs=1e-5)
+
+
 def test_analysis_times_land_on_the_attacks_of_a_synthetic_beat(beat, kit, tmp_path):
     """detect() reports a hit PRE (5 ms) after its template window starts: with
     the template's own attack added, the snares of the synthetic beat land

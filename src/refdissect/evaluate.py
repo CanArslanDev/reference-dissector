@@ -265,13 +265,17 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     Drums: every template's hits; sound id = the template's name, role = its
     match's (matches.json) or else its guess. detect() reports a hit at
     t = (peak + PRE) / SR, PRE (5 ms) after the start of the template's
-    window, so the hit attacks at t - PRE/SR + attack_time(template, role),
-    unless the event carries t_attack. The template's attack is read in the
-    role's band: where its full-band attack sits on the tail of the kick or
-    808 before it, the band puts it back where the snare starts (calibration
-    snares: 21-24 ms early by the full band, -0.6 to +1.8 ms by the snare
-    band, 12 analyses). 808: notes_808 (t, end, midi_float; t is an onset
-    backtracked in the 808 band, taken as the attack). Rhythm: the grid as
+    window, so the hit attacks at t - PRE/SR + the template's attack, unless
+    the event carries t_attack. The attack is the template's attack_s, where
+    discover() found the sound to start (on all its hits, in its role's
+    bands), or else attack_time(template, role). Read by attack_time on the
+    averaged template instead, the kicks of 32 suite beats came 15.7 ms late
+    (their body), not 0.9 ms (drums F1@20 0.810 -> 0.717). In the role's
+    band the attack is not on the tail of the kick or 808 before a snare, as
+    in the full band (calibration snares: 21-24 ms early by the full band,
+    -0.6 to +1.8 ms by the snare band, 12 analyses). 808: notes_808 (t, end,
+    midi_float; t is an onset backtracked in the 808 band, taken as the
+    attack). Rhythm: the grid as
     grid.estimate left it (_analysis_time): tempo, meter, first bar line,
     swing and tempo map. Melodic notes and chords: melodic.json (_melodic);
     without it the estimate carries neither, and they are not scored."""
@@ -282,7 +286,10 @@ def estimate_from_analysis(work: str | Path, scenario: str | None = None) -> dic
     for name, info in analysis["templates"].items():
         role = _drum_role((matches.get(name) or {}).get("role") or info.get("role_guess"))
         path = work / "templates" / f"{name}.npy"
-        lead = attack_time(np.load(path), role) - PRE / SR if path.is_file() else 0.0
+        if info.get("attack_s") is not None:
+            lead = info["attack_s"] - PRE / SR
+        else:
+            lead = attack_time(np.load(path), role) - PRE / SR if path.is_file() else 0.0
         sounds[name] = {"role": role, "path": str(path), "sha256": _sha256(path), "semitones": 0.0, "cents": 0.0,
                         "attack_s": round(lead, 5)}
         for e in analysis["events"].get(name, []):
