@@ -273,7 +273,10 @@ def test_copied_outputs_point_into_their_new_folder(tmp_path):
 
 
 @needs_ffmpeg
-def test_a_failed_beat_is_recorded_and_resume_skips_done_beats(library, tmp_path, monkeypatch):
+def test_a_failed_beat_is_recorded_and_resume_runs_it_again(library, tmp_path, monkeypatch):
+    """A beat that fails is recorded with its error in its scores.json and
+    listed as failed; --resume runs it again, as it was never scored, and
+    skips only a beat whose scores.json holds scores."""
     root = tmp_path / "suite"
     main(["suite", "build", str(library / "inventory.json"), "--out", str(root), "--scenarios", "v1",
           "--seeds", "1,2", "--bars", "4"])
@@ -286,7 +289,9 @@ def test_a_failed_beat_is_recorded_and_resume_skips_done_beats(library, tmp_path
     assert s["beats"] == 0 and s["failed"] == ["v1-1", "v1-2"]
     assert "no grid" in json.loads((root / "v1-1" / "runs" / "x" / "scores.json").read_text())["failed"]
     s = suite.run(root, library / "library.npz", tag="x", jobs=1, resume=True)
-    assert s["last_run"]["beats"] == 0  # both have a scores.json, failed or not
+    assert s["last_run"]["beats"] == 2 and s["failed"] == ["v1-1", "v1-2"]  # both ran again, and failed again
+    (root / "v1-1" / "runs" / "x" / "scores.json").write_text(json.dumps({"beat": "v1-1", "analysis": {}}))
+    assert [suite.scored(root / b, "x") for b in ("v1-1", "v1-2", "v1-3")] == [True, False, False]
 
 
 def test_the_export_keeps_means_per_scenario_only(tmp_path):

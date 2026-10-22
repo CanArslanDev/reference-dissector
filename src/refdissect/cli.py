@@ -281,7 +281,8 @@ def _suite_parser(sub) -> None:
     s.add_argument("--scenarios", default=None, help="comma-separated (default: every beat under dir)")
     s.add_argument("--jobs", type=int, default=3, help="beats in parallel processes (each loads the library, 0.5 GB)")
     s.add_argument("--render", action="store_true", help="render each plan offline for the level scores (deleted)")
-    s.add_argument("--resume", action="store_true", help="skip the beats this tag has scored already")
+    s.add_argument("--resume", action="store_true",
+                   help="skip the beats this tag has scored already (failed ones run again)")
     s.add_argument("--steps", default=None,
                    help="comma-separated, of analyze,melodic,match,fit-808,plan,score (default: all; melodic runs "
                         "where the stems hold a tonal one, score writes scores.json)")
