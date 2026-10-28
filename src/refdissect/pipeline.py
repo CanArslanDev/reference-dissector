@@ -524,10 +524,13 @@ def _fit_notes(work: Path, analysis: dict) -> tuple[list[int], int, float | None
 
 
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
-            log=print, **fit_options) -> dict:
+            log=print, cache: str | Path | bool = True, **fit_options) -> dict:
     """Fit the 808 on bass808's template notes (drums + bass, so the attack
     is in) and write a one-shot at the 808's settled pitch. fit_options go
-    to synth808.fit (maxiter, popsize: a smaller search for tests).
+    to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
+    the folder synth808.fit keeps its fits in (work/cache by default; False:
+    none), so a run whose template, settings and fit code are unchanged
+    reads its fit back.
 
     The pitch is the template's settled pitch as bass808 measured it (the
     QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.8 cents,
@@ -549,7 +552,9 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     # the template's own pitch, or the 808's tuning (analyses written before bass808: the track's)
     f1 = hz or float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
     log(f"808: {used} notes at MIDI {root}, {f1:.2f} Hz ({method or 'tuning'}); fitting (1-3 min)")
-    params, info = fit(ref, f1, **fit_options)
+    params, info = fit(ref, f1, cache=work / "cache" if cache is True else cache or None, **fit_options)
+    if info.get("cached"):
+        log(f"808: the fit of this template, settings and code read back ({info['seconds']} s when it ran)")
     apart = 1200 * np.log2(params.f_end_hz / f1)
     if abs(apart) <= 2 or method == "qifft_tail":
         pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"

@@ -21,6 +21,8 @@ A beat folder after a run:
     runs/<tag>/                       analysis.json, bass808.json, melodic.json, basicpitch/, matches.json,
                                       synth808.json, plan.json, midi/, templates/, log.txt, scores.json
                                       (run.json unscored)
+    cache/                            fit-808's fits by template, settings and code (synth808.fit),
+                                      read back by any tag whose fit-808 has the same ones
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -356,9 +358,9 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
             pipeline.match(work, lib, log=log, **options.get("match", {}))
             lap("match")
         if status["fit-808"] == "run":
-            try:
+            try:  # the fits are kept per beat (cache/), so a tag whose template did not change reads its fit back
                 pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
-                                 **options.get("fit_808", {}))
+                                 **{"cache": beat / "cache", **options.get("fit_808", {})})
             except ValueError as e:
                 problems["fit_808"] = str(e)
             lap("fit_808")

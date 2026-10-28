@@ -60,6 +60,27 @@ def test_envelope_and_harmonics_match_their_direct_forms():
     assert np.allclose(harmonics(y, 33.3), masks)
 
 
+def test_a_fit_is_read_back_while_nothing_it_depends_on_changed(tmp_path, monkeypatch):
+    """A cached fit is the one the search would find again (it is seeded);
+    another template, f1 or setting, or no cache folder, searches."""
+    from refdissect import synth808
+
+    searches = []
+    search = synth808.differential_evolution
+    monkeypatch.setattr(synth808, "differential_evolution", lambda *a, **k: searches.append(1) or search(*a, **k))
+    reference = laid_out(TRUE, int(0.6 * SR))
+    p, info = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    again, kept = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    assert again == p and kept["cached"] and kept["loss"] == info["loss"] and "cached" not in info
+    assert len(searches) == 1 and len(list(tmp_path.glob("fit-808-*.json"))) == 1
+    fit(reference, 41.2, maxiter=4, popsize=4, cache=tmp_path)
+    fit(reference, 41.3, maxiter=3, popsize=4, cache=tmp_path)
+    fit(reference * 0.5, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    fit(reference, 41.2, maxiter=3, popsize=4)
+    assert len(searches) == 5
+    assert fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)[0] == p
+
+
 def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
     """Each loss reads the 808 band, the harmonics' window and the voice's
     sample times made once (butter alone was 0.13 ms of a 2.6 ms

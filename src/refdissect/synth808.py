@@ -15,10 +15,15 @@ gets the highest correlation and loses the distortion entirely (harmonics
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
+import os
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
+import scipy
 from scipy.optimize import differential_evolution
 
 from .audio import PRE, SR, band, samples
@@ -27,6 +32,7 @@ from .xcorr import ncc
 
 NAMES = ("f_end_hz", "f_start_hz", "glide_ms", "decay_s", "attack_ms", "drive", "asym", "phase")
 BOUNDS = [(25, 60), (25, 120), (2, 200), (0.1, 6), (0.3, 200), (0.1, 8), (-0.6, 0.6), (0, 2 * np.pi)]
+CODE = ("synth808.py", "describe.py", "audio.py")  # the loss's code: a cached fit is one of this code (fit)
 
 
 @dataclass
@@ -94,10 +100,38 @@ def compare(reference: np.ndarray, x: np.ndarray, f1: float) -> dict:
             "mel_db": mel_distance(band(reference, "808"), band(x, "808"))}
 
 
+def _key(reference: np.ndarray, f1: float, options: dict) -> str:
+    """What decides a fit: the template (its samples), f1, the settings, the
+    loss's code (CODE) and numpy's and scipy's versions."""
+    a = np.ascontiguousarray(reference)
+    h = hashlib.sha256(f"{a.dtype.str} {a.shape} {float(f1).hex()} {sorted(options.items())} "
+                       f"{np.__version__} {scipy.__version__}".encode())
+    h.update(a.tobytes())
+    for name in CODE:
+        h.update((Path(__file__).parent / name).read_bytes())
+    return h.hexdigest()[:32]
+
+
+def _cached(path: Path) -> tuple[Params, dict] | None:
+    try:
+        kept = json.loads(path.read_text(encoding="utf-8"))
+        return Params.of(kept["x"]), {"loss": kept["loss"], "seconds": kept["seconds"], "cached": True}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int = 1,
-        maxiter: int = 150, popsize: int = 20) -> tuple[Params, dict]:
+        maxiter: int = 150, popsize: int = 20, cache: str | Path | None = None) -> tuple[Params, dict]:
     """Params whose voice matches the reference template (an averaged 808
-    note laid out with its onset PRE in), and how long the search took."""
+    note laid out with its onset PRE in), and how long the search took.
+    With a cache folder, a fit is kept there under its inputs, settings and
+    code (_key) and read back by a fit that has the same ones (info cached:
+    True; seconds is the search's). The search is seeded, so it would find
+    the same Params again: 50 s a suite beat, and a few ms read back."""
+    settings = {"waveform_only": waveform_only, "seed": seed, "maxiter": maxiter, "popsize": popsize}
+    path = Path(cache) / f"fit-808-{_key(reference, f1, settings)}.json" if cache else None
+    if path and (kept := _cached(path)):
+        return kept
     target = band(reference, "808")
     h_ref = harmonics(reference, f1)
     e_ref = np.maximum(envelope_db(reference, 25), -40)
@@ -129,7 +163,13 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
     r = differential_evolution(loss, bounds, popsize=popsize, maxiter=maxiter, tol=1e-7, seed=seed,
                                polish=True)
     p = Params.of(r.x)
-    return p, {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
+    info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
+    if path:  # written whole, then moved in: a run reading it at the same time never sees half a file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(f"{path.name}.{os.getpid()}.part")
+        part.write_text(json.dumps({"x": [float(v) for v in r.x], **info}), encoding="utf-8")
+        os.replace(part, path)
+    return p, info
 
 
 def one_shot(p: Params, pitch_hz: float, seconds: float = 3.0, fade_ms: float = 10) -> np.ndarray:
