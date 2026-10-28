@@ -292,7 +292,7 @@ def test_merges_until_a_round_merges_none(sounds, monkeypatch):
                                                     ("clap", "snare"))]
     rounds = []
 
-    def three_rounds(cands, pairs, first, kind):
+    def three_rounds(cands, pairs, first, kind, clean=None):
         rounds.append(1)
         cols = np.unique(cands.col)
         if len(rounds) > 3 or len(cols) < 2:
@@ -483,3 +483,24 @@ def test_a_view_never_holds_its_main(sounds):
     kicks = [t for n, t, _ in hits if n == "kick"]
     assert found(events, "kick", kicks, tol=0.001).all() and extra(events, "kick", kicks) == 0
     assert events["view"] == []
+
+
+def test_a_merge_keeps_the_cleaner_template(sounds):
+    """Two templates of the snare that keep taking each other's hits: its
+    own, and one holding another sound too, averaged from more hits
+    (layers-2: the snare's template from the low band, 16 of 16 hits at
+    NCC 0.8 or more, and one from the snare band, 7 of 18). Merged into the
+    one from more hits, every snare came out under 0.8 (make_plan gives no
+    pad under 0.5 clean). The one with more clean hits keeps them."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    snare = templates[2].audio
+    other = fit(np.r_[np.zeros(PRE, np.float32), burst(11, 150, 300, 8000, 40)], len(snare))
+    held = Template("held", "snare", "snare", (snare + 0.9 * np.max(np.abs(snare)) * other).astype(np.float32),
+                    templates[2].hits + 8, {}, None)
+    from refdissect.detect import explain as detect_explain
+    got = detect_explain(x, templates + [held])
+    snares = [t for n, t, _ in hits if n == "snare"]
+    assert got.info["merged"] == {"held": {"into": "snare", "offset_ms": 0.0}}
+    assert found(got.events, "snare", snares).all() and all(e["ncc"] >= 0.8 for e in got.events["snare"])
