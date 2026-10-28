@@ -11,12 +11,16 @@ Everything under the work folder is derived from the song: keep it local.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
 import librosa
 import numpy as np
+import scipy
+import soxr
 from scipy.signal import find_peaks
 
 from . import bass808
@@ -53,6 +57,7 @@ SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligne
 # a "layer" this much louder than the top match means the top match is not the template's sound (a kick
 # template's snare-band match got a kick 15 dB louder as its layer); a clap on a snare sits -6..0 dB
 LOUDER_DB = 10.0
+CODE_808 = ("bass808.py", "scenarios.py", "hits.py", "audio.py", "xcorr.py")  # the 808 reader's code (_transcribe)
 
 
 def _save(path: Path, obj) -> Path:
@@ -65,10 +70,48 @@ def _load(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print) -> dict:
+    """bass808.transcribe, kept in cache under what decides it (the two
+    stems' samples, the reader's code CODE_808, numpy's, scipy's and soxr's
+    versions) and read back, its log lines too, when those are the same:
+    the reader is 20-30 s of a suite beat's analyze. Read back or not, it
+    is what bass808.json holds (through JSON)."""
+    h = hashlib.sha256(f"{np.__version__} {scipy.__version__} {soxr.__version__}".encode())
+    for x in (bass, drums):
+        x = np.ascontiguousarray(x)
+        h.update(f"{x.dtype.str} {x.shape}".encode())
+        h.update(x.tobytes())
+    for name in CODE_808:
+        h.update((Path(__file__).parent / name).read_bytes())
+    path = Path(cache) / f"808-{h.hexdigest()[:32]}.json" if cache else None
+    try:
+        kept = _load(path) if path else None
+        if kept:
+            for line in kept["log"]:
+                log(line)
+            return kept["bass808"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    lines: list[str] = []
+
+    def both(msg) -> None:
+        lines.append(str(msg))
+        log(msg)
+    out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both), default=float))
+    if path:  # written whole, then moved in: a run reading it at the same time never sees half a file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(f"{path.name}.{os.getpid()}.part")
+        part.write_text(json.dumps({"bass808": out, "log": lines}), encoding="utf-8")
+        os.replace(part, path)
+    return out
+
+
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
-            meter: str | None = None, tracker: bool = True) -> dict:
+            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = True) -> dict:
     """tracker=False (or a tracker that cannot run) fits the grid as before:
-    fit_grid in bpm_range, first grid beat as phase."""
+    fit_grid in bpm_range, first grid beat as phase. cache: the folder the
+    808 reader's results are kept in (_transcribe; work/cache by default,
+    False: none)."""
     stems_dir, work = Path(stems_dir), Path(work)
     drums, bass = read(stems_dir / "drums.wav"), read(stems_dir / "bass.wav")
     duration = len(drums) / SR
@@ -128,7 +171,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808 = bass808.transcribe(bass, drums, log=log)
+    b808 = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]

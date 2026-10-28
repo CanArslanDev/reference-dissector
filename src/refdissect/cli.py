@@ -108,7 +108,7 @@ def _match_kwargs(a) -> dict:
 
 def _analyze(a):
     from .pipeline import analyze
-    analyze(a.stems, a.work, **_analyze_kwargs(a))
+    analyze(a.stems, a.work, **_analyze_kwargs(a), **({"cache": False} if a.no_cache else {}))
 
 
 def _melodic(a):
@@ -184,8 +184,8 @@ def _suite_build(a):
 def _suite_run(a):
     from .suite import run
     options = {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}
-    if a.no_fit_cache:
-        options["fit_808"] = {"cache": False}
+    if a.no_cache:
+        options["analyze"]["cache"], options["fit_808"] = False, {"cache": False}
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render, options,
             a.resume, _list(a.steps), a.reuse, log=_say)
     o = s["overall"]
@@ -292,9 +292,9 @@ def _suite_parser(sub) -> None:
     s.add_argument("--reuse", default=None, metavar="TAG",
                    help="copy the outputs of the steps not run from runs/TAG/ of each beat (TAG itself: in place); "
                         "fails before running when one is missing")
-    s.add_argument("--no-fit-cache", action="store_true",
-                   help="fit every 808 again, even where a beat keeps a fit of its template, settings and code "
-                        "(cache/)")
+    s.add_argument("--no-cache", action="store_true",
+                   help="read every 808 and fit it again, even where a beat keeps the 808 reader's results of its "
+                        "stems or a fit of its template, settings and code (cache/)")
     _analyze_options(s)
     _match_options(s)
     s.set_defaults(run=_suite_run)
@@ -333,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("analyze", help="grid, tuning, drum templates and hits, 808 notes, sections")
     s.add_argument("stems")
     s.add_argument("--work", required=True)
+    s.add_argument("--no-cache", action="store_true",
+                   help="read the 808 again even where its results for these stems and code are kept (work/cache/)")
     _analyze_options(s)
     s.set_defaults(run=_analyze)
     s = sub.add_parser("melodic", help="notes per tonal stem and chords, with Basic Pitch (after analyze)")
