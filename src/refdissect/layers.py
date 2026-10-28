@@ -103,6 +103,7 @@ FLAM_MS = 35  # a quieter hit this close before another of the same sound is its
 TONE_MS = 35
 TAIL = (0.25, 0.5)  # a low or tonal template's hit this soon (s) after one this much louder is its ringing (_tails)
 NEAR_MS = 2  # a template held this close by a bigger one of its fit band is a variant of that sound (_held)
+CLEAN_NCC = 0.8  # a matched-filter hit this alike to its template is clean (as discover() and the plan count them)
 
 
 @dataclass
@@ -529,12 +530,20 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
 
 
 def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int],
-               kind: list[bool]) -> dict[int, tuple[int, int]]:
+               kind: list[bool], clean: np.ndarray | None = None) -> dict[int, tuple[int, int]]:
     """Columns of one kind (kind: tonal or not; None, never merged) that
     keep losing their hits to each other (DUPLICATE of the fewer's hits
     found twice; a kick+hat template and a hat template share the hat, not
     the kind): {merged: (into, offset)} with p_into = p_merged + offset,
-    into the one earlier in first. At half, a clap on every other snare at
+    into the one earlier in first; where DUPLICATE of the more's hits are
+    found twice too (one sound, twice over), into the one with more clean
+    matched-filter hits (clean, per column). By first alone, layers-2's
+    snare template from the low band (16 of its 16 hits clean, 14 shared)
+    went into a snare-band one (7 of 18): the snare's hits came out 0.44
+    clean, under make_plan's 0.5, and no pad played it. Only both ways: a
+    snare template (32 of 32 clean) took a hat's 128 hits where they shared
+    the 32 snares (a hat averaged over every hit holds the snare under some
+    of them, and the snare's the hat). At half, a clap on every other snare at
     a constant offset (its template and the snare's each holding half the
     other) lost half its hits to the snare, was merged into it, and its
     solo hits went too: 0 of 32 claps. Matching as waveforms instead (NCC
@@ -553,7 +562,8 @@ def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int]
     for (a, b), d in sorted(count.items(), key=lambda kv: -len(kv[1])):
         if len(d) >= DUPLICATE * min(hits[a], hits[b]) and a not in out and b not in out:
             off = int(np.median(d))  # p_b - p_a
-            if first.index(a) < first.index(b):
+            twice = clean is not None and len(d) >= DUPLICATE * max(hits[a], hits[b]) and clean[a] != clean[b]
+            if (clean[a] > clean[b]) if twice else first.index(a) < first.index(b):
                 out[b] = (a, -off)
             else:
                 out[a] = (b, off)
@@ -628,8 +638,8 @@ class Scene:
     (n) and how they overlap (relations); the columns (kit.columns: kept
     templates purified, then pitched copies) with the padded stem's bands;
     the column of each kept template; per column its threshold; the decay of
-    the low and tonal columns; and per column its usual gain and null, as
-    the steps set them."""
+    the low and tonal columns; and per column its usual gain, null and clean
+    matched-filter hits, as the steps set them."""
     templates: list
     n: list[int]
     rel: dict
@@ -641,6 +651,7 @@ class Scene:
     rings: dict[int, np.ndarray]
     usual: np.ndarray | None = None
     null: np.ndarray | None = None
+    clean: np.ndarray | None = None
 
 
 def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, closest_ms: dict | None = None,
@@ -733,9 +744,11 @@ def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> t
     """1. Each column's matched-filter hits (its own band and attack, NCC at
     the threshold, closest_ms apart) and its weak peaks (CANDIDATE_NCC up to
     the threshold); a left-out template's hits go to the templates that
-    explain it. Sets the usual gains: the median of a template's hits."""
+    explain it. Sets the usual gains (the median of a template's hits) and
+    the clean hits (those at CLEAN_NCC or more)."""
     templates, n, columns = sc.templates, sc.n, sc.kit.columns
     cands, weak, usual = Candidates(), {}, np.ones(len(columns))
+    sc.clean = np.zeros(len(columns), int)
     for c, col in enumerate(columns):
         tp = templates[col.template]
         audio = tp.audio if not col.semitones else transpose(tp.audio, col.semitones)
@@ -745,6 +758,7 @@ def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> t
         sure = props["peak_heights"] >= sc.thr[c]
         cands.add(c, p[sure], props["peak_heights"][sure], "matched")
         weak[c] = p[~sure]
+        sc.clean[c] = int(np.sum(props["peak_heights"][sure] >= CLEAN_NCC))
         if not col.semitones and np.any(sure):
             usual[c] = float(np.median(gain[p[sure]]))
     sc.usual = np.array([usual[sc.col_of[col.template]] for col in columns])
@@ -770,7 +784,7 @@ def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple
     for _ in range(len(columns)):  # each round merges a column away: the last one merges none
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
-        dup = duplicates(cands, pairs, order, kind)
+        dup = duplicates(cands, pairs, order, kind, sc.clean)
         if not dup:
             break
         for a, (b, off) in dup.items():
