@@ -326,7 +326,18 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     within SAME_MS of one that another template put on the pad is that
     strike found again (on 5 seed-2 suite beats a snare-band template of
     the kick-and-hat moments played the hat's file a second time on 6-15
-    of them; false hits 11.7 -> 10.7 a beat, htdemucs). The pad plays the
+    of them; false hits 11.7 -> 10.7 a beat, htdemucs). So does the
+    backbone: it is planned first, most hits first, and another kick or
+    snare template's hit within SAME_MS of one of its hits is that kick or
+    snare seen again (a template left with none gets no pad). Ordered by
+    NCC alone, swing66-2's snare-band template of 10 kick moments (NCC
+    0.895, under the kick's 0.713) took pad 36 and played them a second
+    time: kick F1@20 0.903 -> 0.846, swing66's 0.942 -> 0.914. With it,
+    plan drums F1@20 0.866 -> 0.866 [0.897 -> 0.898], kick 0.859 -> 0.862
+    [0.921 -> 0.925], false hits 10.7 -> 10.3 [4.3 -> 3.7] a beat, and no
+    role of any scenario more than 0.005 under the base code's (the
+    layers scenario's second kick, on every other kick, had no pad before
+    either). The pad plays the
     top match at its pitch: Transpose in whole semitones and Detune in
     whole cents (pad_pitch), as Live keeps them. Velocities play each hit's
     gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
@@ -340,15 +351,20 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     pad_of: dict[str, int] = {}
     leads: dict[tuple, float] = {}
     played: dict[int, list[float]] = {}  # where each pad's hits attack (s)
-    # strongest identifications first; a template found twice shares its pad
-    order = sorted(analysis["templates"], key=lambda k: (matches.get(k, {}).get("same_as") is not None,
-                                                         -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
     g = analysis["grid"]
     grid = Grid(bpm, g.get("phase", 0.0), g.get("beats_per_bar", 4), g.get("beat_unit", 4))
     n = int(round(duration * SR))
     least = min_hits if min_hits is not None else min_hits_for(n, grid, RESIDUAL_BARS)
     backbone = min_hits_for(n, grid)  # one hit per 4 bars
     clean, clock = sound_clean(analysis), bar_clock(g)
+    spine = {k: _backbone(v, matches.get(k), clean[k], backbone) for k, v in analysis["templates"].items()}
+    # the backbone first, most hits first, then the strongest identifications; a template found twice shares
+    # its pad
+    order = sorted(analysis["templates"], key=lambda k: (
+        matches.get(k, {}).get("same_as") is not None, not spine[k],
+        -analysis["templates"][k]["detected_hits"] if spine[k]
+        else -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
+    struck: dict[str, list[float]] = {}  # where the backbone's kicks and snares attack (s)
     for name in order:
         info, m = analysis["templates"][name], matches.get(name)
         hits = analysis["events"][name]
@@ -357,14 +373,15 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                     and recurring([e.get("t_attack", e["t"]) for e in hits], clock) < min_recur)):
             continue
         role = m["role"] if m["role"] in PADS else "perc"
-        structural = (role in ("kick", "snare") and info.get("found", "grid") == "grid" and clean[name] >= 0.7
-                      and info["detected_hits"] >= backbone)
+        seen = np.array(struck.get(role, []))
+        if len(seen) and all(np.min(np.abs(seen - _attack_at(e, info))) <= SAME_MS / 1000 for e in hits):
+            continue  # every hit is a kick (snare) the backbone plays: that sound seen again
         shift = 0  # semitones from the pad's pitch to the template's
         if m.get("same_as") in pad_of:
             note = pad_of[m["same_as"]]
             if m["top"][0]["path"] == pads[str(note)]["path"]:
                 shift = pad_pitch(m["top"][0])["transpose"] - pads[str(note)]["transpose"]
-        elif m["top"][0]["ncc"] >= min_ncc or structural:
+        elif m["top"][0]["ncc"] >= min_ncc or spine[name]:
             if used[role] >= len(PADS[role]):
                 continue
             note = PADS[role][used[role]]
@@ -381,13 +398,16 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             st = e.get("semitones", 0)
             if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
                 continue
-            # the hit attacks at t_attack, or the template's attack_s after its window starts; the note
-            # starts that much before it that the pad's sample attacks there (pad_lead)
-            t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
+            # the note starts that much before the hit's attack that the pad's sample attacks there (pad_lead)
+            t = _attack_at(e, info)
             pad = notes[st + shift]
             if len(before.get(pad, [])) and np.min(np.abs(before[pad] - t)) <= SAME_MS / 1000:
                 continue  # one moment of one sample: the pad plays it already, for a template of that sound
+            if len(seen) and np.min(np.abs(seen - t)) <= SAME_MS / 1000:
+                continue  # a kick (snare) the backbone plays already
             played.setdefault(pad, []).append(t)
+            if spine[name]:
+                struck.setdefault(role, []).append(t)
             drum_notes.append({"pitch": pad, "start_time": round(max(0.0, t - pad_lead(pads[str(pad)], leads))
                                                                    * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
@@ -413,6 +433,19 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
+
+
+def _backbone(info: dict, m: dict | None, clean: float, least: int) -> bool:
+    """A kick or snare discover() found on the places of the beat (not in
+    its residual pass), clean (0.7) and played throughout (least hits)."""
+    return (bool(m) and m["role"] in ("kick", "snare") and info.get("found", "grid") == "grid" and clean >= 0.7
+            and info["detected_hits"] >= least)
+
+
+def _attack_at(e: dict, info: dict) -> float:
+    """Where a hit attacks: t_attack, or its template's attack_s after its
+    window starts (at the hit's semitones)."""
+    return e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-e.get("semitones", 0) / 12))
 
 
 def recurring(t, bar, ms: float = RECUR_MS, bars: int = RECUR_BARS) -> float:

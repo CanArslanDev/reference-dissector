@@ -229,6 +229,23 @@ def test_a_pad_plays_each_moment_once(tmp_path):
     assert len(notes) == 16 and {n["pitch"] for n in notes} == {38}
 
 
+def test_the_backbone_plays_its_kicks_once(tmp_path):
+    """swing66-2: a snare-band template of 10 of the kick's moments, closer
+    to a library kick (NCC 0.895) than the kick itself (0.713, played as
+    the backbone), took pad 36 and played those kicks a second time. The
+    backbone is planned first and plays each kick once; a template of only
+    its kicks gets no pad."""
+    analysis, matches, synth = _bars(tmp_path, [1.0 * k + 0.25 for k in range(32)], {"found": "grid"},
+                                     {"role": "kick", "verdict": "no close match", "ncc": 0.713})
+    analysis["templates"]["sound_2"] = {"detected_hits": 10, "clean": 0.8, "found": "grid"}
+    analysis["events"]["sound_2"] = [{"t": t + 0.001, "t_attack": t + 0.001, "gain": 1.0}
+                                     for t in [2.0 * k + 0.25 for k in range(10)]]
+    matches["sound_2"] = {**matches["sound_1"], "top": [{**matches["sound_1"]["top"][0], "ncc": 0.895}]}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == ["sound_1"]
+    assert len(plan["tracks"]["drums"]["notes"]) == 32
+
+
 def test_pitched_copies_get_transposed_pads(tmp_path):
     """Hits of a pitched copy (detect: semitones) play on pads of their own,
     the sound's sample transposed that much further, the plain ones on the
