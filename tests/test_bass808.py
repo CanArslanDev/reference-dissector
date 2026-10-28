@@ -20,16 +20,20 @@ def kick(seconds: float = 0.12) -> np.ndarray:
 
 
 def line(notes, root_hz: float = 32.70, cents: float = 0.0, bpm: float = 140.0, bars: int = 4, leak: float = 0.15,
-         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1
+         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0
          ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """A bass stem, a drum stem and the truth of `bars` bars of notes (16th
     step, length in 16ths, semitones over the root, and "legato" for a note
     that slides in from the one before over slide_ms without starting the
     sample again), the 808 settling at root_hz + cents and starting `drop`
-    semitones over it; a kick on every other attacked note, leaking into the
-    bass stem at `leak`."""
+    semitones over it (and `tail` more semitones falling with a time
+    constant of 150 ms, as real 808s' drops end); a kick on every other
+    attacked note, leaking into the bass stem at `leak`."""
     f = root_hz * 2 ** (cents / 1200)
     sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, 1.5, 3, 2.0, 0.05, 0.3), 2.5)
+    if tail:
+        t = np.arange(len(sample)) / SR
+        sample = np.interp(np.cumsum(2 ** (tail * np.exp(-t / 0.15) / 12)), np.arange(len(sample)), sample)
     step = 60 / bpm / 4
     n = int((bars * 16 * step + 1.5) * SR)
     bass, drums = np.zeros(n, np.float32), np.zeros(n, np.float32)
@@ -334,6 +338,21 @@ def test_the_settled_pitch_waits_for_the_drop_to_settle():
     bass, drums, truth = line([(0, 8, 0), (8, 4, 5), (12, 2, 0), (14, 2, 7)], cents=11.0, drop=8.0, glide_ms=120.0)
     b = B.transcribe(bass, drums)
     assert abs(b["template"]["tuning_cents"] - 11.0) < 3
+
+
+def test_short_notes_read_their_settled_pitch_past_the_template():
+    """bass_low's failure: 110-330 ms notes of an 808 whose drop ends in a
+    slow tail (2.5 semitones more, falling with a 150 ms time constant)
+    never settle, and one exponential fitted to the template's drop leaves
+    the tail out: the tuning read 35.0 cents sharp (+46.0 for +11). Notes
+    up a fifth play the sample 1.5 times as fast and reach past the
+    template's end; read on them, 20.4 cents. A template whose notes
+    settled (QIFFT window) keeps its own reading."""
+    bass, drums, _ = line([(0, 2, 0), (2, 1, 0), (3, 1, 0), (4, 3, 0), (7, 2, 0), (9, 1, 5), (10, 3, 7), (13, 3, 0)],
+                          root_hz=21.83, cents=11.0, bpm=136.0, drop=8.0, glide_ms=40.0, tail=2.5)
+    b = B.transcribe(bass, drums)
+    assert b["template"]["method"].startswith("notes_") and abs(b["template"]["tuning_cents"] - 11.0) < 25
+    assert B.settle(B.band(bass, "808"), FLAT, [(0.0, 0.3, 700.0)] * 3) is FLAT
 
 
 def test_tune_808_splits_a_fraction_into_transpose_and_detune():
