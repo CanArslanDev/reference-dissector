@@ -114,3 +114,20 @@ def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_p
     pipeline._transcribe(bass * 2, drums, tmp_path, lambda m: None)
     pipeline._transcribe(bass, drums, None, lambda m: None)
     assert len(calls) == 3
+
+
+def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems, tmp_path, monkeypatch):
+    """By default analyze keeps nothing: a script that patches a module and
+    runs it must not read back what the unpatched code found (the cache sees
+    the files, not the code in memory). Given a folder, a run that reads the
+    808 reader's result back says so in source.cached, and is otherwise the
+    run that kept it."""
+    monkeypatch.setattr(beats, "track", lambda *a, **kw: pytest.fail("the tracker ran"))
+    plain = pipeline.analyze(stems["dir"], tmp_path / "plain", log=lambda *_: None, tracker=False)
+    assert sorted(p.name for p in (tmp_path / "plain").iterdir()) == ["analysis.json", "bass808.json", "templates"]
+    kept = tmp_path / "kept"
+    first, again = (pipeline.analyze(stems["dir"], tmp_path / w, log=lambda *_: None, tracker=False, cache=kept)
+                    for w in ("first", "again"))
+    assert "cached" not in plain["source"] and "cached" not in first["source"]
+    assert again["source"].pop("cached") == {"808_reader": str(next(kept.glob("808-*.json")))}
+    assert again == first == plain

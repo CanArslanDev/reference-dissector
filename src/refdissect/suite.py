@@ -21,9 +21,10 @@ A beat folder after a run:
     runs/<tag>/                       analysis.json, bass808.json, melodic.json, basicpitch/, matches.json,
                                       synth808.json, plan.json, midi/, templates/, log.txt, scores.json
                                       (run.json unscored)
-    cache/                            the 808 reader's results by stems and code (pipeline._transcribe)
-                                      and fit-808's fits by template, settings and code (synth808.fit),
-                                      read back by any tag whose analyze or fit-808 has the same ones
+    cache/                            with cache on (--cache): the 808 reader's results and fit-808's
+                                      fits (cache.py), read back by a run with cache on whose stems, or
+                                      template and settings, and code are the same; its record names
+                                      them (cached) and its seconds leave their steps out
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -59,6 +60,9 @@ REFERENCE = {"drums": "drums", "bass": "bass"}  # truth group -> the plan's stem
 STEPS = ("analyze", "melodic", "match", "fit-808", "plan", "score")
 NEEDS = {"melodic": "analyze", "match": "analyze", "fit-808": "analyze", "plan": "analyze", "score": "plan"}
 ONE_SHOT = "808 (synth).wav"  # pipeline.fit_808's
+# a result a run with cache on read back from cache/ (record: cached) -> the step whose seconds it shortens:
+# on v1-1 and glides-1, fit-808 took 1.6 s with its fit read back, 68-70 s with it run
+READ_BACK = {"808_reader": "analyze", "fit_808": "fit_808"}
 # the outputs each step reads beyond NEEDS: melodic.build reads notes_808 (the chords' bass) and match the
 # drum templates, so a reused melodic.json or matches.json describes the analysis it was made from
 READS = {"melodic": ("analyze",), "match": ("analyze",), "fit-808": ("analyze",),
@@ -338,18 +342,21 @@ def _prepare(beat: Path, work: Path, tag: str, model: str, steps, reuse: str | N
 
 
 def _pipeline(beat: Path, work: Path, model: str, library, library_808, options: dict, lap, status: dict,
-              reuse: str | None) -> dict:
+              reuse: str | None, cache: bool = False) -> tuple[dict, list[str]]:
     """The steps whose status is run, as the commands run them; returns the
-    problems. A beat whose 808 never rings alone gets no fitted one-shot
-    (fit_808's ValueError), so its plan has no 808 track, as with the CLI."""
-    problems = {}
+    problems and the results read back (READ_BACK's names) from the beat's
+    cache/, where cache keeps the 808 reader's results and the fits for
+    every run that has it on. A beat whose 808 never rings alone gets no
+    fitted one-shot (fit_808's ValueError), so its plan has no 808 track, as
+    with the CLI."""
+    problems, cached, kept = {}, [], beat / "cache" if cache else False
     with open(work / "log.txt", "a", encoding="utf-8", buffering=1) as f:  # line by line, to follow a run
         def log(msg) -> None:
             f.write(f"{msg}\n")
         log("steps: " + ", ".join(f"{s} {v}" for s, v in status.items()) + (f" (runs/{reuse})" if reuse else ""))
-        if status["analyze"] == "run":  # the 808 reader's results and the fits are kept per beat (cache/)
-            pipeline.analyze(stems_dir(beat, model), work, log=log, **{"cache": beat / "cache",
-                                                                         **options.get("analyze", {})})
+        if status["analyze"] == "run":
+            a = pipeline.analyze(stems_dir(beat, model), work, log=log, **{"cache": kept, **options.get("analyze", {})})
+            cached += list(a["source"].get("cached", {}))
             lap("analyze")
         if status["melodic"] == "run":
             pipeline.melodic(work, log=log, **options.get("melodic", {}))
@@ -361,15 +368,16 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
             lap("match")
         if status["fit-808"] == "run":
             try:
-                pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
-                                 **{"cache": beat / "cache", **options.get("fit_808", {})})
+                r = pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
+                                     **{"cache": kept, **options.get("fit_808", {})})
+                cached += ["fit_808"] if r["fit"].get("cached") else []
             except ValueError as e:
                 problems["fit_808"] = str(e)
             lap("fit_808")
         if status["plan"] == "run":
             pipeline.plan(work, log=log)
             lap("plan")
-    return problems
+    return problems, cached
 
 
 def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, lap) -> tuple[dict, list]:
@@ -393,7 +401,8 @@ def _plan_score(truth: dict, beat: Path, work: Path, plan: dict, render: bool, l
 
 
 def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, library_808: str | Path | None = None,
-             render: bool = False, options: dict | None = None, steps=None, reuse: str | None = None) -> dict:
+             render: bool = False, options: dict | None = None, steps=None, reuse: str | None = None,
+             cache: bool = False) -> dict:
     """The steps (check_steps: all by default) on one beat's stems for model
     (separated already) into runs/<tag>/, and with score, scored at analysis
     and plan level. runs/<tag>/ is emptied first and given the other steps'
@@ -401,7 +410,9 @@ def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, librar
     _prepare). The record is written to runs/<tag>/scores.json (run.json
     without score) and returned. options: keyword arguments for the steps,
     {"analyze": {...}, "melodic": {...}, "match": {...}, "fit_808": {...}},
-    passed on unchanged."""
+    passed on unchanged. cache: keep the 808 reader's results and the fits
+    in the beat's cache/ and read them back (_pipeline); off, every step
+    runs (a measurement's default)."""
     beat = Path(beat).resolve()
     work = beat / "runs" / tag
     steps = check_steps(steps, reuse)
@@ -412,7 +423,8 @@ def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, librar
     lap = _stopwatch(seconds)
     status, problems = _prepare(beat, work, tag, model, steps, reuse)
     lap("prepare")
-    problems |= _pipeline(beat, work, model, library, library_808, options, lap, status, reuse)
+    ran, cached = _pipeline(beat, work, model, library, library_808, options, lap, status, reuse, cache)
+    problems |= ran
     plan = json.loads((work / "plan.json").read_text(encoding="utf-8")) if (work / "plan.json").is_file() else None
     scores = {}
     if "score" in steps:
@@ -425,7 +437,7 @@ def run_beat(beat: str | Path, tag: str, model: str, library: str | Path, librar
     record = {"beat": beat.name, "scenario": truth["scenario"], "seed": truth["seed"], "tag": tag, "model": model,
               "separation": {k: sep.get(k) for k in ("model", "seed", "shifts", "device", "versions")},
               "options": options, "steps": status, "reuse": reuse, "refdissect": SOURCE, "render": render,
-              "seconds": seconds, "problems": problems}
+              "cache": cache, "cached": cached, "seconds": seconds, "problems": problems}
     if plan is not None:
         tracks = plan["tracks"]
         record["plan_size"] = {"pads": len(tracks["drums"]["pads"]), "drum_notes": len(tracks["drums"]["notes"]),
@@ -475,14 +487,14 @@ def _done(record: dict, log) -> None:
 def run(root: str | Path, library: str | Path, library_808: str | Path | None = None, tag: str = "base",
         model: str = DEFAULT_MODEL, scenarios=None, jobs: int = 3, render: bool = False,
         options: dict | None = None, resume: bool = False, steps=None, reuse: str | None = None,
-        log=print) -> dict:
+        cache: bool = False, log=print) -> dict:
     """Separate what is not separated yet (one Demucs process), then
     run_beat over the beats, `jobs` at a time in their own processes (each
     loads the library once, about 0.5 GB, if match runs), and write the
     means per scenario to root/scores-<tag>.json (also returned). resume
     skips beats this tag has scored already (scored); a beat that failed
-    runs again. steps and reuse: run_beat's, checked for every beat before
-    any runs (check_steps, reuse_problems)."""
+    runs again. steps, reuse and cache: run_beat's, steps and reuse checked
+    for every beat before any runs (check_steps, reuse_problems)."""
     steps = check_steps(steps, reuse)
     if stale := stale_steps(steps, reuse):
         log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
@@ -500,7 +512,7 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
             raise ValueError(f"runs/{reuse} cannot be reused in {len(bad)} of {len(beats)} beats: {shown}"
                              + (" ..." if len(bad) > 4 else ""))
     args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {}, steps,
-             reuse) for b in beats]
+             reuse, cache) for b in beats]
     if jobs > 1 and len(args) > 1:
         with ProcessPoolExecutor(min(jobs, len(args)), mp_context=multiprocessing.get_context("spawn")) as pool:
             for future in as_completed([pool.submit(_run_job, a) for a in args]):
@@ -637,20 +649,32 @@ def _distinct(values) -> list:
     return [seen[k] for k in sorted(seen)]
 
 
+def _timed(record: dict) -> dict:
+    """A record's seconds without the steps that read a result back from
+    cache/ (READ_BACK), and then without the total: those time the cache,
+    not the code."""
+    out = dict(record["seconds"])
+    for name in record.get("cached") or []:
+        out.pop(READ_BACK[name], None)
+        out.pop("total", None)
+    return out
+
+
 def _scenario_means(records: list[dict]) -> dict:
     return {"beats": len(records), "seeds": sorted(r["seed"] for r in records),
             "analysis": _means([headline(r["analysis"]) for r in records]),
             "plan": _means([headline(r["plan"]) for r in records]),
-            "seconds": _means([r["seconds"] for r in records])}
+            "seconds": _means([_timed(r) for r in records])}
 
 
 def aggregate(root: str | Path, tag: str) -> dict:
     """Means per scenario over the beats this tag has scored (a key over the
     beats that have it), and overall: the mean over scenarios, so each
     scenario counts once whatever its number of beats. options, render,
-    steps, reuse and refdissect (the code) list every value the records
-    hold: one, unless a resumed run mixed them (steps also differ where a
-    beat has no tonal stem)."""
+    steps, reuse, cache and refdissect (the code) list every value the
+    records hold: one, unless a resumed run mixed them (steps also differ
+    where a beat has no tonal stem); cached counts the beats that read each
+    result back (their seconds leave its step out: _timed)."""
     records = [json.loads(p.read_text(encoding="utf-8")) for p in Path(root).glob(f"*/runs/{tag}/scores.json")]
     ok = [r for r in records if "failed" not in r]
     groups: dict[str, list[dict]] = {}
@@ -664,7 +688,8 @@ def aggregate(root: str | Path, tag: str) -> dict:
                            "devices": sorted({str(r["separation"].get("device")) for r in ok})},
             "options": _distinct(r.get("options") for r in ok), "render": _distinct(r.get("render") for r in ok),
             "steps": _distinct(r.get("steps") for r in ok), "reuse": _distinct(r.get("reuse") for r in ok),
-            "refdissect": _distinct(r.get("refdissect") for r in ok),
+            "refdissect": _distinct(r.get("refdissect") for r in ok), "cache": _distinct(r.get("cache") for r in ok),
+            "cached": {k: n for k in READ_BACK if (n := sum(k in (r.get("cached") or []) for r in ok))},
             "beats": len(ok), "failed": sorted(r["beat"] for r in records if "failed" in r),
             "scenarios": per, "overall": {"scenarios": len(per), **overall}}
 
@@ -712,7 +737,7 @@ TABLES = (  # (part, key, title, digits)
     ("plan", "levels.kit.drums_db", "Levels: a perfect kit's drums under the plan's faders, re the truth (dB)", 2),
     ("plan", "levels.vs_kit_abs_db", "Levels: median |level against a perfect kit| over sounds, plan render (dB)", 2),
     ("plan", "levels.balance_abs_db", "Levels: median |balance| over sounds, plan render (dB)", 2),
-    ("seconds", "total", "Seconds per beat after separation", 0),
+    ("seconds", "total", "Seconds per beat after separation (beats that read nothing back from cache/)", 0),
 )
 ROLE_TABLES = (("analysis", "f1_20", "Strict F1@20 per drum role, analysis", 3),
                ("plan", "f1_20", "Strict F1@20 per drum role, plan", 3),
@@ -777,6 +802,14 @@ def _reused(agg: dict) -> str:
         f" (stale: {', '.join(stale)} read outputs this run rewrote)" if stale else "")
 
 
+def _read_back(agg: dict) -> str:
+    """'; read back from cache/: the 808 reader on 12 beats, ...' for a tag
+    whose runs read results back (left out of its seconds: _timed)."""
+    names = {"808_reader": "the 808 reader", "fit_808": "fit-808's fit"}
+    got = [f"{names[k]} on {n} beat{'s' * (n != 1)}" for k, n in (agg.get("cached") or {}).items()]
+    return f"; read back from cache/: {', '.join(got)} (their steps left out of the seconds)" if got else ""
+
+
 def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> str:
     """Markdown: per scenario, each headline number for every tag (from
     root/scores-<tag>.json) and the change from the first tag to the last."""
@@ -787,7 +820,7 @@ def report(root: str | Path, tags: list[str], out: str | Path | None = None) -> 
         sep = a.get("separation") or {}
         lines.append(f"- **{t}**: {a['beats']} beats in {len(a['scenarios'])} scenarios, model {a.get('model')} "
                      f"(seed {sep.get('seed')}, shifts {sep.get('shifts')}, {', '.join(sep.get('devices', []))}), "
-                     f"options {json.dumps(a.get('options'))}" + _reused(a)
+                     f"options {json.dumps(a.get('options'))}" + _reused(a) + _read_back(a)
                      + (f"; failed: {', '.join(a['failed'])}" if a.get("failed") else ""))
     lines.append("")
     for part, key, title, digits in TABLES:

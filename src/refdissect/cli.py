@@ -108,7 +108,7 @@ def _match_kwargs(a) -> dict:
 
 def _analyze(a):
     from .pipeline import analyze
-    analyze(a.stems, a.work, **_analyze_kwargs(a), **({"cache": False} if a.no_cache else {}))
+    analyze(a.stems, a.work, **_analyze_kwargs(a), cache=not a.no_cache)
 
 
 def _melodic(a):
@@ -183,11 +183,9 @@ def _suite_build(a):
 
 def _suite_run(a):
     from .suite import run
-    options = {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}
-    if a.no_cache:
-        options["analyze"]["cache"], options["fit_808"] = False, {"cache": False}
-    s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render, options,
-            a.resume, _list(a.steps), a.reuse, log=_say)
+    s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, _list(a.steps), a.reuse,
+            cache=a.cache, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
@@ -292,9 +290,10 @@ def _suite_parser(sub) -> None:
     s.add_argument("--reuse", default=None, metavar="TAG",
                    help="copy the outputs of the steps not run from runs/TAG/ of each beat (TAG itself: in place); "
                         "fails before running when one is missing")
-    s.add_argument("--no-cache", action="store_true",
-                   help="read every 808 and fit it again, even where a beat keeps the 808 reader's results of its "
-                        "stems or a fit of its template, settings and code (cache/)")
+    s.add_argument("--cache", action=argparse.BooleanOptionalAction, default=False,
+                   help="keep the 808 reader's results and the fits in each beat's cache/ and read them back where "
+                        "the stems or the template, the settings and the package's code are the same (default off: "
+                        "every step runs, and its seconds are the code's)")
     _analyze_options(s)
     _match_options(s)
     s.set_defaults(run=_suite_run)
