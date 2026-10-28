@@ -92,8 +92,9 @@ def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypat
 
 def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_path, monkeypatch):
     """pipeline._transcribe keeps bass808.transcribe's result by the two
-    stems' samples and the reader's code, and reads it back with its log
-    lines, through JSON either way; other stems, or no cache, read again."""
+    stems' samples and the package's code, and reads it back with its log
+    lines, through JSON either way, saying where from (a read-back left no
+    trace in the log); other stems, or no cache, read again."""
     from refdissect import pipeline
 
     calls = []
@@ -105,8 +106,10 @@ def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_p
     monkeypatch.setattr(pipeline.bass808, "transcribe", reader)
     bass, drums = np.ones(100, np.float32), np.zeros(100, np.float32)
     first, again = [], []
-    out = pipeline._transcribe(bass, drums, tmp_path, first.append)
-    assert pipeline._transcribe(bass, drums, tmp_path, again.append) == out and again == first and len(calls) == 1
+    out, read_back = pipeline._transcribe(bass, drums, tmp_path, first.append)
+    path = next(tmp_path.glob("808-*.json"))
+    assert read_back is None and pipeline._transcribe(bass, drums, tmp_path, again.append) == (out, str(path))
+    assert again == [f"808 reader: read back from {path}; its log when it ran:", *first] and len(calls) == 1
     assert out["notes"][0]["t"] == 0.5 and isinstance(out["template"]["hz"], float)
     pipeline._transcribe(bass * 2, drums, tmp_path, lambda m: None)
     pipeline._transcribe(bass, drums, None, lambda m: None)

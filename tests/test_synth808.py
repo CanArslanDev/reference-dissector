@@ -71,8 +71,8 @@ def test_a_fit_is_read_back_while_nothing_it_depends_on_changed(tmp_path, monkey
     reference = laid_out(TRUE, int(0.6 * SR))
     p, info = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
     again, kept = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
-    assert again == p and kept["cached"] and kept["loss"] == info["loss"] and "cached" not in info
-    assert len(searches) == 1 and len(list(tmp_path.glob("fit-808-*.json"))) == 1
+    assert again == p and kept["loss"] == info["loss"] and "cached" not in info
+    assert len(searches) == 1 and [f.name for f in tmp_path.glob("fit-808-*.json")] == [kept["cached"]]
     fit(reference, 41.2, maxiter=4, popsize=4, cache=tmp_path)
     fit(reference, 41.3, maxiter=3, popsize=4, cache=tmp_path)
     fit(reference * 0.5, 41.2, maxiter=3, popsize=4, cache=tmp_path)

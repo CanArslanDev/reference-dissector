@@ -11,16 +11,12 @@ Everything under the work folder is derived from the song: keep it local.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from collections import Counter
 from pathlib import Path
 
 import librosa
 import numpy as np
-import scipy
-import soxr
 from scipy.signal import find_peaks
 
 from . import bass808
@@ -29,6 +25,7 @@ from . import detect as det
 from .audio import PRE, SR, band, read, samples, shift, transpose, write
 from .audio import fit as fit_to
 from .beats import track_stems
+from .cache import keep, kept, key
 from .detect import (
     LENGTH_MS,
     Template,
@@ -57,7 +54,6 @@ SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligne
 # a "layer" this much louder than the top match means the top match is not the template's sound (a kick
 # template's snare-band match got a kick 15 dB louder as its layer); a clap on a snare sits -6..0 dB
 LOUDER_DB = 10.0
-CODE_808 = ("bass808.py", "scenarios.py", "hits.py", "audio.py", "xcorr.py")  # the 808 reader's code (_transcribe)
 
 
 def _save(path: Path, obj) -> Path:
@@ -70,40 +66,28 @@ def _load(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print) -> dict:
-    """bass808.transcribe, kept in cache under what decides it (the two
-    stems' samples, the reader's code CODE_808, numpy's, scipy's and soxr's
-    versions) and read back, its log lines too, when those are the same:
-    the reader is 20-30 s of a suite beat's analyze. Read back or not, it
-    is what bass808.json holds (through JSON)."""
-    h = hashlib.sha256(f"{np.__version__} {scipy.__version__} {soxr.__version__}".encode())
-    for x in (bass, drums):
-        x = np.ascontiguousarray(x)
-        h.update(f"{x.dtype.str} {x.shape}".encode())
-        h.update(x.tobytes())
-    for name in CODE_808:
-        h.update((Path(__file__).parent / name).read_bytes())
-    path = Path(cache) / f"808-{h.hexdigest()[:32]}.json" if cache else None
-    try:
-        kept = _load(path) if path else None
-        if kept:
-            for line in kept["log"]:
-                log(line)
-            return kept["bass808"]
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
+def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print) -> tuple[dict, str | None]:
+    """bass808.transcribe, kept in cache under what decides it (cache.key:
+    the two stems' samples, the versions and the package's code) and read
+    back, its log lines too, when those are the same: the reader is 20-40 s
+    of a suite beat's analyze. Returns its result (through JSON, read back
+    or not: what bass808.json holds) and the file it was read back from, or
+    None when it ran."""
+    path = Path(cache) / f"808-{key((bass, drums), {})}.json" if cache else None
+    found = kept(path, log)
+    if found and isinstance(found.get("bass808"), dict) and isinstance(found.get("log"), list):
+        log(f"808 reader: read back from {path}; its log when it ran:")
+        for line in found["log"]:
+            log(line)
+        return found["bass808"], str(path)
     lines: list[str] = []
 
     def both(msg) -> None:
         lines.append(str(msg))
         log(msg)
     out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both), default=float))
-    if path:  # written whole, then moved in: a run reading it at the same time never sees half a file
-        path.parent.mkdir(parents=True, exist_ok=True)
-        part = path.with_name(f"{path.name}.{os.getpid()}.part")
-        part.write_text(json.dumps({"bass808": out, "log": lines}), encoding="utf-8")
-        os.replace(part, path)
-    return out
+    keep(path, {"bass808": out, "log": lines}, log)
+    return out, None
 
 
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
@@ -171,7 +155,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808 = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
+    b808, _ = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]
@@ -587,8 +571,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     is in) and write a one-shot at the 808's settled pitch. fit_options go
     to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
     the folder synth808.fit keeps its fits in (work/cache by default; False:
-    none), so a run whose template, settings and fit code are unchanged
-    reads its fit back.
+    none), so a run whose template, settings and code are unchanged reads
+    its fit back (synth808.json's fit.cached names the file).
 
     The pitch is the template's settled pitch as bass808 measured it (the
     QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.8 cents,
@@ -610,9 +594,10 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     # the template's own pitch, or the 808's tuning (analyses written before bass808: the track's)
     f1 = hz or float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
     log(f"808: {used} notes at MIDI {root}, {f1:.2f} Hz ({method or 'tuning'}); fitting (1-3 min)")
-    params, info = fit(ref, f1, cache=work / "cache" if cache is True else cache or None, **fit_options)
+    kept_in = work / "cache" if cache is True else cache or None
+    params, info = fit(ref, f1, cache=kept_in, log=log, **fit_options)
     if info.get("cached"):
-        log(f"808: the fit of this template, settings and code read back ({info['seconds']} s when it ran)")
+        log(f"808: fit read back from {Path(kept_in) / info['cached']} ({info['seconds']} s when it ran)")
     apart = 1200 * np.log2(params.f_end_hz / f1)
     if abs(apart) <= 2 or method == "qifft_tail":
         pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"
