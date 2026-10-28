@@ -141,6 +141,8 @@ def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     for step in ("analyze", "melodic", "match", "fit_808", "plan", "score_analysis", "render", "score_plan", "total"):
         assert rec["seconds"][step] >= 0, step
     assert set(rec["steps"].values()) == {"run"} and rec["reuse"] is None
+    # a measurement keeps and reads back nothing unless asked (--cache): every step ran, its seconds are the code's
+    assert rec["cache"] is False and rec["cached"] == [] and not (root / "v1-1" / "cache").exists()
     assert rec["plan_size"]["melodic_notes"] == {"other": 0, "vocals": 2}  # v1 plays no melodic notes
     # the stub's stems are the truth's groups, so a perfect kit would sit at the truth's level
     assert {g: v["kit_db"] for g, v in rec["plan"]["levels"]["kit"].items()} == {"drums": 0.0, "bass": 0.0}
@@ -191,7 +193,10 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     none rang alone for 600 ms in these 8 bars). A run that reuses everything
     but plan and score scores the same. A reused run must have every output,
     which is checked before anything runs; in place, the kept outputs stay;
-    a fit-808 that found nothing to fit is an answer the reuse carries."""
+    a fit-808 that found nothing to fit is an answer the reuse carries.
+    With cache on, a run reads back the 808 reader's result and the fit a
+    run with it on kept, its record and the report say so, and its seconds
+    leave those steps out."""
     root = tmp_path / "suite"
     main(["suite", "build", str(library / "inventory.json"), "--out", str(root), "--scenarios", "melodic",
           "--seeds", "1", "--bars", "8"])
@@ -199,9 +204,10 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     monkeypatch.setattr(basicpitch, "transcribe", truth_basic_pitch)
     lib, lib808 = library / "library.npz", library / "library_808.npz"
     options = {"analyze": {"tracker": False}, "fit_808": QUICK_FIT}
-    suite.run(root, lib, lib808, "full", jobs=1, options=options)
+    suite.run(root, lib, lib808, "full", jobs=1, options=options, cache=True)
     beat = root / "melodic-1"
     rec = json.loads((beat / "runs" / "full" / "scores.json").read_text())
+    assert rec["cache"] is True and rec["cached"] == [] and len(list((beat / "cache").glob("*.json"))) == 2
     m = rec["analysis"]["melodic"]
     assert {v["estimated_layer"] for v in m["layers"].values()} == {"other"} and m["extra"][0]["layer"] == "vocals"
     assert m["pooled"]["note_f1"] > 0.9 and rec["plan"]["melodic"]["pooled"]["note_f1"] > 0.9
@@ -217,6 +223,18 @@ def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     assert again["analysis"] == rec["analysis"] and again["plan"] == rec["plan"]
     assert again["problems"] == rec["problems"] and re["reuse"] == ["full"]
     assert "melodic, match, fit-808 reused from full" in suite.report(root, ["full", "re"])
+
+    back = suite.run(root, lib, lib808, "back", jobs=1, options=options, steps=["analyze", "fit-808", "plan", "score"],
+                     reuse="full", cache=True)
+    kept = json.loads((beat / "runs" / "back" / "scores.json").read_text())
+    assert kept["cached"] == ["808_reader", "fit_808"] and kept["analysis"] == rec["analysis"]
+    assert back["cached"] == {"808_reader": 1, "fit_808": 1} and back["cache"] == [True]
+    assert {"analyze", "fit_808", "total"}.isdisjoint(back["scenarios"]["melodic"]["seconds"])
+    assert "plan" in back["scenarios"]["melodic"]["seconds"]
+    assert "; read back from cache/: the 808 reader on 1 beat, fit-808's fit on 1 beat" in suite.report(root, ["back"])
+    log = (beat / "runs" / "back" / "log.txt").read_text()
+    assert f"808 reader: read back from {next((beat / 'cache').glob('808-*.json'))}" in log
+    assert "808: fit read back from" in log
 
     # in place: the kept outputs stay, the record is rewritten
     kept = (work / "analysis.json").stat().st_mtime_ns

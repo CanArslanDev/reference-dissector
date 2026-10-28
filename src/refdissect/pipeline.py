@@ -91,11 +91,12 @@ def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=pri
 
 
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
-            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = True) -> dict:
+            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = False) -> dict:
     """tracker=False (or a tracker that cannot run) fits the grid as before:
     fit_grid in bpm_range, first grid beat as phase. cache: the folder the
-    808 reader's results are kept in (_transcribe; work/cache by default,
-    False: none)."""
+    808 reader's results are kept in and read back from (_transcribe; True:
+    work/cache, as the command has it; by default none). One read back is
+    named in source.cached."""
     stems_dir, work = Path(stems_dir), Path(work)
     drums, bass = read(stems_dir / "drums.wav"), read(stems_dir / "bass.wav")
     duration = len(drums) / SR
@@ -155,7 +156,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808, _ = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
+    b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]
@@ -180,6 +181,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                 "templates": out_templates, "events": events, "layers": found.info, "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
+    if read_back:  # not read by this run: what the run that kept it read (same stems, code and versions)
+        analysis["source"]["cached"] = {"808_reader": read_back}
     _save(work / "analysis.json", analysis)
     return analysis
 
@@ -566,13 +569,14 @@ def _fit_notes(work: Path, analysis: dict) -> tuple[list[int], int, float | None
 
 
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
-            log=print, cache: str | Path | bool = True, **fit_options) -> dict:
+            log=print, cache: str | Path | bool = False, **fit_options) -> dict:
     """Fit the 808 on bass808's template notes (drums + bass, so the attack
     is in) and write a one-shot at the 808's settled pitch. fit_options go
     to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
-    the folder synth808.fit keeps its fits in (work/cache by default; False:
-    none), so a run whose template, settings and code are unchanged reads
-    its fit back (synth808.json's fit.cached names the file).
+    the folder synth808.fit keeps its fits in (True: work/cache, as the
+    command has it; by default none), so a run whose template, settings and
+    code are unchanged reads its fit back (synth808.json's fit.cached names
+    the file).
 
     The pitch is the template's settled pitch as bass808 measured it (the
     QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.8 cents,
