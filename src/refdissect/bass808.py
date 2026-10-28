@@ -54,7 +54,7 @@ cents sharp under 50 Hz (+33 cents on PIRAMIT, whose 808 sits at +11.8).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import soxr
@@ -838,6 +838,58 @@ def _lag(ref: Template, tpl: Template, span_ms: float = 150.0, reach_ms: float =
     return (int(np.argmax(corr)) * samples(0.5)) - samples(reach_ms)
 
 
+def settle(lo: np.ndarray, tpl: Template, spans: list[tuple[float, float, float]], least: int = 3,
+           width_s: float = 0.05, steady: float = 50.0) -> Template:
+    """The template with its settled pitch read on the notes found, where
+    learn() had no window in which its notes' drop had settled (a drop fit,
+    a still-falling window, or the tail). spans: each note's (start, end,
+    transposition in cents). A note c cents up plays the sample 2^(c/1200)
+    times as fast, so its period-by-period pitch less c, at that many times
+    its own time, is the template's: the notes reach past the template's
+    end. The reading: the median over the latest width_s of template time
+    that `least` notes reach, where its two halves agree within `steady`
+    cents (further apart, the notes slide there) and it lies under the
+    template's (a drop still falling is read sharp: one exponential leaves
+    out its slow tail). The pitch curve is moved with it, so every note's
+    heard pitch stays as it was.
+
+    On the suite's 48 beats, against the truth, learn() had no settled
+    window on 11 (htdemucs) and 6 (htdemucs_ft), and this reading was taken
+    on 3 and 4 of them: bass_low-1's template read 59.7 and 40.9 cents
+    sharp from 110-330 ms notes, its +7 notes (330 ms, 0.45 s of template
+    time) 13.8 and 10.0; swing66-1's 28.0, now 9.5; full-2's moved from +1.4
+    and +1.0 to -2.8 and -6.4, meter34-2's from +1.6 to +1.4 and v1orig-1's
+    from -1.0 to -1.8 (htdemucs_ft). On the others the reading was over the
+    template's, or not steady (producer-2: halves 298 and 442 cents apart,
+    where the notes' ends slide). Replayed on the notes legato() was given."""
+    if tpl.method.startswith("qifft_") and tpl.method != "qifft_tail" and not tpl.method.endswith("_falling"):
+        return tpl
+    pts = []
+    for j, (t, end, c) in enumerate(spans):
+        rate = 2 ** (c / 1200)
+        s, midi = _track(lo, t, end, 1.3 * tpl.hz * rate * 2 ** (2 / 12), skip_s=0.0)
+        keep = s < (end - t) - 0.01  # the cut's last period aside
+        pts += [(a * rate, m - c / 100, j) for a, m in zip(s[keep], midi[keep])]
+    if not pts:
+        return tpl
+    pts = np.array(pts)
+    reach = np.sort([pts[pts[:, 2] == j, 0].max() for j in np.unique(pts[:, 2])])[::-1]
+    if len(reach) < least:
+        return tpl
+    b = float(reach[least - 1])
+    first = pts[(pts[:, 0] >= b - width_s) & (pts[:, 0] < b - width_s / 2), 1]
+    second = pts[(pts[:, 0] >= b - width_s / 2) & (pts[:, 0] <= b), 1]
+    if not len(first) or not len(second) or 100 * abs(np.median(first) - np.median(second)) > steady:
+        return tpl
+    midi = float(np.median(np.r_[first, second]))
+    if midi >= tpl.midi:
+        return tpl
+    hz = 440 * 2 ** ((midi - 69) / 12)
+    shift = 1200 * np.log2(tpl.hz / hz)
+    return replace(tpl, hz=hz, method=f"notes_{1000 * (b - width_s):.0f}_{1000 * b:.0f}ms",
+                   curve=[[s, round(c + shift, 1)] for s, c in tpl.curve])
+
+
 def _late(starts: list[int], kicks: np.ndarray, before_ms: float = 100.0, least: int = 5,
           late_ms: float = 35.0) -> int:
     """How late (samples) the notes found start against the drum attacks
@@ -1232,12 +1284,15 @@ def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 
     mid = float(np.median([t[3].hz for t in close]))
     best = max(close, key=lambda t: (t[1], abs(1200 * np.log2(t[3].hz / mid)) <= 10, t[0]))
     share, on_kicks, name, tpl, found, cands = best
-    root = int(np.floor(tpl.midi + 0.5))
-    tuning = tpl.midi - root
     env = np.sqrt(np.convolve(lo.astype(np.float64) ** 2, np.ones(samples(25)) / samples(25), mode="same"))
     notes = []
     feet = [o["i"] / DS - PRE_LOW for o in att]
     found = [refine(x, tpl, f, feet) for f in retriggers(found, cands, lo, tpl, kicks / SR)]
+    starts = [(f["k"] + PRE_LOW) / LOW_SR for f in found]
+    tpl = settle(lo, tpl, [(s, min((f["end"] + PRE_LOW) / LOW_SR, nxt), f["c"])
+                           for s, f, nxt in zip(starts, found, starts[1:] + [np.inf])])
+    root = int(np.floor(tpl.midi + 0.5))
+    tuning = tpl.midi - root
     for j, f in enumerate(found):
         t = (f["k"] + PRE_LOW) / LOW_SR
         nxt = (found[j + 1]["k"] + PRE_LOW) / LOW_SR if j + 1 < len(found) else np.inf
