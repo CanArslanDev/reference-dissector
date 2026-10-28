@@ -14,6 +14,7 @@ gets the highest correlation and loses the distortion entirely (harmonics
 
 from __future__ import annotations
 
+import functools
 import time
 from dataclasses import asdict, dataclass
 
@@ -51,12 +52,21 @@ class Params:
         return float(12 * np.log2(self.f_start_hz / self.f_end_hz))
 
 
+@functools.lru_cache(maxsize=8)
+def _times(n: int) -> np.ndarray:
+    """The sample times of n samples (s), made once per length (read-only):
+    the fit's every candidate is as long."""
+    t = np.arange(n) / SR
+    t.setflags(write=False)
+    return t
+
+
 def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarray:
     """The voice, peak-normalized; pitch_hz moves the whole pitch curve (the
     drop keeps its size in semitones)."""
     n = int(seconds * SR)
     ratio = (pitch_hz / p.f_end_hz) if pitch_hz else 1.0
-    t = np.arange(n) / SR
+    t = _times(n)
     f = (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * ratio
     phi = p.phase + 2 * np.pi * np.cumsum(f) / SR
     amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)

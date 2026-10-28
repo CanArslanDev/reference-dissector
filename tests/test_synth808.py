@@ -58,3 +58,22 @@ def test_envelope_and_harmonics_match_their_direct_forms():
     lv = [p[(f > h * 33.3 * 0.97) & (f < h * 33.3 * 1.03)].max() for h in range(1, 13)]
     masks = np.maximum(10 * np.log10(np.array(lv[1:]) / lv[0] + 1e-12), -60)
     assert np.allclose(harmonics(y, 33.3), masks)
+
+
+def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
+    """Each loss reads the 808 band, the harmonics' window and the voice's
+    sample times made once (butter alone was 0.13 ms of a 2.6 ms
+    candidate), with the same numbers as before."""
+    from refdissect import audio, describe, synth808
+
+    made = []
+    butter, hanning = audio.butter, np.hanning
+    monkeypatch.setattr(audio, "butter", lambda *a, **k: made.append("butter") or butter(*a, **k))
+    monkeypatch.setattr(describe.np, "hanning", lambda n: made.append("hanning") or hanning(n))
+    audio._design.cache_clear(), describe._hann.cache_clear(), synth808._times.cache_clear()
+    reference = laid_out(TRUE, int(0.6 * SR))
+    fit(reference, 41.2, maxiter=2, popsize=4)
+    assert made.count("butter") == 1 and made.count("hanning") == 1 and synth808._times.cache_info().misses <= 2
+    x = np.random.default_rng(0).standard_normal(4410).astype(np.float32)
+    assert np.array_equal(audio.band(x, "808"), audio.sosfiltfilt(butter(4, 1500.0, fs=SR, output="sos"), x)
+                          .astype(np.float32))
