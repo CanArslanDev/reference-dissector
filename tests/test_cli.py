@@ -22,3 +22,5 @@ def test_analyze_passes_the_grid_options(monkeypatch):
     assert seen["kw"] == {"bpm_range": (100.0, 180.0), "bpm": 137.0, "meter": "3/4", "tracker": False}
     main(["analyze", "stems", "--work", "w"])
     assert seen["kw"] == {"bpm_range": (100.0, 180.0), "bpm": None, "meter": None, "tracker": True}
+    main(["analyze", "stems", "--work", "w", "--no-cache"])
+    assert seen["kw"]["cache"] is False

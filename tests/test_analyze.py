@@ -88,3 +88,26 @@ def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypat
     assert set(grid["swing"]) == {"ratio_16", "ratio_8", "evidence"}
     # discover() groups onsets by their place in the beat, so a phase on the attacks finds the same hits
     assert {k: len(v) for k, v in a["events"].items()} == {k: len(v) for k, v in stems["old_events"].items()}
+
+
+def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_path, monkeypatch):
+    """pipeline._transcribe keeps bass808.transcribe's result by the two
+    stems' samples and the reader's code, and reads it back with its log
+    lines, through JSON either way; other stems, or no cache, read again."""
+    from refdissect import pipeline
+
+    calls = []
+
+    def reader(bass, drums, log=None):
+        calls.append(1)
+        log("  808 template from drums onsets: 9 notes")
+        return {"template": {"hz": np.float64(32.7), "root_midi": 24}, "notes": [{"t": np.float32(0.5), "pitch": 24}]}
+    monkeypatch.setattr(pipeline.bass808, "transcribe", reader)
+    bass, drums = np.ones(100, np.float32), np.zeros(100, np.float32)
+    first, again = [], []
+    out = pipeline._transcribe(bass, drums, tmp_path, first.append)
+    assert pipeline._transcribe(bass, drums, tmp_path, again.append) == out and again == first and len(calls) == 1
+    assert out["notes"][0]["t"] == 0.5 and isinstance(out["template"]["hz"], float)
+    pipeline._transcribe(bass * 2, drums, tmp_path, lambda m: None)
+    pipeline._transcribe(bass, drums, None, lambda m: None)
+    assert len(calls) == 3

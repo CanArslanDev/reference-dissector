@@ -21,8 +21,9 @@ A beat folder after a run:
     runs/<tag>/                       analysis.json, bass808.json, melodic.json, basicpitch/, matches.json,
                                       synth808.json, plan.json, midi/, templates/, log.txt, scores.json
                                       (run.json unscored)
-    cache/                            fit-808's fits by template, settings and code (synth808.fit),
-                                      read back by any tag whose fit-808 has the same ones
+    cache/                            the 808 reader's results by stems and code (pipeline._transcribe)
+                                      and fit-808's fits by template, settings and code (synth808.fit),
+                                      read back by any tag whose analyze or fit-808 has the same ones
 
 Everything under root is made of your library and stays local: the stems,
 the plans and the scores files name files and hold note times.
@@ -346,8 +347,9 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
         def log(msg) -> None:
             f.write(f"{msg}\n")
         log("steps: " + ", ".join(f"{s} {v}" for s, v in status.items()) + (f" (runs/{reuse})" if reuse else ""))
-        if status["analyze"] == "run":
-            pipeline.analyze(stems_dir(beat, model), work, log=log, **options.get("analyze", {}))
+        if status["analyze"] == "run":  # the 808 reader's results and the fits are kept per beat (cache/)
+            pipeline.analyze(stems_dir(beat, model), work, log=log, **{"cache": beat / "cache",
+                                                                         **options.get("analyze", {})})
             lap("analyze")
         if status["melodic"] == "run":
             pipeline.melodic(work, log=log, **options.get("melodic", {}))
@@ -358,7 +360,7 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
             pipeline.match(work, lib, log=log, **options.get("match", {}))
             lap("match")
         if status["fit-808"] == "run":
-            try:  # the fits are kept per beat (cache/), so a tag whose template did not change reads its fit back
+            try:
                 pipeline.fit_808(work, library_808=_library(str(library_808)) if library_808 else None, log=log,
                                  **{"cache": beat / "cache", **options.get("fit_808", {})})
             except ValueError as e:
