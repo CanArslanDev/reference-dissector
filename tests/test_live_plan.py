@@ -93,6 +93,26 @@ def test_a_pads_sample_attacks_where_its_hit_did(tmp_path):
     assert np.max(np.abs(np.array(played) - hits)) < 1e-4
 
 
+@pytest.mark.parametrize("named", ["sound_1", "sound_3"])
+def test_a_sound_is_as_clean_as_the_templates_merged_into_it(tmp_path, named):
+    """layers.explain merged a clean template into a less clean one of the
+    same sound (layers-2: the low-band snare, 16 matched-filter peaks at NCC
+    0.9 or more, into the snare-band one, clean 0.44): the sound gets its
+    pad whichever of the two carries the hits."""
+    analysis, matches, synth = _fixture(tmp_path)
+    other = "sound_3" if named == "sound_1" else "sound_1"
+    analysis["templates"] = {named: {"detected_hits": 16, "clean": 0.44},
+                             other: {"detected_hits": 0, "clean": 0.0,
+                                     "peak_ncc_histogram_0.3_to_1.0": [5, 1, 0, 0, 0, 0, 16]}}
+    analysis["events"] = {named: [{"t": 0.5 * k, "gain": 1.0} for k in range(8)], other: []}
+    analysis["layers"] = {"merged": {other: {"into": named, "offset_ms": -0.25}}}
+    matches = {named: matches["sound_1"], other: {**matches["sound_1"], "verdict": f"same sound as {named}",
+                                                  "same_as": named}}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == [named]
+    assert len(plan["tracks"]["drums"]["notes"]) == 8
+
+
 def test_pitched_copies_get_transposed_pads(tmp_path):
     """Hits of a pitched copy (detect: semitones) play on pads of their own,
     the sound's sample transposed that much further, the plain ones on the
