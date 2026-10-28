@@ -3,6 +3,7 @@ everything else is built on. All analysis runs on mono float32 at 44.1 kHz."""
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +58,8 @@ def write(path: str | Path, x: np.ndarray, peak: float | None = 0.9, subtype: st
     return path
 
 
-def _sos(role: str):
+@functools.cache
+def _design(role: str):
     lo, hi = BANDS[role]
     if lo and hi:
         return butter(4, [lo, hi], btype="band", fs=SR, output="sos")
@@ -66,6 +68,15 @@ def _sos(role: str):
     if hi:
         return butter(4, hi, btype="low", fs=SR, output="sos")
     return None
+
+
+def _sos(role: str):
+    """The role's band filter, designed once (a copy each call: scipy's
+    sosfilt wants it writable): butter() takes 0.13 ms, a quarter of
+    filtering a 0.6 s 808 template, and the 808 fit filters one per
+    candidate (about 24,000 a fit)."""
+    sos = _design(role)
+    return None if sos is None else sos.copy()
 
 
 def band(x: np.ndarray, role: str) -> np.ndarray:
