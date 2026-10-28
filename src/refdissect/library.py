@@ -164,18 +164,26 @@ def correlate(q: np.ndarray, bank: np.ndarray, wide: int = SPECKLE_WIDE,
     +-wide cents, through the FFT. The peak is the mean product at the best
     shift (1 for the same speckle); a positive shift means q is the row's
     sound transposed up."""
+    return correlate_many([q], bank, wide, chunk)[0]
+
+
+def correlate_many(qs: list[np.ndarray], bank: np.ndarray, wide: int = SPECKLE_WIDE,
+                   chunk: int = 512) -> list[tuple[np.ndarray, np.ndarray]]:
+    """correlate() of each speckle in qs, each block of the bank transformed
+    once for all of them (the same numbers as one at a time)."""
     n_bins = bank.shape[1]
     nfft = next_fast_len(n_bins + wide, real=True)
-    Q = np.fft.rfft(q.astype(np.float32), nfft)
+    Qs = [np.fft.rfft(q.astype(np.float32), nfft) for q in qs]
     lags = np.r_[np.arange(0, wide + 1), np.arange(nfft - wide, nfft)]
-    peak, shift_cents = np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)
+    out = [(np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)) for _ in qs]
     for a in range(0, len(bank), chunk):
-        S = np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1)
-        c = np.fft.irfft(Q[None, :] * np.conj(S), nfft, axis=1)[:, lags]
-        k = np.argmax(c, axis=1)
-        peak[a:a + chunk] = c[np.arange(len(c)), k] / n_bins
-        shift_cents[a:a + chunk] = np.where(k <= wide, k, k - len(lags))
-    return peak, shift_cents
+        S = np.conj(np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1))
+        for Q, (peak, shift_cents) in zip(Qs, out):
+            c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
+            k = np.argmax(c, axis=1)
+            peak[a:a + chunk] = c[np.arange(len(c)), k] / n_bins
+            shift_cents[a:a + chunk] = np.where(k <= wide, k, k - len(lags))
+    return out
 
 
 def speckle_path(library_path: str | Path) -> Path:
@@ -216,11 +224,20 @@ class _Ncc:
 
     def __call__(self, block: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """(|NCC|, lag in samples) per row of block."""
-        C = np.fft.rfft(np.atleast_2d(block), self.n, axis=1) * self.H
-        corr = np.fft.irfft(self.T[None, :] * np.conj(C), self.n, axis=1)[:, self.lags]
-        v = corr / np.sqrt(self.t_energy * energy(C, self.n) + 1e-20)[:, None]
-        k = np.argmax(np.abs(v), axis=1)
-        return np.abs(v[np.arange(len(v)), k]), np.where(k <= self.max_lag, k, k - len(self.lags))
+        C = self.spectra(block)
+        return self.scores(np.conj(C), energy(C, self.n))
+
+    def spectra(self, block: np.ndarray) -> np.ndarray:
+        """The rows' spectra in the band: the same for every template of this
+        length and role (Library._sweep shares them)."""
+        return np.fft.rfft(np.atleast_2d(block), self.n, axis=1) * self.H
+
+    def scores(self, conj: np.ndarray, e: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """__call__ from the rows' spectra, conjugated, and their energy e."""
+        corr = np.fft.irfft(self.T[None, :] * conj, self.n, axis=1)[:, self.lags]
+        v = np.abs(corr / np.sqrt(self.t_energy * e + 1e-20)[:, None])
+        k = np.argmax(v, axis=1)
+        return v[np.arange(len(v)), k], np.where(k <= self.max_lag, k, k - len(self.lags))
 
 
 class Library:
@@ -240,6 +257,7 @@ class Library:
         self.spectra = spectra
         self.speckles: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # band -> (entries, speckles)
         self.speckle_info: dict = {}
+        self._ready: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}  # prepare()'s searches, by template
 
     @classmethod
     def build(cls, rows: list[dict], seconds: float = 0.6, max_duration: float = 4.0,
@@ -350,6 +368,61 @@ class Library:
         raw = transpose(self.audio[i].astype(np.float32), semitones)
         return fit(np.r_[np.zeros(PRE - samples(2), np.float32), raw], length)
 
+    def block(self, rows, length: int, semitones: float = 0.0) -> np.ndarray:
+        """candidate() of each entry in rows, stacked; untransposed, read
+        straight from the cache (the same samples, without a copy per entry)."""
+        if semitones:
+            return np.stack([self.candidate(i, length, semitones) for i in rows])
+        pre = PRE - samples(2)
+        out = np.zeros((len(rows), length), np.float32)
+        m = max(0, min(length - pre, self.audio.shape[1]))
+        out[:, pre:pre + m] = self.audio[rows, :m]
+        return out
+
+    def _key(self, t: np.ndarray, *settings) -> tuple:
+        return (np.ascontiguousarray(t).tobytes(), np.asarray(t).dtype.str, *settings)
+
+    def _sweep(self, ts: list[np.ndarray], role: str, base: float, roles: set[str] | None, max_lag_ms: float,
+               chunk: int) -> list[tuple[np.ndarray, np.ndarray]]:
+        """_match()'s first pass for templates of one length: (|NCC|, lag) of
+        every chosen entry at base semitones, each block of entries laid out
+        and transformed once for all the templates."""
+        chosen = [i for i, r in enumerate(self.roles) if not roles or r in roles]
+        scorers = [_Ncc(t, role, max_lag_ms) for t in ts]
+        out = [(np.zeros(len(chosen), np.float32), np.zeros(len(chosen), np.int64)) for _ in ts]
+        for a in range(0, len(chosen), chunk):
+            C = scorers[0].spectra(self.block(chosen[a:a + chunk], len(ts[0]), base))
+            e, conj = energy(C, scorers[0].n), np.conj(C)
+            for (scores, lags), score in zip(out, scorers):
+                scores[a:a + chunk], lags[a:a + chunk] = score.scores(conj, e)
+        return out
+
+    def prepare(self, windows: dict[str, list[np.ndarray]], max_lag_ms: float = 30, chunk: int = 256) -> None:
+        """match() and match_fine() made ready for several templates at once
+        ({band: windows of one length}, as pipeline.match searches them): the
+        first pass over every entry (_sweep) and, in a band with a speckle
+        index, the speckle search (correlate_many) share each block of the
+        library, which a search one template at a time transformed again for
+        each one (v1-1: 34 passes over 9,000 entries for 6 templates). The
+        numbers are the same; they are kept, by template, until forget()."""
+        self._ready = {}
+        for role, ts in windows.items():
+            ts = [np.asarray(t) for t in ts if len(t)]
+            if not ts:
+                continue
+            for length in sorted({len(t) for t in ts}):
+                same = [t for t in ts if len(t) == length]
+                for t, found in zip(same, self._sweep(same, role, 0.0, None, max_lag_ms, chunk)):
+                    self._ready[self._key(t, "pass", role, 0.0, None, max_lag_ms, chunk)] = found
+                if role in self.speckles and length == samples(SPECKLE[role][2]):
+                    peaks = correlate_many([speckle(t, role)[0] for t in same], self.speckles[role][1])
+                    for t, found in zip(same, peaks):
+                        self._ready[self._key(t, "speckle", role, SPECKLE_WIDE)] = found
+
+    def forget(self) -> None:
+        """prepare()'s searches dropped."""
+        self._ready = {}
+
     def match(self, t: np.ndarray, role: str, semitones=(0,), base: float = 0.0, top: int = 10,
               prefilter: int = 200, roles: set[str] | None = None, max_lag_ms: float = 30,
               chunk: int = 256) -> list[dict]:
@@ -367,11 +440,8 @@ class Library:
         score = _Ncc(t, role, max_lag_ms)
         n, H, T, t_energy, max_lag, lags = score.n, score.H, score.T, score.t_energy, score.max_lag, score.lags
         chosen = [i for i, r in enumerate(self.roles) if not roles or r in roles]
-        scores = np.zeros(len(chosen), np.float32)
-        best_lag = np.zeros(len(chosen), np.int64)
-        for a in range(0, len(chosen), chunk):
-            scores[a:a + chunk], best_lag[a:a + chunk] = score(
-                np.stack([self.candidate(i, n_t, base) for i in chosen[a:a + chunk]]))
+        key = self._key(t, "pass", role, float(base), tuple(sorted(roles)) if roles else None, max_lag_ms, chunk)
+        scores, best_lag = self._ready.get(key) or self._sweep([t], role, base, roles, max_lag_ms, chunk)[0]
         results = [{"i": i, "ncc": float(scores[j]), "lag": int(best_lag[j]), "semitones": float(base)}
                    for j, i in enumerate(chosen)]
         results.sort(key=lambda r: -r["ncc"])
@@ -421,7 +491,8 @@ class Library:
         if len(t) != samples(SPECKLE[role][2]):
             raise ValueError(f"A {role}-band template is {SPECKLE[role][2]} ms here, not {len(t) * 1000 / SR:.0f}")
         rows, bank = self.speckles[role]
-        peak, cents_off = correlate(speckle(t, role)[0], bank, wide)
+        peak, cents_off = self._ready.get(self._key(t, "speckle", role, wide)) or correlate(speckle(t, role)[0],
+                                                                                           bank, wide)
         tried = {int(rows[j]): int(j) for j in np.argsort(-peak)[:keep]}
         found = {}
         if union:

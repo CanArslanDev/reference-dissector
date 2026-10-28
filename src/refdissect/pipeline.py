@@ -312,10 +312,7 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     0-8 ms from hit to hit (the suite's layers scenario) is smeared in the
     average: found in neither of 2 beats."""
     main, n = ranked[0], len(t)
-    tb = band(t, b)
-    atom, _ = library.atoms(t, b, [main])
-    g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
-    rest = (tb - g * atom[0]).astype(np.float32)
+    tb, rest = band(t, b), _rest(library, t, b, main)
     seen, partners = {main["i"]}, []
     for r in library.distinct(ranked, n, keep=pool) + library.distinct(_search(library, rest, b, None)[0], n,
                                                                         keep=pool):
@@ -350,6 +347,15 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     if better < min_db:
         return [], {**evidence, "accepted": False, "why": f"the partner takes off less than {min_db:g} dB"}
     return [layer], {**evidence, "accepted": True}
+
+
+def _rest(library: Library, t: np.ndarray, b: str, main: dict) -> np.ndarray:
+    """What a template window leaves in band b once its top match is fitted
+    (least squares, never added): where _layer looks for a second sound."""
+    tb = band(t, b)
+    atom, _ = library.atoms(t, b, [main])
+    g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
+    return (tb - g * atom[0]).astype(np.float32)
 
 
 def _role(top: list[dict], named: Counter, guess: str, b: str) -> str:
@@ -424,8 +430,13 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     ranked_by: dict[tuple[str, str], list[dict]] = {}
     windows: dict[tuple[str, str], np.ndarray] = {}
     method: dict[tuple[str, str], str] = {}
+    fulls = {name: _template(work, name) for name in templates}
+    # every template's window searched together in each band: the same rankings, each block of the
+    # library transformed once for all of them instead of once per template (Library.prepare)
+    library.prepare({role: [full[: samples(LENGTH_MS[role])] for full in fulls.values()]
+                     for role in ("kick", "snare", "hat")})
     for name in templates:
-        full = _template(work, name)
+        full = fulls[name]
         by_band[name] = {}
         for role in ("kick", "snare", "hat"):
             t = windows[name, role] = full[: samples(LENGTH_MS[role])]
@@ -486,6 +497,9 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
             out[name]["speckle_index"] = library.speckle_info["version"]
         if name in same_as:
             out[name]["verdict"] = f"same sound as {same_as[name]}"
+    layered = [n for n in templates if n not in same_as and band_of[n] != "kick"]
+    library.prepare({b: [_rest(library, windows[n, b], b, ranked_by[n, b][0]) for n in layered if band_of[n] == b]
+                     for b in {band_of[n] for n in layered}})
     for name in templates:
         b, m = band_of[name], out[name]
         if name in same_as or b == "kick":
@@ -501,6 +515,7 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
         where = f"{b}, {m['source']}" if m.get("source") else b
         log(f"  {name:9s} -> {m['role']:6s} {m['top'][0]['file'][:34]:34s} st {m['top'][0]['semitones']:+.2f} "
             f"ncc {m['top'][0]['ncc']:.3f} margin {m['margin']:+.3f} [{where}] ({m['verdict']}){layer} | {others}")
+    library.forget()
     _save(work / "matches.json", out)
     return out
 
