@@ -190,3 +190,19 @@ def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
     lib.match(kicks[0], "kick", top=10)
     assert len(blocks) == 3  # forgotten: searched again
 
+
+def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monkeypatch):
+    """Library.candidate resamples only the start of an entry a transposed
+    window holds (and TRANSPOSE_MARGIN more): the samples are the same as
+    from the whole entry."""
+    from refdissect import library
+
+    lib, _ = noisy
+    read = []
+    monkeypatch.setattr(library, "transpose", lambda x, st: read.append(len(x)) or transpose(x, st))
+    for i in (0, 30, 61, 121):
+        for st in (-4, -1.5, 0.0025, 1, 3.7):
+            whole = fit(np.r_[np.zeros(samples(3), np.float32), transpose(lib.audio[i].astype(np.float32), st)],
+                        samples(80))
+            assert np.array_equal(lib.candidate(i, samples(80), st), whole)
+    assert max(read) < lib.audio.shape[1]

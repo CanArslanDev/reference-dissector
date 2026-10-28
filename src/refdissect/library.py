@@ -139,6 +139,7 @@ SPECKLE_N = 1 << 16  # FFT size: 0.67 Hz bins, finer than a cent above 1.2 kHz
 SPECKLE_SMOOTH = 150  # cents: coarser structure (the sound's colour, the band filter) is taken out
 SPECKLE_WIDE = 1200  # cents searched either way
 NOT_SPECKLED = {"kick", "808", "melodic/loop"}  # tonal library roles: no noise to compare
+TRANSPOSE_MARGIN = 4096  # samples resampled past what a transposed candidate's window holds (Library.candidate)
 
 
 def speckle(x: np.ndarray, band_name: str) -> np.ndarray:
@@ -364,8 +365,15 @@ class Library:
         return len(self.paths)
 
     def candidate(self, i: int, length: int, semitones: float = 0.0) -> np.ndarray:
-        """Entry i laid out like a template: its onset PRE into the window."""
-        raw = transpose(self.audio[i].astype(np.float32), semitones)
+        """Entry i laid out like a template: its onset PRE into the window.
+        Transposed, only as much of the entry is resampled as the window
+        holds, and TRANSPOSE_MARGIN samples more, after which soxr gives the
+        same samples as from the whole entry (on 5,400 transpositions of 300
+        entries: all the same from 1,024 on, not at 256)."""
+        x = self.audio[i]
+        if semitones:
+            x = x[:int(np.ceil((length - PRE + samples(2)) * 2 ** (semitones / 12))) + TRANSPOSE_MARGIN]
+        raw = transpose(x.astype(np.float32), semitones)
         return fit(np.r_[np.zeros(PRE - samples(2), np.float32), raw], length)
 
     def block(self, rows, length: int, semitones: float = 0.0) -> np.ndarray:
