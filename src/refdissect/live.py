@@ -288,8 +288,10 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     - it was detected min_hits times, by default as often as discover()
       asks of the rarest sound it keeps (min_hits_for at RESIDUAL_BARS: 3,
       or one per 16 bars);
-    - it recurs: at least min_recur of its hits have another at their place
-      of the bar 1 to RECUR_BARS bars away (recurring);
+    - one of discover()'s residual pass (found where no template of its band
+      plays) recurs: at least min_recur of its hits have another at their
+      place of the bar 1 to RECUR_BARS bars away (recurring, on the grid's
+      bars as bar_clock reads them: its tempo map, its tempo change);
     - it is clean (sound_clean, over the templates merged into it: at least
       min_clean of its own matched-filter hits at NCC 0.8 or more);
     - the library has something close (NCC >= min_ncc), or it is the
@@ -298,15 +300,24 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
       per 4 bars, min_hits_for), played with the closest sound even if far.
     Measured on the 48 suite beats (plan level, mean over scenarios,
     htdemucs; htdemucs_ft in brackets), against 12 hits and the backbone
-    rule for any template: open hats F1@20 0.043 -> 0.979 [0.022 -> 0.993]
+    rule for any template: open hats F1@20 0.043 -> 0.980 [0.022 -> 0.993]
     (4-8 hits a beat), snares 0.836 -> 0.936 [0.816 -> 0.918] (tempo72's and
     tempo95's 8 hits: 0 -> 1.0), crash, tom and rim 0 -> 0.5 [0.5, 0.45, 0];
-    sounds with a pad that play no truth sound 0.71 -> 0.05 [0.32 -> 0.02] a
-    beat, false hits 22.0 -> 11.7 [10.1 -> 4.6] a beat. Those sounds are
-    mostly discover()'s residual templates on the transients of a loop at
-    its own tempo, left in the drum stem: 3 of the 86 such templates recur
-    (m2g), against 209 of the 214 whose moments are 90 % or more a truth
-    sound's. By count alone they rose to 0.83 a beat, with 25.2 false hits.
+    sounds with a pad that play no truth sound (drums.extra) 0.71 -> 0.05
+    [0.32 -> 0.02], false hits 22.0 -> 11.7 [10.1 -> 4.6] a beat. Those
+    sounds are mostly residual templates on the transients of the suite's
+    melodic loop, which plays at its own tempo (scenarios._bleed): 3 of the
+    86 such templates recur (m2g), against 209 of the 214 whose moments are
+    90 % or more a truth sound's. That is a suite figure: a loop on the
+    beat's tempo recurs by construction, and with recurrence waived they
+    are 0.37 [0.23] with 16.3 [7.1] false hits a beat (an estimate for such
+    songs; by count alone 0.83 and 25.2). Held to recurrence, a grid-found
+    sound depended on the tempo being exact and constant: plan drums F1@20
+    0.866 -> 0.507 [0.897 -> 0.568] on a tempo rising 3 % over each beat,
+    0.637 [0.662] with the bpm 0.2 % off (a forced --bpm), and every sound
+    of a second tempo lost its pad; residual templates alone: 0.855
+    [0.882], 0.853 [0.883], and with the drift kept as tempo map 0.867
+    [0.897], the suite's own 0.866 [0.897] unchanged.
     A sound found twice (same_as) shares the first one's pad; the same file
     at another pitch plays on a pad of its own, transposed so far
     (_pitched_pads: discover() finds a pitched copy as a template too, and
@@ -337,12 +348,13 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     n = int(round(duration * SR))
     least = min_hits if min_hits is not None else min_hits_for(n, grid, RESIDUAL_BARS)
     backbone = min_hits_for(n, grid)  # one hit per 4 bars
-    clean = sound_clean(analysis)
+    clean, clock = sound_clean(analysis), bar_clock(g)
     for name in order:
         info, m = analysis["templates"][name], matches.get(name)
         hits = analysis["events"][name]
         if (not m or info["detected_hits"] < least or clean[name] < min_clean
-                or recurring([e.get("t_attack", e["t"]) for e in hits], grid.bar) < min_recur):
+                or (info.get("found", "grid") != "grid"
+                    and recurring([e.get("t_attack", e["t"]) for e in hits], clock) < min_recur)):
             continue
         role = m["role"] if m["role"] in PADS else "perc"
         structural = (role in ("kick", "snare") and info.get("found", "grid") == "grid" and clean[name] >= 0.7
@@ -403,28 +415,70 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     return plan
 
 
-def recurring(t, bar: float, ms: float = RECUR_MS, bars: int = RECUR_BARS) -> float:
+def recurring(t, bar, ms: float = RECUR_MS, bars: int = RECUR_BARS) -> float:
     """The share of hits (times in s) with another hit at the same place of
     the bar (within ms) 1 to `bars` bars away: drums are programmed in
-    patterns. Lags of 1 to 8 bars hold patterns of 3 bars (3/4 read in
-    4/4) and sounds that play every 8 bars (rare-1's rim), and a song's
-    length does not raise the chance of a stray hit recurring. Only 1 to 4
-    bars away lost the rim, and the suite's snares 0.936 -> 0.918. A drum
-    sound recurs within 4 ms where it does within 12: 209 of m2g's 214
-    templates whose moments are 90 % or more a truth sound's, and every
-    PIRAMIT template that recurs. A loop at a nearby tempo drifts 8-12 ms
-    a bar (producer-1 tiled six times: 72 hits of one recur within 10 ms,
-    none within 8); within 12 ms, 7 of m2g's 86 templates that play no
-    truth sound recurred, against 3 within 6."""
+    patterns. bar is a bar's length (s), or the song's bars as bar_clock
+    gives them, where its tempo drifts or changes. Lags of 1 to 8 bars hold
+    patterns of 3 bars (3/4 read in 4/4) and sounds that play every 8 bars
+    (rare-1's rim), and a song's length does not raise the chance of a
+    stray hit recurring. Only 1 to 4 bars away lost the rim, and the suite's
+    snares 0.936 -> 0.918. A drum sound recurs within 4 ms where it does
+    within 12: 209 of m2g's 214 templates whose moments are 90 % or more a
+    truth sound's, and every PIRAMIT template that recurs. A loop at a
+    nearby tempo drifts 8-12 ms a bar (producer-1 tiled six times: 72 hits
+    of one recur within 10 ms, none within 8); within 12 ms, 7 of m2g's 86
+    templates that play no truth sound recurred, against 3 within 6.
+
+    That makes it a test of the tempo too: on a constant grid 0.2 % off the
+    song's tempo (3.5 ms a bar at 136 BPM), the suite's drum sounds stopped
+    recurring (plan drums F1@20 0.866 -> 0.637 with every template held to
+    it), and on a tempo rising 3 % over the beat, 0.866 -> 0.507."""
     t = np.sort(np.asarray(t, dtype=float))
     if len(t) < 2:
         return 0.0
+    s, b = bar if isinstance(bar, tuple) else (np.array([0.0, bar]), np.array([0.0, 1.0]))
+    at = _continued(t, s, b)  # in bars
+    tol = ms / 1000 * (_continued(t + 1e-3, s, b) - _continued(t - 1e-3, s, b)) / 2e-3
     near = np.zeros(len(t), bool)
-    for lag in np.arange(1, bars + 1) * bar:
-        for target in (t + lag, t - lag):
-            i = np.clip(np.searchsorted(t, target), 1, len(t) - 1)
-            near |= np.minimum(np.abs(t[i] - target), np.abs(t[i - 1] - target)) <= ms / 1000
+    for lag in range(1, bars + 1):
+        for target in (at + lag, at - lag):
+            i = np.clip(np.searchsorted(at, target), 1, len(at) - 1)
+            near |= np.minimum(np.abs(at[i] - target), np.abs(at[i - 1] - target)) <= tol
     return float(near.mean())
+
+
+def bar_clock(grid: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Where an analysis grid's bars fall, as (seconds, bars), piecewise
+    linear and continued past both ends: the grid's constant tempo, or the
+    beats of its tempo_map where they drift from it (grid.drift), and
+    outside the part the grid follows (tempo_change: span_s), the other
+    tempo (ratio, the second's over the first's)."""
+    g = Grid(grid["bpm"], grid.get("phase", 0.0), grid.get("beats_per_bar", 4), grid.get("beat_unit", 4))
+    lines = np.asarray(grid.get("tempo_map") or [], dtype=float)
+    if len(lines) >= 2:  # quarter-note lines
+        s, b = lines, np.arange(len(lines)) * g.beat / g.bar
+    else:
+        s, b = np.array([g.phase, g.phase + g.bar]), np.array([0.0, 1.0])
+    change = grid.get("tempo_change") or {}
+    if change.get("span_s"):
+        lo, hi = change["span_s"]
+        other = change["ratio"] if change.get("grid_follows") == "first" else 1 / change["ratio"]
+        edge = _continued(np.array([lo, hi]), s, b)
+        inside = (s > lo) & (s < hi)
+        s = np.r_[lo - g.bar, lo, s[inside], hi, hi + g.bar]
+        b = np.r_[edge[0] - other, edge[0], b[inside], edge[1], edge[1] + other]
+    return s, b
+
+
+def _continued(x, xp: np.ndarray, fp: np.ndarray) -> np.ndarray:
+    """np.interp, continued past both ends along the first and the last piece."""
+    x = np.asarray(x, dtype=float)
+    y = np.interp(x, xp, fp)
+    lo, hi = x < xp[0], x > xp[-1]
+    y[lo] = fp[0] + (x[lo] - xp[0]) * (fp[1] - fp[0]) / (xp[1] - xp[0])
+    y[hi] = fp[-1] + (x[hi] - xp[-1]) * (fp[-1] - fp[-2]) / (xp[-1] - xp[-2])
+    return y
 
 
 def sound_clean(analysis: dict) -> dict[str, float]:
