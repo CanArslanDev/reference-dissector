@@ -47,7 +47,7 @@ import mido
 import numpy as np
 
 from .audio import PRE, SR, attack_time, read, rms_db, transpose, trim_onset
-from .render import VOL_VEL, glide_s, pad_settings, render_808, velocity_gain
+from .render import VOL_VEL, as_played, glide_s, pad_settings, render_808, velocity_gain
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -298,6 +298,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     length_beats = 4 * math.ceil(duration * beats_per_second / 4)
     pads, drum_notes, used = {}, [], {k: 0 for k in PADS}
     pad_of: dict[str, int] = {}
+    leads: dict[tuple, float] = {}
     # strongest identifications first; a template found twice shares its pad
     order = sorted(analysis["templates"], key=lambda k: (matches.get(k, {}).get("same_as") is not None,
                                                          -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
@@ -329,9 +330,11 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             st = e.get("semitones", 0)
             if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
                 continue
-            # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
+            # the hit attacks at t_attack, or the template's attack_s after its window starts; the note
+            # starts that much before it that the pad's sample attacks there (pad_lead)
             t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
-            drum_notes.append({"pitch": notes[st + shift], "start_time": round(t * beats_per_second, 4),
+            t -= pad_lead(pads[str(notes[st + shift])], leads)
+            drum_notes.append({"pitch": notes[st + shift], "start_time": round(max(0.0, t) * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
@@ -355,6 +358,29 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
+
+
+def pad_lead(pad: dict, cache: dict) -> float:
+    """Seconds from a pad's note to its sample's attack as Simpler plays it
+    (from start_s, at Transpose plus Detune; audio.attack_time in the pad
+    role's band, as evaluate.estimate_from_plan times a pad), 0 for a
+    sample that cannot be read. cache keeps one per sample and setting.
+
+    Notes placed at the hits' t_attack played each hit that much late: on
+    the 48 suite beats (htdemucs) the plan's timing medians were kick +2.06
+    ms, snare +1.13, hat +0.56 (mean over scenarios), and 0.0-0.6 ms more
+    than the analysis' on every sound. A note this much earlier attacks
+    where the analysis heard the hit: 162 of the 164 sounds with a pad are
+    timed within 0.3 ms of the analysis (the other two play fewer of its
+    templates)."""
+    s = pad_settings(pad)
+    key = (pad["path"], s["start_s"], s["transpose"] + s["detune_cents"] / 100, s["role"])
+    if key not in cache:
+        try:
+            cache[key] = attack_time(as_played(read(pad["path"]), s["start_s"], key[2]), s["role"])
+        except (OSError, RuntimeError):
+            cache[key] = 0.0
+    return cache[key]
 
 
 def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
