@@ -163,6 +163,18 @@ def test_a_residual_template_is_no_backbone(tmp_path):
     assert make_plan(*_bars(tmp_path, hits, {"found": "residual"}, close), tmp_path)["tracks"]["drums"]["pads"]
 
 
+def test_a_pad_plays_each_moment_once(tmp_path):
+    """Two templates of one sound (same_as: the same file, found in two
+    bands) share a pad; where both found the same strike, the pad plays it
+    once. On 5 of the suite's seed-2 beats a snare-band template of the
+    kick-and-hat moments played the hat's file a second time on 6-15 of
+    them."""
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["events"]["sound_2"] += [{"t": 0.5 * k + 0.002, "gain": 0.5} for k in (0, 2, 4, 6)]
+    notes = make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]
+    assert len(notes) == 16 and {n["pitch"] for n in notes} == {38}
+
+
 def test_pitched_copies_get_transposed_pads(tmp_path):
     """Hits of a pitched copy (detect: semitones) play on pads of their own,
     the sound's sample transposed that much further, the plain ones on the

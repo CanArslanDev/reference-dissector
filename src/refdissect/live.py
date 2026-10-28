@@ -47,7 +47,7 @@ import mido
 import numpy as np
 
 from .audio import PRE, SR, attack_time, read, rms_db, transpose, trim_onset
-from .detect import RESIDUAL_BARS, min_hits_for
+from .detect import RESIDUAL_BARS, SAME_MS, min_hits_for
 from .grid import Grid
 from .render import VOL_VEL, as_played, glide_s, pad_settings, render_808, velocity_gain
 
@@ -311,12 +311,16 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     at another pitch plays on a pad of its own, transposed so far
     (_pitched_pads: discover() finds a pitched copy as a template too, and
     producer-2's hat 3 semitones down had played at the hat's pitch, its
-    own pitched copies 300 cents off). The pad plays the top match at its
-    pitch: Transpose in whole semitones and Detune in whole cents
-    (pad_pitch), as Live keeps them. Velocities play each hit's gain under
-    Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A match's
-    layers (matches.json) are not played yet. With melodic (melodic.json),
-    each tonal stem's notes get a MIDI track."""
+    own pitched copies 300 cents off). A pad plays a strike once: a hit
+    within SAME_MS of one that another template put on the pad is that
+    strike found again (on 5 seed-2 suite beats a snare-band template of
+    the kick-and-hat moments played the hat's file a second time on 6-15
+    of them; false hits 11.7 -> 10.7 a beat, htdemucs). The pad plays the
+    top match at its pitch: Transpose in whole semitones and Detune in
+    whole cents (pad_pitch), as Live keeps them. Velocities play each hit's
+    gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
+    match's layers (matches.json) are not played yet. With melodic
+    (melodic.json), each tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -324,6 +328,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     pads, drum_notes, used = {}, [], {k: 0 for k in PADS}
     pad_of: dict[str, int] = {}
     leads: dict[tuple, float] = {}
+    played: dict[int, list[float]] = {}  # where each pad's hits attack (s)
     # strongest identifications first; a template found twice shares its pad
     order = sorted(analysis["templates"], key=lambda k: (matches.get(k, {}).get("same_as") is not None,
                                                          -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
@@ -359,6 +364,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
         notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) + shift for h in hits} - {0})}
+        before = {k: np.array(v) for k, v in played.items()}  # the other templates' hits on each pad
         for e, v in zip(hits, velocities([h["gain"] for h in hits], vol_vel=VOL_VEL)):
             st = e.get("semitones", 0)
             if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
@@ -366,8 +372,12 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             # the hit attacks at t_attack, or the template's attack_s after its window starts; the note
             # starts that much before it that the pad's sample attacks there (pad_lead)
             t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
-            t -= pad_lead(pads[str(notes[st + shift])], leads)
-            drum_notes.append({"pitch": notes[st + shift], "start_time": round(max(0.0, t) * beats_per_second, 4),
+            pad = notes[st + shift]
+            if len(before.get(pad, [])) and np.min(np.abs(before[pad] - t)) <= SAME_MS / 1000:
+                continue  # one moment of one sample: the pad plays it already, for a template of that sound
+            played.setdefault(pad, []).append(t)
+            drum_notes.append({"pitch": pad, "start_time": round(max(0.0, t - pad_lead(pads[str(pad)], leads))
+                                                                   * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
