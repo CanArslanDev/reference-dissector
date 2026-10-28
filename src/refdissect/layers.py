@@ -286,19 +286,34 @@ def explained(t: np.ndarray, others: list[np.ndarray], lags: tuple[int, int]) ->
     return 1.0 - res ** 2 / (float((t.astype(np.float64) ** 2).sum()) or 1e-12), coef, best
 
 
+def _order(hits: list[int], main: list[int | None]) -> list[int]:
+    """The templates in the order relations() takes them: those averaged
+    from more hits first, and each view (main[k]: the template k is a
+    view of, discover()'s same_sound_as) right after its main, whatever
+    its hits. By hits alone, melodic-1's kick in the snare band (18 hits)
+    came before the kick's own template (15) and explained it: the kick
+    was left out, and the view timed its moments, on the click or 12 or
+    35 ms late on the body (kick F1@20 0.929 -> 0.748). Right after, not
+    only after: a template taken between them (melodic-1's hat, 0.08 of
+    the view) got the view's hits when the view was left out, its null
+    rose 6 times and 20 of its hats went."""
+    root = [k if m is None else m for k, m in enumerate(main)]
+    return sorted(range(len(hits)), key=lambda k: (-hits[root[k]], root[k], k != root[k], -hits[k]))
+
+
 def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int],
-              holdable: set[int], rows: list[int]) -> dict:
+              holdable: set[int], rows: list[int], main: list[int | None] | None = None) -> dict:
     """How the templates overlap, from their weighted bands (full; n: column
     lengths; rows: the fit band each is heard in) and their own detection
-    bands (own[k][j]: template j in k's band), taking those averaged from
-    more hits first:
+    bands (own[k][j]: template j in k's band), taking them in _order()'s
+    order (main: each one's main, if it is a view):
     - composite: the earlier ones explain COMPOSITE of it in all bands (a
       duplicate, or a kick+hat where both have templates): left out;
     - echo: an earlier one explains ECHO of it in its own band, so its
       matched filter repeats that one's (a kick+hat found in the hat band
       finds every hat): never probed for;
     - holds: s holds h, another sound that may be held (holdable, _held)."""
-    order = sorted(range(len(full)), key=lambda k: -hits[k])
+    order = _order(hits, main or [None] * len(full))
     near = (-samples(10), samples(10))
     composite: dict[int, dict] = {}
     echo: dict[int, float] = {}
@@ -684,7 +699,10 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     # hits
     residual = {k for k, tp in enumerate(templates) if getattr(tp, "found", "grid") == "residual"}
     holdable = {k for k in range(len(templates)) if (k not in tones or k in hatlike) and k not in residual}
-    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows)
+    main = [names.index(tp.same_sound_as) if getattr(tp, "same_sound_as", None) in names else None
+            for tp in templates]
+    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows,
+                    main)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones | residual and k not in rel["echo"]]
     columns, purity = [], {}

@@ -463,3 +463,23 @@ def test_a_held_sound_sits_where_it_plays_with_its_holder(case):
         want = 2.4
     held = layers._held([snare, hat], [samples(60), hat.shape[1]], 0, [1], [1, 2], [16, 100])
     assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(samples(want), abs=samples(0.5))
+
+
+def test_a_view_never_holds_its_main(sounds):
+    """A kick template and a view of it that discover() found in the snare
+    band from more hits (same_sound_as: the kick), its window 3 ms later
+    on the sound. Taken by hits, the view came first, the kick was left
+    out as a composite of it and every kick was the view's, 3 ms late
+    (melodic-1: the view's matched filter caught the body, 12-35 ms late
+    on half the kicks). The main comes first: the kicks are its own, on
+    their attack, and the view adds none."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    kick, late = templates[1], samples(3)
+    view = Template("view", "kick", "snare", np.r_[kick.audio[late:], np.zeros(late, np.float32)], kick.hits + 3,
+                    {}, None, same_sound_as="kick", found="residual")
+    events = explain(x, templates + [view])
+    kicks = [t for n, t, _ in hits if n == "kick"]
+    assert found(events, "kick", kicks, tol=0.001).all() and extra(events, "kick", kicks) == 0
+    assert events["view"] == []
