@@ -209,6 +209,78 @@ def test_a_kick_inside_a_held_note_is_the_note_going_on():
         assert [n["midi_settled"] for n in out] == [22.1, 17.1][:kept]
 
 
+def tone(parts, hz: float = 32.70, seconds: float = 3.0) -> np.ndarray:
+    """The 808 band of a tone at hz that starts again (from zero phase, at
+    level 1) at each (start, end, decay seconds, gain curve or None) of
+    parts and is silent between them, with noise at -100 dB."""
+    from refdissect.audio import band
+    y = np.random.default_rng(0).standard_normal(int(seconds * SR)) * 1e-5
+    for a, b, decay, gain in parts:
+        t = np.arange(int((b - a) * SR)) / SR
+        g = np.exp(-t / decay) * (gain(t) if gain else 1.0)
+        y[int(a * SR):int(a * SR) + len(t)] = np.sin(2 * np.pi * hz * t) * g
+    return band(y.astype(np.float32), "808")
+
+
+def note(t: float, end: float, ncc: float, midi: float = 24.0) -> dict:
+    return {"t": t, "t_attack": t + 0.005, "end": end, "midi_settled": midi, "ncc": ncc, "flags": []}
+
+
+FLAT = B.Template(np.zeros(1), np.zeros(1), [], 32.70, "qifft_300_600ms", [[0.0, 0.0], [2.0, 0.0]])
+
+
+def test_a_note_never_holds_across_a_silence():
+    """PIRAMIT's failure: an 808 note, 1.0 s of silence, then the 808 alone
+    (no kick) on a note whose onset sits 27 ms before its envelope rises
+    and whose template fit is 0.89; a note found in the rest, 60 dB under
+    the others. Both were the note before going on, which then held the
+    rest (15.3 s on PIRAMIT). Now the note before ends where it falls
+    silent (0.4 s), the note after the rest is a note of its own, and the
+    note in the rest is none."""
+    lo = tone([(0.0, 0.4, 1.0, None), (1.4, 2.4, 1.0, None), (0.9, 1.0, 1.0, lambda t: 1e-3)])
+    notes = [note(0.0, 0.9, 0.97), note(0.9, 1.373, 0.4), note(1.373, 2.4, 0.89)]
+    feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+    feet = feet[(feet < 1.38) | (feet > 1.42)]  # its rise aside: the rest alone makes it a note
+    out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+    assert [n["t"] for n in out] == [0.0, 1.373]
+    assert out[0]["end"] == pytest.approx(0.4, abs=0.02) and out[1]["end"] == 2.4
+
+
+def test_a_rise_after_the_onset_attacks_the_note():
+    """PIRAMIT's 808 alone, re-attacking from a sustain 16 dB down (no
+    silence, no kick): its envelope rises 12-21 dB 27 ms after the onset
+    the template's fit gives (0.89). The rise attacks the note. A weak rise
+    there (4 dB: the suite's notes merged with a foot 20-40 ms late rise
+    -5.6 to +7.9 dB) does not."""
+    for jump_db, kept in ((16.0, 2), (4.0, 1)):  # the sustain decays to jump_db under the new note's level
+        lo = tone([(0.0, 1.427, 1.427 / np.log(10 ** (jump_db / 20)), None), (1.427, 2.6, 1.0, None)])
+        notes = [note(0.0, 1.4, 0.97), note(1.4, 2.6, 0.89)]
+        feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+        out = B.legato(notes, lo, FLAT, feet, np.zeros(0))
+        assert len(out) == kept and out[-1]["end"] == 2.6
+
+
+def test_a_note_under_a_sidechain_duck_stays_one_note():
+    """A held 808 ducked 20 or 30 dB for 80 ms by a sidechained kick every
+    0.4 s (the deepest dip inside the suite's truth notes was 26.8 dB under
+    the note's peak), recovering over 60 ms: the notes found in a duck
+    where nothing attacks (70 ms in: the duck's own start shows an
+    envelope foot) are the note going on, never cut at a duck."""
+    for depth in (20.0, 30.0):
+        def duck(t, depth=depth):
+            g = np.ones_like(t)
+            for k in (0.4, 0.8, 1.2):
+                d = t - k
+                g = np.where((d >= 0) & (d < 0.08), 10 ** (-depth / 20), g)
+                g = np.where((d >= 0.08) & (d < 0.14), 10 ** (-depth / 20 * (1 - (d - 0.08) / 0.06)), g)
+            return g
+        lo = tone([(0.0, 1.6, 3.0, duck)])
+        notes = [note(0.0, 0.47, 0.97), note(0.47, 0.87, 0.8), note(0.87, 1.6, 0.8)]
+        feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+        out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+        assert len(out) == 1 and out[0]["end"] == 1.6
+
+
 def test_a_kick_split_off_the_next_note_at_the_edge_of_the_search():
     """PIRAMIT's C#2 notes: 60 ms on a kick at +1310 cents (past the
     search's whole semitones), followed at once by a C1 note: the C1 note

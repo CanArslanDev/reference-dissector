@@ -83,6 +83,11 @@ ATTACKED_NCC = 0.9  # a note whose template fit (attack and drop included) reach
 # kick inside a held note may be split off as (seconds)
 SLIDES, LEGATO_STEP, LEGATO_SHORTEST, LEGATO_REACH, SPLIT_S = False, 0.75, 0.08, 12.75, 0.12
 SLIDE_AFTER = 0.1  # _slide: seconds after the note before starts that a slide may leave it (sooner: its own drop)
+# the 808 is silent where its band's RMS over 25 ms stays SILENT_DB or more under a note's peak (that RMS's highest
+# point over the note's first 200 ms) for SILENT_S seconds or more: inside the suite's 5,448 truth notes (both
+# models, 50 ms in to 10 ms before the end) it never fell more than 26.8 dB under the note's peak, and PIRAMIT's
+# rests sit 52-81 dB under its notes' median peak, the shortest 62 ms long
+SILENT_DB, SILENT_S = 40.0, 0.05
 
 
 # ── Attacks ──
@@ -925,9 +930,46 @@ def _settles_at(lo: np.ndarray, a: dict, n: dict, *others: dict) -> tuple[np.nda
     return t, midi, float(np.median(later)) if len(later) else n["midi_settled"]
 
 
+def _top(env: np.ndarray, n: dict, ms: float = 200.0) -> int:
+    """The sample of env's highest point over a note's first ms, or up to
+    its end: where its own peak is read (a note's "peak" reads 200 ms on,
+    the next note's attack too)."""
+    i = min(max(0, int(round(n["t"] * SR))), len(env) - 1)
+    return i + int(np.argmax(env[i:i + max(1, samples(1000 * min(ms / 1000, n["end"] - n["t"])))]))
+
+
+def silent_from(env: np.ndarray, a: int, b: int, under: float, least_s: float = SILENT_S) -> int | None:
+    """The first sample in [a, b) from which env stays under `under` for
+    least_s or more (the stretch may run on past b); None where it does not."""
+    n = samples(1000 * least_s)
+    quiet = env[a:min(len(env), b + n)] < under
+    edges = np.flatnonzero(np.diff(np.r_[0, quiet.astype(np.int8), 0]))
+    for s, e in zip(edges[::2], edges[1::2]):
+        if s >= b - a:
+            break
+        if e - s >= n:
+            return a + int(s)
+    return None
+
+
+def audible(notes: list[dict], env: np.ndarray, under_db: float = SILENT_DB) -> list[dict]:
+    """The notes whose own peak (env, the 808 band's 25 ms RMS, up to the
+    note's end: _top) is less than under_db under the median of the
+    notes' peaks: a note found where the 808 is silent is not one. On
+    PIRAMIT, 6 notes were found in its rests, 49-78 dB under its notes'
+    median peak (NCC 0.12-0.65); legato() then joined them to the note
+    before, which held the rest, or the 808 notes after them to them. On
+    the suite's beats no note is: the quietest sits 34.3 dB under."""
+    if not notes:
+        return notes
+    peaks = np.array([env[_top(env, n)] for n in notes])
+    return [n for n, p in zip(notes, peaks) if p > float(np.median(peaks)) * 10 ** (-under_db / 20)]
+
+
 def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, kicks: np.ndarray,
            attacked_ncc: float = ATTACKED_NCC, slides: bool = SLIDES, step: float = LEGATO_STEP,
-           shortest: float = LEGATO_SHORTEST, reach: float = LEGATO_REACH, split_s: float = SPLIT_S) -> list[dict]:
+           shortest: float = LEGATO_SHORTEST, reach: float = LEGATO_REACH, split_s: float = SPLIT_S,
+           silent_db: float = SILENT_DB) -> list[dict]:
     """Notes found where nothing attacks (no envelope foot within 20 ms, no
     drum attack from 30 ms before to 15 ms after, a template fit under
     attacked_ncc, and no restart of the sample's drop: _restarts) are not
@@ -936,6 +978,23 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     wrong pitches (glides scenario: 48 truth notes, up to 130 found), and
     the sustain of a long note, once the template's own has decayed, with
     short notes 8-10 semitones low (kick808-2).
+
+    Nothing goes on across a silence (the 808 band's 25 ms RMS silent_db
+    under the note's peak for SILENT_S: silent_from): a note found after
+    the note before has fallen silent starts again, and every note ends
+    where it falls silent. On PIRAMIT a note of 0.06 s took in four notes
+    of an 808 playing alone after a 1.2 s rest, then a 7.4 s rest, and held
+    15.3 s: those notes start 27 ms before their envelope rises, and their
+    template fit is 0.887-0.893 (the fit trades time for pitch: at the
+    foot, at the template's own pitch, 0.848-0.861).
+
+    A rise (a foot whose envelope rises RISE_DB or more, as reattacks()
+    finds a note after a rest or a decay) from 20 ms before a note's onset
+    to its peak (up to its end, and nearer its onset than the next note's)
+    attacks it too. PIRAMIT's notes of an 808 without a kick rise 11.1-20.6
+    dB 26.6-27.5 ms after their onsets; on the suite's 48 beats (both
+    models), the 41 notes merged with a foot 20-40 ms after their onset
+    rise -5.6 to +7.9 dB.
 
     A kick inside a held note: an attacked note of split_s or less whose
     unattacked follower settles (period by period) within half a semitone
@@ -951,9 +1010,24 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     truth's 24 (htdemucs; 120 on htdemucs_ft), 6 of them right (5), and
     merging every one scored better on every 808 number (_slide has the
     replay)."""
+    env = rms_envelope(lo, 25.0)
+    quiet = 10 ** (-silent_db / 20)
+    e = envelope(lo)
+    rises = np.array([f for f in feet if rise_db(e, int(round(f * SR)), 30.0, 40.0, 0.0) >= RISE_DB])
+
+    def rest(a: dict, b: dict) -> bool:  # a falls silent before b's peak
+        i = _top(env, a)
+        return silent_from(env, i, _top(env, b), env[i] * quiet) is not None
+
+    def risen(n: dict, nxt: float) -> bool:  # a rise from 20 ms before n's onset to its peak, nearer n than nxt
+        top = _top(env, n) / SR
+        return bool(len(rises)) and bool(np.any((rises >= n["t"] - 0.02) & (rises <= min(top, (n["t"] + nxt) / 2))))
+
     out: list[dict] = []
-    for n in notes:
-        if not out or _attacked(n, feet, kicks, attacked_ncc) or _restarts(lo, tpl, n):
+    for j, n in enumerate(notes):
+        nxt = notes[j + 1]["t"] if j + 1 < len(notes) else np.inf
+        if not out or rest(out[-1], n) or _attacked(n, feet, kicks, attacked_ncc) or risen(n, nxt) \
+                or _restarts(lo, tpl, n):
             out.append(dict(n))
             continue
         prev = out[-1]
@@ -972,6 +1046,11 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
         out.append({**n, "t": glide["t"], "t_attack": glide["t"], "midi_settled": glide["to_midi"],
                     "transposition": round(100 * (glide["to_midi"] - tpl.midi), 1), "glide": glide,
                     "flags": ["legato"]})
+    for n in out:
+        i = _top(env, n)
+        cut = silent_from(env, i, int(round(n["end"] * SR)), env[i] * quiet)
+        if cut is not None:
+            n["end"] = round(cut / SR, 5)
     return out
 
 
@@ -1173,8 +1252,8 @@ def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 
                       "gain": round(f["g"], 4), "ncc": f["ncc"],
                       "peak": round(float(env[i:i + samples(200)].max()) if i < len(env) else 0.0, 5),
                       "kick": bool(strong(i)), "flags": []})
-    notes = legato(kick_splits(notes, kicks / SR), lo, tpl, np.array([o["i"] for o in att]) / SR, kicks / SR,
-                   ATTACKED_NCC, slides)
+    notes = legato(kick_splits(audible(notes, env), kicks / SR), lo, tpl, np.array([o["i"] for o in att]) / SR,
+                   kicks / SR, ATTACKED_NCC, slides)
     for n, nxt in zip(notes, notes[1:] + [None]):
         n["end"] = round(min(n["end"], nxt["t"]) if nxt else n["end"], 5)
         n["pitch"] = int(np.floor(n["midi_settled"] - tuning + 0.5))
