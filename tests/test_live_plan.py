@@ -138,16 +138,70 @@ def test_a_sound_heard_once_every_other_bar_gets_a_pad(tmp_path):
 
 def test_hits_that_never_recur_are_no_drum_sound(tmp_path):
     """A melodic loop at its own tempo leaves transients in the drum stem
-    that discover() groups into a clean template; called a kick, it got a
-    pad as the backbone. Its hits sit at a new place of the bar every
-    time; the same hits on one place of the bar keep it."""
+    that discover()'s residual pass groups into a clean template, close to
+    a library kick. Its hits sit at a new place of the bar every time; the
+    same hits on one place of the bar keep it."""
     loop = [1.37 * k + 0.11 for k in range(16)]
-    info, match = {"found": "grid"}, {"role": "kick", "verdict": "no close match", "ncc": 0.7}
+    info, match = {"found": "residual"}, {"role": "kick", "verdict": "same family", "ncc": 0.9}
     assert recurring(loop, 2.0) < 0.2
     assert not make_plan(*_bars(tmp_path, loop, info, match), tmp_path)["tracks"]["drums"]["pads"]
     steady = [2.0 * k + 0.5 for k in range(16)]
     assert recurring(steady, 2.0) == 1.0
     assert make_plan(*_bars(tmp_path, steady, info, match), tmp_path)["tracks"]["drums"]["pads"]
+
+
+def _ramp(tmp_path, times, info, match, bars: int = 32, rise: float = 0.03):
+    """A beat whose tempo rises `rise` over its `bars` bars from 120 BPM (its
+    last bar 59 ms shorter than its first) on the constant grid through its
+    beats, as fit_grid keeps it, with one template whose hits are the
+    quarter-note lines at `times` (indices); and those lines."""
+    lines = np.r_[0.0, np.cumsum(0.5 * (1 - rise * np.arange(4 * bars) / (4 * bars)))]
+    analysis, matches, synth = _bars(tmp_path, lines[times].tolist(), info, match)
+    analysis["source"]["duration_s"] = float(lines[-1])
+    analysis["grid"]["bpm"] = 60 / float(np.polyfit(np.arange(len(lines)), lines, 1)[0])
+    return (analysis, matches, synth), lines
+
+
+def test_a_sound_found_on_the_beat_needs_no_recurrence(tmp_path):
+    """Recurrence is measured on the grid's constant tempo, so it tests the
+    tempo too: on a tempo rising 3 % the kick on every bar line stops
+    recurring (lag-1 bars up to 30 ms off), and with every template held
+    to it the suite's drums fell 0.866 -> 0.507 (plan F1@20). A sound
+    discover() found on the places of the beat needs none."""
+    (analysis, matches, synth), lines = _ramp(tmp_path, slice(0, -1, 4), {"found": "grid"},
+                                              {"role": "kick", "verdict": "same sample", "ncc": 0.97})
+    assert recurring(lines[:-1:4], 240 / analysis["grid"]["bpm"]) < 0.3
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == ["sound_1"]
+    assert len(plan["tracks"]["drums"]["notes"]) == 32
+
+
+def test_a_residual_sound_recurs_on_the_grids_tempo_map(tmp_path):
+    """Where the beats drift from the constant grid, fit_grid keeps them as
+    tempo_map; a residual template's hits recur on it (bar_clock): on the
+    suite with every time warped by a 3 % rise, plan drums F1@20 0.855
+    without the map, 0.867 with it (0.866 unwarped)."""
+    (analysis, matches, synth), lines = _ramp(tmp_path, slice(3, -1, 8), {"found": "residual"},  # beat 4, odd bars
+                                              {"role": "hat", "verdict": "same sample", "ncc": 0.97})
+    assert not make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["pads"]
+    analysis["grid"]["tempo_map"] = lines.tolist()
+    assert len(make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]) == 16
+
+
+def test_a_residual_sound_recurs_at_its_own_tempo_after_a_tempo_change(tmp_path):
+    """Two tempi: the grid follows the longer part (grid.tempo_change), and
+    a sound of the other part recurs at that part's tempo. Two suite beats
+    joined (v1-2 then tempo95-2, B's templates all residual): B's sounds
+    plan F1@20 0 -> 0.982 (mean)."""
+    hits = [16.0 + 0.4 + 240 / 142 * k for k in range(8)]  # 8 bars at 142 BPM after 8 at 120
+    analysis, matches, synth = _bars(tmp_path, hits, {"found": "residual"},
+                                     {"role": "snare", "verdict": "same sample", "ncc": 0.97})
+    analysis["source"]["duration_s"] = 16.0 + 8 * 240 / 142
+    assert recurring(hits, 2.0) == 0.0
+    assert not make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["pads"]
+    analysis["grid"]["tempo_change"] = {"until": 16.0, "from": 16.0, "ratio": round(142 / 120, 3),
+                                        "grid_follows": "first", "span_s": [0.0, 16.0]}
+    assert len(make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]) == 8
 
 
 def test_a_residual_template_is_no_backbone(tmp_path):
