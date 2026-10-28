@@ -280,10 +280,11 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad when it was detected often and
-    cleanly and the library has something close (NCC >= min_ncc), or when
-    it is a kick or snare (the backbone, played with the closest sound even
-    if far). A sound found twice (same_as) shares the first one's pad; the
-    same file at another pitch plays on a pad of its own, transposed so far
+    cleanly (sound_clean: over the templates merged into it) and the
+    library has something close (NCC >= min_ncc), or when it is a kick or
+    snare (the backbone, played with the closest sound even if far). A
+    sound found twice (same_as) shares the first one's pad; the same file
+    at another pitch plays on a pad of its own, transposed so far
     (_pitched_pads: discover() finds a pitched copy as a template too, and
     producer-2's hat 3 semitones down had played at the hat's pitch, its
     own pitched copies 300 cents off). The pad plays the top match at its
@@ -302,12 +303,13 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     # strongest identifications first; a template found twice shares its pad
     order = sorted(analysis["templates"], key=lambda k: (matches.get(k, {}).get("same_as") is not None,
                                                          -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
+    clean = sound_clean(analysis)
     for name in order:
         info, m = analysis["templates"][name], matches.get(name)
-        if not m or info["detected_hits"] < min_hits or info.get("clean", 1.0) < min_clean:
+        if not m or info["detected_hits"] < min_hits or clean[name] < min_clean:
             continue
         role = m["role"] if m["role"] in PADS else "perc"
-        structural = role in ("kick", "snare") and info.get("clean", 1.0) >= 0.7 and info["detected_hits"] >= 16
+        structural = role in ("kick", "snare") and clean[name] >= 0.7 and info["detected_hits"] >= 16
         shift = 0  # semitones from the pad's pitch to the template's
         if m.get("same_as") in pad_of:
             note = pad_of[m["same_as"]]
@@ -358,6 +360,34 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
+
+
+def sound_clean(analysis: dict) -> dict[str, float]:
+    """Each template's clean share over its sound: itself and the templates
+    layers.explain merged into it (their hits are its hits), the largest.
+    A merged template keeps no hits, so its own share is read off its
+    matched-filter peaks over the whole stem (peak_ncc_histogram: those at
+    NCC 0.8 or more of those at 0.6 or more). On layers-2 the snare-band
+    snare (clean 0.44, under min_clean) holds the low-band one merged into
+    it (16 peaks at 0.9 or more, none between 0.4 and 0.9): taken by the
+    name alone, no pad played the snare (plan snare F1@20 1.0 -> 0)."""
+    merged = (analysis.get("layers") or {}).get("merged") or {}
+    own = {}
+    for name, info in analysis["templates"].items():
+        peaks = info.get("peak_ncc_histogram_0.3_to_1.0")
+        if info.get("detected_hits") or not peaks:
+            own[name] = info.get("clean", 1.0)
+        else:
+            own[name] = sum(peaks[5:]) / sum(peaks[3:]) if sum(peaks[3:]) else 0.0
+    out = dict(own)
+    for name in merged:
+        root, seen = name, {name}
+        while root in merged and merged[root]["into"] not in seen:  # merged into one merged in turn
+            root = merged[root]["into"]
+            seen.add(root)
+        if root in out:
+            out[root] = max(out[root], own[name])
+    return out
 
 
 def pad_lead(pad: dict, cache: dict) -> float:
