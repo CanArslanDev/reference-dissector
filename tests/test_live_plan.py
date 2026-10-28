@@ -74,6 +74,25 @@ def test_drum_notes_go_where_their_hits_attack(tmp_path):
     assert first == pytest.approx(0.18, abs=1e-4)
 
 
+def test_a_pads_sample_attacks_where_its_hit_did(tmp_path):
+    """A note starts as long before its hit's t_attack as the pad's sample
+    takes to attack as Simpler plays it (pad_lead), so the plan, timed as
+    Live plays it (evaluate.estimate_from_plan), attacks where the analysis
+    heard each hit; a sample with 6 ms in front of its attack played every
+    hit that much late."""
+    from refdissect import evaluate
+    analysis, matches, synth = _fixture(tmp_path)
+    late = tmp_path / "late.wav"
+    sf.write(late, np.r_[np.zeros(int(0.006 * SR)), np.random.default_rng(2).standard_normal(SR // 4) * 0.5], SR)
+    matches["sound_1"]["top"] = [{"path": str(late), "ncc": 0.97, "semitones": -1.0}]
+    del matches["sound_2"]
+    hits = [0.1 + 0.5 * k for k in range(8)]
+    analysis["events"]["sound_1"] = [{"t": t, "t_attack": t, "gain": 1.0} for t in hits]
+    est = evaluate.estimate_from_plan(make_plan(analysis, matches, synth, tmp_path), root=tmp_path)
+    played = sorted(e["t_attack"] for e in est["drums"])
+    assert np.max(np.abs(np.array(played) - hits)) < 1e-4
+
+
 def test_pitched_copies_get_transposed_pads(tmp_path):
     """Hits of a pitched copy (detect: semitones) play on pads of their own,
     the sound's sample transposed that much further, the plain ones on the
