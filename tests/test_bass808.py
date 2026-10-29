@@ -264,6 +264,28 @@ def test_a_rise_after_the_onset_attacks_the_note():
         assert len(out) == kept and out[-1]["end"] == 2.6
 
 
+def test_a_note_after_a_rest_starts_on_its_rise_at_the_pitch_its_periods_hold():
+    """PIRAMIT's notes after a rest, kept by the rest alone (no kick, a
+    template fit under 0.9): segment() placed one 27 ms before its rise at
+    +13 semitones (C#2 where the stem holds C1) and one 45 ms after its rise
+    at +84.5 cents. Each now starts on its rise, at the template's whole
+    transposition nearest the pitch its periods settle at (C1). A pitch
+    within half a semitone of the stem's is kept."""
+    lo = tone([(0.0, 0.4, 1.0, None), (1.4, 1.9, 1.0, None), (2.4, 3.0, 1.0, None)], seconds=3.2)
+    feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+    rises = [feet[np.argmin(np.abs(feet - t))] for t in (1.4, 2.4)]  # the band filter puts them 8 ms early
+    for second, third in ((37.0, 24.845), (24.3, 24.3)):
+        notes = [note(0.0, 0.9, 0.97), note(rises[0] - 0.027, 2.4, 0.89, second),
+                 note(rises[1] + 0.045, 3.2, 0.78, third)]
+        out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+        settled = [FLAT.midi if m > 24.5 else m for m in (second, third)]
+        assert [n["t"] for n in out[1:]] == pytest.approx(rises, abs=1e-5)
+        assert [n["midi_settled"] for n in out[1:]] == pytest.approx(settled, abs=0.01)
+        pre = B.PRE / SR  # the attack moves with the onset, read at the note's new rate
+        lead = [(0.005 + pre) * 2 ** ((m - s) / 12) - pre for m, s in zip((second, third), settled)]
+        assert [n["t_attack"] - n["t"] for n in out[1:]] == pytest.approx(lead, abs=1e-4)
+
+
 def test_a_note_under_a_sidechain_duck_stays_one_note():
     """A held 808 ducked 20 or 30 dB for 80 ms by a sidechained kick every
     0.4 s (the deepest dip inside the suite's truth notes was 26.8 dB under

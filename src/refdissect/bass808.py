@@ -1048,6 +1048,21 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     models), the 41 notes merged with a foot 20-40 ms after their onset
     rise -5.6 to +7.9 dB.
 
+    A note kept by a rest or a rise alone was placed by segment() on the
+    template's fit alone. It starts on the foot that attacks it (the rise
+    of RISE_DB or more after the rest, or that rise: the one that rises
+    most; none, it stays), its attack moved with it (_seam), and once its
+    end is known (merged, cut at a silence) it takes the template's whole
+    transposition nearest the pitch its periods settle at, where its own
+    lies more than half a semitone from it (_repitch). On PIRAMIT the 8
+    such notes attacked 21.4-22.3 ms before their foot (6), 50.2 ms after
+    it (1) and 28.8 ms after a foot in the rest that no rise follows (1:
+    the attack's own foot was merged into it, and the note stays); the 7
+    moved now attack 5.2-5.4 ms after it (the template's own attack), and
+    the two written C#2 (+1310 cents) and C#1 (+84.5) where the stem holds
+    C1 (24.03 by QIFFT) are C1: of the notes of 200 ms or more, 88 of 98
+    are written as the stem holds them (86 before).
+
     A kick inside a held note: an attacked note of split_s or less whose
     unattacked follower settles (period by period) within half a semitone
     of the note before it, which it cut, is a kick leaking into the bass
@@ -1065,22 +1080,34 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     env = rms_envelope(lo, 25.0)
     quiet = 10 ** (-silent_db / 20)
     e = envelope(lo)
-    rises = np.array([f for f in feet if rise_db(e, int(round(f * SR)), 30.0, 40.0, 0.0) >= RISE_DB])
+    feet = np.asarray(feet, dtype=float)
+    up = np.array([rise_db(e, int(round(f * SR)), 30.0, 40.0, 0.0) for f in feet])
 
-    def rest(a: dict, b: dict) -> bool:  # a falls silent before b's peak
-        i = _top(env, a)
-        return silent_from(env, i, _top(env, b), env[i] * quiet) is not None
+    def silent(n: dict, until: int) -> int | None:  # where n falls silent before sample `until`
+        i = _top(env, n)
+        return silent_from(env, i, until, env[i] * quiet)
 
-    def risen(n: dict, nxt: float) -> bool:  # a rise from 20 ms before n's onset to its peak, nearer n than nxt
+    def rest(a: dict, b: dict) -> np.ndarray | None:  # a falls silent before b's peak: the rises from there on
+        top = _top(env, b)
+        s = silent(a, top)
+        return None if s is None else np.flatnonzero((up >= RISE_DB) & (feet >= s / SR) & (feet <= top / SR))
+
+    def risen(n: dict, nxt: float) -> np.ndarray:  # rises from 20 ms before n's onset to its peak, nearer n than nxt
         top = _top(env, n) / SR
-        return bool(len(rises)) and bool(np.any((rises >= n["t"] - 0.02) & (rises <= min(top, (n["t"] + nxt) / 2))))
+        return np.flatnonzero((up >= RISE_DB) & (feet >= n["t"] - 0.02) & (feet <= min(top, (n["t"] + nxt) / 2)))
 
     out: list[dict] = []
+    seams: list[dict] = []
     for j, n in enumerate(notes):
         nxt = notes[j + 1]["t"] if j + 1 < len(notes) else np.inf
-        if not out or rest(out[-1], n) or _attacked(n, feet, kicks, attacked_ncc) or risen(n, nxt) \
-                or _restarts(lo, tpl, n):
+        if not out or _attacked(n, feet, kicks, attacked_ncc) or _restarts(lo, tpl, n):
             out.append(dict(n))
+            continue
+        after, rose = rest(out[-1], n), risen(n, nxt)
+        if after is not None or len(rose):
+            at = rose if len(rose) else after
+            out.append(_seam(n, float(feet[at[np.argmax(up[at])]]) if len(at) else None))
+            seams.append(out[-1])
             continue
         prev = out[-1]
         if len(out) > 1 and "legato" not in prev["flags"] and prev["end"] - prev["t"] <= split_s \
@@ -1099,11 +1126,52 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
                     "transposition": round(100 * (glide["to_midi"] - tpl.midi), 1), "glide": glide,
                     "flags": ["legato"]})
     for n in out:
-        i = _top(env, n)
-        cut = silent_from(env, i, int(round(n["end"] * SR)), env[i] * quiet)
+        cut = silent(n, int(round(n["end"] * SR)))
         if cut is not None:
             n["end"] = round(cut / SR, 5)
+        if any(n is m for m in seams):
+            _repitch(lo, tpl, n)
     return out
+
+
+def _reread(lo: np.ndarray, tpl: Template, n: dict, least: int = 4) -> float | None:
+    """The settled pitch (MIDI) of note n read on the stem: the median of
+    its periods (_track near 1.3 times the higher of its own and the
+    template's pitch) over the later 60 % of the note, or of its part before
+    the 808 starts again (from 60 ms in, a period half a semitone over the
+    lowest so far: its own pitch only falls), the last period, which the
+    cut ends, aside; less the template's drop there at the rate that
+    reading implies. None with fewer than `least` periods."""
+    hz = 440 * 2 ** ((max(n["midi_settled"], tpl.midi) - 69) / 12)
+    t, midi = _track(lo, n["t"], n["end"], 1.3 * hz, skip_s=0.0)
+    again = np.flatnonzero((t >= 0.06) & (midi >= np.minimum.accumulate(np.where(t >= 0.06, midi, np.inf)) + 0.5))
+    span = t[again[0]] if len(again) else n["end"] - n["t"]
+    keep = np.flatnonzero((t >= 0.4 * span) & (t < span))[:-1]
+    if len(keep) < least:
+        return None
+    from .scenarios import drop
+    rate = 2 ** ((float(np.median(midi[keep])) - tpl.midi) / 12)
+    return float(np.median(midi[keep] - drop(tpl.curve, t[keep] * rate) / 100))
+
+
+def _seam(n: dict, foot: float | None) -> dict:
+    """Note n moved to the foot that attacks it, its attack with it."""
+    m = dict(n)
+    if foot is not None:
+        m["t"], m["t_attack"] = round(foot, 5), round(n["t_attack"] + foot - n["t"], 5)
+    return m
+
+
+def _repitch(lo: np.ndarray, tpl: Template, n: dict, apart: float = 0.5) -> None:
+    """Where note n's settled pitch lies more than `apart` semitones from
+    the stem's (_reread), n takes the template's nearest whole
+    transposition to the stem's, its attack read at that rate (in place)."""
+    heard = _reread(lo, tpl, n)
+    if heard is None or abs(heard - n["midi_settled"]) <= apart:
+        return
+    c = 100.0 * round(heard - tpl.midi)
+    lead = (n["t_attack"] - n["t"] + PRE / SR) * 2 ** ((100 * (n["midi_settled"] - tpl.midi) - c) / 1200)
+    n.update(midi_settled=round(tpl.midi + c / 100, 4), transposition=c, t_attack=round(n["t"] + lead - PRE / SR, 5))
 
 
 def _slide(lo: np.ndarray, tpl: Template, prev: dict, n: dict, step: float = LEGATO_STEP,
@@ -1214,6 +1282,40 @@ FLAGS = {"drums": lambda drum, notch: drum, "drums|notch": lambda drum, notch: d
          "all": lambda drum, notch: True}
 
 
+def written(lo: np.ndarray, tpl: Template, found: list[dict], feet: np.ndarray, kicks: np.ndarray, strong,
+            slides: bool = SLIDES) -> tuple[Template, list[dict]]:
+    """The notes found (refine's, at LOW_SR) as bass808.json holds them, and
+    the template, its settled pitch read on them where learn() had none
+    (settle): audible ones, kick_splits, legato, then each note's written
+    pitch, cents and heard pitch. feet: the envelope's feet (seconds);
+    kicks: the drum attacks (seconds); strong(i): a drum attack at sample i."""
+    env = rms_envelope(lo, 25.0)
+    starts = [(f["k"] + PRE_LOW) / LOW_SR for f in found]
+    tpl = settle(lo, tpl, [(s, min((f["end"] + PRE_LOW) / LOW_SR, nxt), f["c"])
+                           for s, f, nxt in zip(starts, found, starts[1:] + [np.inf])])
+    tuning = tpl.midi - int(np.floor(tpl.midi + 0.5))
+    notes = []
+    for f, t, nxt in zip(found, starts, starts[1:] + [np.inf]):
+        end = min((f["end"] + PRE_LOW) / LOW_SR, nxt)
+        settled = tpl.midi + f["c"] / 100
+        pitch = int(np.floor(settled - tuning + 0.5))
+        i = int(round(t * SR))
+        notes.append({"t": round(t, 5), "t_attack": round(f["k"] / LOW_SR + attack_s(tpl, f["c"]), 5),
+                      "end": round(end, 5), "pitch": pitch, "midi_settled": round(settled, 4),
+                      "midi_float": round(sounding(tpl, settled, f["c"], end - t), 4),
+                      "cents": round(100 * (settled - pitch), 1), "transposition": round(f["c"], 1),
+                      "gain": round(f["g"], 4), "ncc": f["ncc"],
+                      "peak": round(float(env[i:i + samples(200)].max()) if i < len(env) else 0.0, 5),
+                      "kick": bool(strong(i)), "flags": []})
+    notes = legato(kick_splits(audible(notes, env), kicks), lo, tpl, feet, kicks, ATTACKED_NCC, slides)
+    for n, nxt in zip(notes, notes[1:] + [None]):
+        n["end"] = round(min(n["end"], nxt["t"]) if nxt else n["end"], 5)
+        n["pitch"] = int(np.floor(n["midi_settled"] - tuning + 0.5))
+        n["cents"] = round(100 * (n["midi_settled"] - n["pitch"]), 1)
+        n["midi_float"] = round(_heard(tpl, n), 4)
+    return tpl, notes
+
+
 def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 2, penalty: float = 0.5,
                slides: bool = SLIDES, log=None) -> dict:
     """The 808 notes of a bass stem (drums: the drum stem, whose kicks flag
@@ -1284,36 +1386,11 @@ def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 
     mid = float(np.median([t[3].hz for t in close]))
     best = max(close, key=lambda t: (t[1], abs(1200 * np.log2(t[3].hz / mid)) <= 10, t[0]))
     share, on_kicks, name, tpl, found, cands = best
-    env = np.sqrt(np.convolve(lo.astype(np.float64) ** 2, np.ones(samples(25)) / samples(25), mode="same"))
-    notes = []
     feet = [o["i"] / DS - PRE_LOW for o in att]
     found = [refine(x, tpl, f, feet) for f in retriggers(found, cands, lo, tpl, kicks / SR)]
-    starts = [(f["k"] + PRE_LOW) / LOW_SR for f in found]
-    tpl = settle(lo, tpl, [(s, min((f["end"] + PRE_LOW) / LOW_SR, nxt), f["c"])
-                           for s, f, nxt in zip(starts, found, starts[1:] + [np.inf])])
+    tpl, notes = written(lo, tpl, found, np.array([o["i"] for o in att]) / SR, kicks / SR, strong, slides)
     root = int(np.floor(tpl.midi + 0.5))
     tuning = tpl.midi - root
-    for j, f in enumerate(found):
-        t = (f["k"] + PRE_LOW) / LOW_SR
-        nxt = (found[j + 1]["k"] + PRE_LOW) / LOW_SR if j + 1 < len(found) else np.inf
-        end = min((f["end"] + PRE_LOW) / LOW_SR, nxt)
-        settled = tpl.midi + f["c"] / 100
-        pitch = int(np.floor(settled - tuning + 0.5))
-        i = int(round(t * SR))
-        notes.append({"t": round(t, 5), "t_attack": round(f["k"] / LOW_SR + attack_s(tpl, f["c"]), 5),
-                      "end": round(end, 5), "pitch": pitch, "midi_settled": round(settled, 4),
-                      "midi_float": round(sounding(tpl, settled, f["c"], end - t), 4),
-                      "cents": round(100 * (settled - pitch), 1), "transposition": round(f["c"], 1),
-                      "gain": round(f["g"], 4), "ncc": f["ncc"],
-                      "peak": round(float(env[i:i + samples(200)].max()) if i < len(env) else 0.0, 5),
-                      "kick": bool(strong(i)), "flags": []})
-    notes = legato(kick_splits(audible(notes, env), kicks / SR), lo, tpl, np.array([o["i"] for o in att]) / SR,
-                   kicks / SR, ATTACKED_NCC, slides)
-    for n, nxt in zip(notes, notes[1:] + [None]):
-        n["end"] = round(min(n["end"], nxt["t"]) if nxt else n["end"], 5)
-        n["pitch"] = int(np.floor(n["midi_settled"] - tuning + 0.5))
-        n["cents"] = round(100 * (n["midi_settled"] - n["pitch"]), 1)
-        n["midi_float"] = round(_heard(tpl, n), 4)
     curve = tpl.curve[::2]
     return {"template": {"notes_used": len(tpl.starts), "onsets_s": [round(s / SR, 5) for s in tpl.starts],
                          "hz": round(tpl.hz, 4), "midi": round(tpl.midi, 4), "root_midi": root,
