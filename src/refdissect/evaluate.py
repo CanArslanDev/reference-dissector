@@ -32,11 +32,14 @@ from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, sample
 from .calibrate import _f1
 from .grid import BAR_SLACK
 from .render import (
+    RETRIGGER_S,
     as_played,
     chain_semitones,
     chains_808,
     fader_db,
     glide_s,
+    late_808,
+    pad_hits,
     pad_settings,
     pitch_808,
     read_at,
@@ -370,8 +373,18 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
     bps, gain = plan["tempo"] / 60, 10 ** ((fader_db(plan, "808") + s["volume_db"]) / 20)
     own = s["root_midi"] + cents / 100  # the one-shot's settled pitch, played at shift 0
     leads: dict[float, float] = {}
+    lengths: dict[float, float] = {}
+
+    def played_s(pitch: int) -> float:
+        shift = pitch_808(s, pitch)[0]
+        if shift not in lengths:
+            lengths[shift] = len(as_played(shot, 0.0, shift)) / SR
+        return lengths[shift]
+
+    chains = chains_808(t808)
+    late = late_808([c[0] for c in chains], bps, played_s) if not glide_s(t808) else np.zeros(len(chains), bool)
     bass = []
-    for chain in chains_808(t808):
+    for c, chain in enumerate(chains):
         first = chain[0]
         shift = pitch_808(s, first["pitch"])[0]
         if shift not in leads:
@@ -389,16 +402,18 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
             ring = float(np.sum(np.isfinite(heard[o:])) - 1) / SR  # until the voice reads past the one-shot
             if ring <= 0:  # it had ended before this note started: nothing plays
                 continue
-            dur = min(stop - t, ring)
+            on = t + RETRIGGER_S * (late[c] and not k)  # where Live starts the sample, which sounds from there on
+            dur = min(stop - on, ring)
             midi = S.sounding(lambda x, o=o, h=heard: h[np.clip(o + np.round(x * SR).astype(int), 0, len(h) - 1)],
                               dur)
             glide = None if not k else {"from_midi": round(own + semis[max(0, o - 1)], 4),
                                         "to_midi": round(own + pitch_808(s, n["pitch"])[0], 4), "t": round(t, 5),
                                         "ms": round(1000 * glide_s(t808), 1), "shape": "lin"}
-            bass.append({"sound": "808", "t": round(t, 5), "t_attack": round(t + (leads[shift] if not k else 0.0), 5),
+            bass.append({"sound": "808", "t": round(on, 5), "t_attack": round(on + (leads[shift] if not k else 0.0), 5),
                          "end": round(stop, 5), "midi": round(float(midi), 4), "pitch": int(n["pitch"]),
                          "midi_settled": round(own + pitch_808(s, n["pitch"])[0], 4), "glide": glide,
-                         "with_kick": False, "gain": round(gain * v, 5), "flags": ["legato"] if k else []})
+                         "with_kick": False, "gain": round(gain * v, 5),
+                         "flags": ["legato"] if k else ["retrigger"] if late[c] else []})
     at_root = as_played(shot, 0.0, pitch_808(s, s["root_midi"])[0])
     sounds["808"] = {"role": "808", "path": str(path), "sha256": _sha256(path), "semitones": s["transpose"],
                      "cents": cents, "attack_s": round(attack_time(at_root, "808"), 5), "f0_hz": round(f0, 3)}
@@ -409,13 +424,17 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
                        velocity_curve="live") -> dict:
     """What Live would play, as an estimate (render.py's assumptions).
 
-    Drum note: t = start_time * 60 / tempo; t_attack = t + attack_time(the
-    pad's sample as played: from frame 0, or from start_s, transposed by
-    transpose + detune_cents/100 semitones) in the pad role's band; sound id
-    = the pad's note, role = the pad's. 808 note (pitch: the MIDI note
+    Drum note: t = start_time * 60 / tempo, RETRIGGER_S later where it
+    comes while its pad's hit before still plays (render.pad_hits: Live's
+    pads play one voice; flagged "retrigger"); t_attack = t +
+    attack_time(the pad's sample as played: from frame 0, or from start_s,
+    transposed by transpose + detune_cents/100 semitones) in the pad role's
+    band; sound id = the pad's note, role = the pad's. 808 note (pitch: the MIDI note
     written): the one-shot transposed by (pitch - 60) + transpose +
     detune_cents/100 semitones, attack read in the 808 band, ending at the
-    note end. It settles at root_midi + cents/100 + that shift
+    note end, RETRIGGER_S later where the voice of the note before at its
+    pitch still sounds (render.late_808; flagged "retrigger"). It settles
+    at root_midi + cents/100 + that shift
     (midi_settled; render.pitch_808: pitch plus the 808's tuning and
     heard_cents with tune_808's Transpose and Detune; a plan without cents
     gets the one-shot's own, scenarios.tuning), and sounds (midi) as a
@@ -432,13 +451,13 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     so is a legato note that starts after the voice has read past the
     one-shot's end (a long chain at a high pitch: the voice is silent).
     Melodic notes: the plan's melodic tracks (_plan_melodic). Rhythm: Live's
-    own grid, bar 1 at 0 s at the plan's tempo; the plan puts notes at their
-    seconds, so the song's bars fall on it only when the song's first bar
-    line is at 0 s."""
+    own grid, bar 1 at 0 s at the plan's tempo, in the plan's meter (the
+    build sets Live's time signature to it; 4/4 for a plan without one);
+    the plan puts notes at their seconds, so the song's bars fall on it
+    only when the song's first bar line is at 0 s."""
     bps = plan["tempo"] / 60
     track = plan["tracks"]["drums"]
-    g_drums = 10 ** (fader_db(plan, "drums") / 20)
-    sounds, settings, missing = {}, {}, []
+    sounds, settings, shots, missing = {}, {}, {}, []
     for note, pad in track["pads"].items():
         key, s = str(note), pad_settings(pad)
         path, role = resolve(pad["path"], root), _drum_role(s["role"])
@@ -447,27 +466,21 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
         except (OSError, RuntimeError):
             missing.append(str(pad["path"]))
             continue
-        settings[key] = s
+        settings[key], shots[key] = s, x
         sounds[key] = {"role": role, "path": str(path), "sha256": _sha256(path), "semitones": s["transpose"],
                        "cents": s["detune_cents"], "attack_s": round(attack_time(x, role), 5)}
-    drums = []
-    for n in track["notes"]:
-        key = str(n["pitch"])
-        if key not in sounds:
-            continue
-        s, t = settings[key], n["start_time"] / bps
-        curve = s["velocity_curve"] or velocity_curve
-        gain = g_drums * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve, s["vol_vel"])
-        drums.append({"sound": key, "role": sounds[key]["role"], "t": round(t, 5),
-                      "t_attack": round(t + sounds[key]["attack_s"], 5), "gain": round(gain, 5),
-                      "velocity": int(n["velocity"]), "layer_of": None, "flags": []})
+    drums = [{"sound": h["pad"], "role": sounds[h["pad"]]["role"], "t": round(h["t"], 5),
+              "t_attack": round(h["t"] + sounds[h["pad"]]["attack_s"], 5), "gain": round(h["gain"], 5),
+              "velocity": h["velocity"], "layer_of": None, "flags": ["retrigger"] * h["late"]}
+             for h in pad_hits(plan, shots, settings, velocity_curve)]
     drums.sort(key=lambda e: e["t_attack"])
     bass = _plan_808(plan, root, velocity_curve, sounds, missing)
     _with_kick(bass, drums)
     length = plan.get("length_beats", 0.0) / bps
     return _events(scenario, {"from": "plan", "velocity_curve": str(velocity_curve), "missing": missing},
                    audio={"sr": SR, "n_samples": int(round(length * SR))},
-                   time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length),
+                   time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length,
+                                   int(plan.get("beat_unit", 4))),
                    sounds=sounds, drums=drums, bass808=bass, **_plan_melodic(plan, bps))
 
 
