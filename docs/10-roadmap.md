@@ -2,7 +2,7 @@
 
 In rough order of value. Each item names how it will be measured. The calibration-v2 suite ([03](03-calibration.md)) is the answer key for most of them.
 
-Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as in [12](12-replica-mode.md), unless a line says otherwise. "Now" is tag m3 (6d96bc5): replica mode with the fixes of 2026-10-29. "Before" is base-htdemucs (471fd70), the code before replica mode. The fixes were measured against m2g-vel: the merged code of 9ccc759, its plans under Live's velocity law.
+Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as in [12](12-replica-mode.md), unless a line says otherwise. "Now" is tag m4 (e7ea748): replica mode with the fixes of 2026-10-29. m3 (6d96bc5) is the same before the last two, a level per drum pad and the 808 one-shot on its template's periods. "Before" is base-htdemucs (471fd70), the code before replica mode. The fixes were measured against m2g-vel: the merged code of 9ccc759, its plans under Live's velocity law.
 
 ## Done in replica mode
 
@@ -20,8 +20,8 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
   - 64th-roll hits: 65 → 165 of 200, from the layer lane's run (l1b-fix) to m2g.
   - Pitched copies play on pads of their own. Library layers are searched (`matches.json`) but not played.
 - **The 808's notes**, read as transpositions of the song's own 808:
-  - note F1 (50 ms, 50 cents): 0.278 → 0.936 at analysis, 0.229 → 0.921 in the plan;
-  - median pitch error: 55 → 6 cents at analysis;
+  - note F1 (50 ms, 50 cents): 0.278 → 0.936 at analysis, 0.229 → 0.934 in the plan;
+  - median pitch error: 55 → 6 cents at analysis, 70 → 4.5 cents in the plan;
   - the written note is right for 0.970 of the notes (0.947 at m2g-vel). Where a template's own notes never settle, its settled pitch is read on the notes that reach past it: bass_low 0.487 → 0.987.
   - A note ends where the 808 falls silent, and a 9 dB rise attacks one. On PIRAMIT no note is held over 0.2 s or more of silence (4 before, the longest held 15.3 s), and the 808 alone and the breakdown are two sections again.
 - **Sounds at any pitch.** The snare and hat bands are matched to a quarter cent (the speckle index), and pads play their match's Transpose and Detune. No pad that plays its sound's file is off pitch now; before Detune per pad, drum_pitch's snare played 30 cents off.
@@ -31,7 +31,15 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
   - false hits 23.0 → 9.6 a beat; sounds with a pad that play no truth sound 0.71 → 0.05 a beat. That last is a suite figure: with recurrence waived, as a loop on the beat's tempo would face, 0.37 (an estimate).
 - **Drum note timing.** A drum note starts as much before its hit's attack as its pad's sample takes to attack, so the plan times each sound where the analysis does: plan kick median +2.06 → −0.34 ms and p90 7.88 → 5.58 ms, hat p90 4.24 → 2.86 ms.
 - **Melodies and chords, started** (item 5 before). Basic Pitch runs per tonal stem: note F1 0.630; chords majmin 0.977 (4 beats). The plan carries the notes as muted MIDI tracks.
-- **Levels.** The plan's median distance from a perfect kit: 7.18 → 3.67 dB at m2g-vel, whose velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, which the build sets on every Simpler (not verified in Live). The pad gate made it worse again: 4.09 dB (item 1).
+- **Levels.** The plan's median distance from a perfect kit: 7.18 → 3.67 dB at m2g-vel, whose velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, which the build sets on every Simpler (not verified in Live). The pad gate made it worse again (4.09 dB at m3), and a level per pad brought it to 1.25 dB (m4, below).
+- **A level per drum pad** (m4; item 1 before). Each pad plays where the stems hold its sound: a kick on drums + bass less the plan's own 808, every other sound on the drum stem, the loudest pad at 0 dB, the drum fader stopped where the loudest pad meets its stem.
+  - m3 → m4: 4.09 → 1.25 dB from a perfect kit (htdemucs_ft 3.70 → 1.23), balance 3.03 → 0.55 dB (2.84 → 0.50); no scenario of either model further off on either.
+  - Against the kit, hats +6.23 → −1.10 dB and open hats +11.57 → −0.09 dB (htdemucs_ft +6.47 → −0.69, +10.54 → −0.83).
+  - Not verified in Live: no pad Volume under 0 dB has been built or captured.
+- **The 808's plan pitch** (m4; item 2 before). The one-shot follows its template's own periods until the drop has settled, laid out as the template is.
+  - m3 → m4, plan: 808 note F1@50 0.921 → 0.934 (htdemucs_ft 0.910 → 0.934), median error 8.3 → 4.5 cents (13.6 → 9.6), settled within 50 cents 0.925 → 0.970 (0.935 → 0.958).
+  - bass_low-1, m3's regression: note F1@50 0.718 → 1.0 (0.449 → 0.981); its Detune correction by note length within 0.2 cents of 0 (htdemucs_ft: 3.8 for notes under 120 ms). The line's correction lies within 8 cents of 0 on 48 of 48 beats (47; 37 and 43 at m3).
+  - Not verified in Live, and not judged by ear: the new one-shot has not been built or captured.
 - **Speed.** A suite beat takes 112.6 s after separation at 2 jobs, against 141.9 s at m2g (m3a; not a controlled timing): match 49.1 → 28.0 s, analyze 38.7 → 34.4 s, fit-808 50.9 → 46.2 s. The speed changes left every output the same on all 48 beats (and on the 8 htdemucs_ft beats run).
 - **Kept results.** The 808 reader's results and the 808 fits are kept by the `analyze` and `fit-808` commands unless `--no-cache`, and by `suite run` only with `--cache`, under a key of the inputs, the settings, the versions and the package's code as the process loaded it. Read back, analyze takes 8.1 s and fit-808 1.0 s a suite beat; a run records what it read back and leaves it out of its seconds.
 
@@ -39,15 +47,15 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
 
 The targets are set for a replica: no listening test backs them yet.
 
-| metric | target | now | gap from now | on htdemucs_ft (m3-ft) |
+| metric | target | now | gap from now | on htdemucs_ft (m4-ft) |
 |---|---|---|---|---|
 | kick, F1@20 | ≥ 0.90 | 0.882 / 0.871 | 0.018 / 0.029 | 0.935 / 0.925 |
 | hat, F1@20 (pitched copies included) | ≥ 0.90 | 0.860 / 0.861 | 0.040 / 0.039 | 0.913 / 0.919 |
-| 808 note accuracy: note F1 (50 ms, 50 cents) | ≥ 0.95 | 0.936 / 0.921 | 0.014 / 0.029 | 0.924 / 0.910 |
+| 808 note accuracy: note F1 (50 ms, 50 cents) | ≥ 0.95 | 0.936 / 0.934 | 0.014 / 0.016 | 0.924 / 0.934 |
 | 808 written note right | ≥ 0.95 | 0.970 | met | 0.959 |
 | onset timing, p90 of the error per sound | ≤ 10 ms | kick 5.3 / 5.6, snare 3.2 / 3.2, hat 3.3 / 2.9, 808 8.0 / 8.0 ms | met on the means. Per scenario, 14 role means are over 10 ms at analysis and 13 in the plan | kick 3.3 / 2.2, snare 3.8 / 3.3, hat 1.7 / 1.4, 808 7.0 / 7.0 ms; 9 and 7 role means over 10 ms |
 | chord accuracy, majmin | ≥ 0.85 | 0.977 (4 synthetic beats) | met; not verified on songs | 0.979 |
-| plan levels, median distance from a perfect kit | under 1 dB (an estimate) | 4.09 dB (3.67 at m2g-vel) | 3.09 dB | 3.70 dB (3.21) |
+| plan levels, median distance from a perfect kit | under 1 dB (an estimate) | 1.25 dB (4.09 at m3, 3.67 at m2g-vel) | 0.25 dB | 1.23 dB (3.70; 3.21) |
 
 The timing misses, at analysis level:
 - kick: tempo95 (11.4 ms), drum_pitch (11.8 ms), melodic (17.1 ms; 27.1 at m2g);
@@ -66,7 +74,7 @@ Live 12.4.6 was measured on 2026-10-19; the results are recorded in ableton-live
 | Live 12.4.6 | the plan and the build now | next |
 |---|---|---|
 | Transpose keeps whole semitones (a fraction is truncated toward zero). Detune keeps whole cents from −50 to +50. | `pad_pitch` and `tune_808` round both. Pads and the 808 get Detune. | Check them in Live (item 3). |
-| A velocity sets a Simpler's level: dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over its Volume. "Vol < Vel" is 35 % on a Simpler made with `insert_device` and 45 % on a pad loaded through the browser. | Done offline (m2g-vel): the build sends "Vol < Vel" 35 % to every pad and to the 808, the velocities invert the law, and `render.py` and `estimate_levels` play it. Plan levels 3.67 dB from a perfect kit at m2g-vel, 4.09 dB at m3; with v/127 velocities, Live would have played m2g's plans 9.30 dB off (computed from the law). | Check it in Live (item 3). |
+| A velocity sets a Simpler's level: dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over its Volume. "Vol < Vel" is 35 % on a Simpler made with `insert_device` and 45 % on a pad loaded through the browser. | Done offline (m2g-vel): the build sends "Vol < Vel" 35 % to every pad and to the 808, the velocities invert the law, and `render.py` and `estimate_levels` play it. Plan levels 3.67 dB from a perfect kit at m2g-vel, 4.09 dB at m3, 1.25 dB at m4 with a Volume per pad; with v/127 velocities, Live would have played m2g's plans 9.30 dB off (computed from the law). | Check it in Live (item 3), with the pad Volumes. |
 | Snap, on by default, ends a sample 10–30 ms early. | Not set. | Snap off on every Simpler. |
 | A choke group cuts the sounding pad with a linear 1 ms fade (groups 0–16). | No choke groups. `render.py` fades a cut over 5 ms. | Choke groups for the hats (rolls, producer and full choke their open hats), and a 1 ms fade in `render.py`. |
 | Glide slides linearly in semitones over exactly the Glide Time, with one voice and overlapping notes. Notes 25 ms apart jump. | A legato note's predecessor is held 10 ms over it, and voices are set to 1 after `build_tracks`. Slides are off by default. | Check it in Live. Slides that score better than merging the unattacked notes. |
@@ -74,31 +82,33 @@ Live 12.4.6 was measured on 2026-10-19; the results are recorded in ableton-live
 | `signature` sets the meter before anything is built. | The plan holds no meter, and Live's bar 1 sits at 0 s. | The meter, and the song's first bar line on bar 1. |
 
 The plan's own gaps:
-- **A level per pad.** No pad has a level of its own: each plays its sample at 0 dB, and the drum fader is one RMS match over all the pads, so a pad added or removed moves every other sound. With the pad gate, plan levels went 3.67 → 4.09 dB from a perfect kit (3.21 → 3.70 on htdemucs_ft) and balance 2.24 → 3.03 dB (1.98 → 2.84); the open hats it adds sit a median 11.4 dB over the kit.
-  - Measured, not adopted: each pad set to the drum stem's level at its hits, with the drum fader at the stems' level: 4.04 dB (1.54 on htdemucs_ft), balance 0.61 dB (0.68), but the htdemucs kick 5.85 dB under the kit. At the truth's own hits, htdemucs's drum stem holds kicks 4.2 dB under a perfect kit and the other sounds about 4 dB over it, and levels matched to it there scored 4.09 dB (1.72). Neither number is a floor: both read the drum stem alone.
-  - Metric: `levels.vs_kit_abs_db` and `levels.balance_abs_db`, both models. Target: no worse than m2g-vel's (3.67 and 2.24 dB; htdemucs_ft 3.21 and 1.98), then under 1 dB (an estimate).
-- **The 808's level.** It sits 1.98 dB under a perfect kit, because its fader matches the bass stem's whole-track RMS. Match faders the way levels are scored.
+- **Levels per beat.** A level per pad (done, m4) brought the plan to 1.25 dB from a perfect kit (htdemucs_ft 1.23) and balance 0.55 dB (0.50). What stays open:
+  - the kick against the snare: further off than at m3 on 2 of 42 beats (6 of 43). On bass_low-2 the kick and hat pads play each other's files; on tempo95-2 the kick, read under the plan's own 808, reads 1.74 dB lower under the new one-shot;
+  - balance is each sound against the median sound of both stem groups, whose kit offsets differ (the htdemucs drum stem 5.52 dB under the truth's drums, the bass stem 0.96 dB under the truth's bass): the 808's balance reads +2.70 dB (−1.76 at m3). Score balance within each group.
+  - Metric: per beat, `levels.kick.vs_kit_db` minus `levels.snare.vs_kit_db`; `levels.vs_kit_abs_db` and `levels.balance_abs_db`, both models. Target: no beat further off than at m3, then under 1 dB (an estimate).
+- **The 808's level.** It sits 1.87 dB under a perfect kit (htdemucs_ft 2.01), because its fader matches the bass stem's whole-track RMS. Match faders the way levels are scored.
 - **Library layers.** Play `matches.json`'s layer on a second pad with the same notes, at its gain and lag.
 - **One strike, by sound rather than by time.** The backbone's kick and snare are played once by a 15 ms timing rule, and a strike is played once per pad. Linking the views of one sound in the analysis (`same_sound_as`) would decide it there: a real kick layered on every backbone kick is not played now, and one recording on two pads can still sound twice (PIRAMIT).
 
-**Measured by:** plan-level scores (drums F1@20 0.868 against 0.883 at analysis), and the levels: 4.09 dB from a perfect kit now.
+**Measured by:** plan-level scores (drums F1@20 0.868 against 0.883 at analysis), and the levels: 1.25 dB from a perfect kit now.
 
-### 2. The 808's pitch in the plan
+### 2. The 808 in the plan: a note's own cents
 
-bass_low-1's notes are written at the right pitch since 2026-10-29, but the plan plays them a median 41.7 cents off (17.5 at m2g-vel): plan note F1@50 0.949 → 0.718, and on htdemucs_ft settled within 50 cents 0.987 → 0. Over the suite, the plan's 808 note F1@50 is 0.921 (0.926), its median error 8.3 cents (7.7), and on htdemucs_ft settled within 50 cents 0.935 (0.958).
-- The fitted one-shot drops 25.9 semitones with a 19 ms time constant, while the 808 holds about 100 cents over its settled pitch until about 200 ms. `heard_cents` is one median for every note, and it follows the short notes.
-- No single Detune serves both models on this beat (offline: a correction of 70 cents or more on htdemucs, 35–39 or less on htdemucs_ft).
-- The yardstick reads a 110 ms note under 30 Hz over less than one period (`scenarios.tuning`), so its reading depends on phase: 89 and 160 cents for one drop, on two near-identical one-shots.
-- Leads, not verified: a one-shot whose pitch follows the higher of the fitted drop and the template's own curve; a Detune that centres short and long notes.
+m3's regression, bass_low-1 played a median 41.7 cents off, is resolved (m4, above): its plan note F1@50 is 1.0, and the suite's 0.934 (htdemucs_ft 0.934). One Detune per Simpler still plays every note at the line's tuning:
+- **full.** The analysis writes one note a semitone high and hears 5 short notes 41 cents low; m3's one-shot, falling too fast, happened to offset both. Plan note F1@50 0.890 → 0.851 (htdemucs_ft 0.910 → 0.890).
+- **producer.** Plan median error 6.8 → 8.2 cents (15.2 → 21.1), with its note F1@50 up, 0.770 → 0.804 (0.698 → 0.770). Not investigated further.
+- **bass_low-2 on htdemucs_ft.** Its template is read from its tail, 57 cents flat; bass_low's plan note F1@50 there is 0.513 (bass_low-1 0.981).
+- **By ear**, not checked: the one-shot's pitch step at its first crossing followed, and the quiet or cut head that puts its attack where the template's is.
+- **The yardstick** reads a 110 ms note under 30 Hz over less than one period (`scenarios.tuning`), so its reading depends on phase: 89 and 160 cents for one drop, on two near-identical fitted one-shots.
 
-**Measured by:** the plan's 808 note F1@50, median |cents| and settled pitch within 50 cents, overall and on bass_low, both models. Target: keep the written note (0.970; 0.959), with no plan-level 808 number worse than m2g-vel's by more than 0.01 (1 cent).
+**Measured by:** the plan's 808 note F1@50, median |cents| and settled pitch within 50 cents, overall and per scenario, both models. Target: keep the written note (0.970; 0.959), with no plan-level 808 number of any scenario worse than m3's by more than 0.01 (1 cent).
 
 ### 3. The build, checked in Live
 
 No replica-mode plan has been built in Live and recorded yet.
-- Build m3 plans of a few suite beats into an empty Live 12.4.6 set, with item 1's settings.
+- Build m4 plans of a few suite beats into an empty Live 12.4.6 set, with item 1's settings.
 - Record them (`capture_stems`, `render_and_analyze`) and score the recording as the plan is scored.
-- Check pad Detune, the pads' early notes, the 808's Transpose, Detune, Glide and voices, the meter, bar 1 and the levels.
+- Check pad Detune and pad Volumes under 0 dB (−19.7 to 0 dB on the suite), the pads' early notes, the 808's one-shot on its template's periods, its Transpose, Detune, Glide and voices, the meter, bar 1 and the levels. No pad Volume under 0 dB and no such one-shot has been built or captured yet.
 
 **Measured by:** the recording's scores against the offline render's: strict F1@20, levels (dB), pad and 808 pitch (cents). Target: within 0.01 F1, 0.5 dB and 1 cent, an estimate. In the Live battery, played pitches followed the stored values within 0.002 cents and notes started within 0.04 ms. Gap: not measured.
 
@@ -128,7 +138,7 @@ Not run on the 48 beats yet.
 **Next:**
 - a 48-beat run with popsize 10;
 - a controlled timing of the whole suite (m3a shared the machine with Live, m2g did not);
-- the tests in parallel (pytest-xdist): 316 tests take 328 s in one process;
+- the tests in parallel (pytest-xdist): 342 passing tests take 301 s in one process (5269673);
 - a cache key per step's own modules: with the whole package hashed, any edit makes every kept result stale;
 - match's own inverse transform per template and block (22 of 61 s profiled on v1-1), and the start of beat_this's and Basic Pitch's uv environments.
 
@@ -136,12 +146,20 @@ Not run on the 48 beats yet.
 
 ### 6. The open issues
 
-Measured on m3 against m2g-vel unless named; [12](12-replica-mode.md#known-limits) has the details.
+Measured on m4, in brackets against m3 for what m4 changed (the plan's 808 and levels) and against m2g-vel for the rest, unless named; [12](12-replica-mode.md#known-limits) has the details. m3's two regressions, the plan's levels and its 808 pitch on bass_low-1, are done (above).
 
 | issue | metric now | target |
 |---|---|---|
-| Plan levels: no pad has a level of its own (item 1) | 4.09 dB from a perfect kit (3.67 at m2g-vel), balance 3.03 dB (2.24); htdemucs_ft 3.70 and 2.84 dB | no worse than m2g-vel, then under 1 dB |
-| The plan's 808 pitch on short, low notes (item 2) | bass_low-1 median error 41.7 cents (17.5), plan note F1@50 0.718 (0.949); htdemucs_ft settled within 50 cents 0.935 (0.958) | no plan 808 number worse than m2g-vel's by more than 0.01 |
+| The kick against the snare per beat (item 1): further off than at m3 on bass_low-2, whose kick and hat pads play each other's files, and on tempo95-2, whose kick reads 1.74 dB lower under the new one-shot | mean over scenarios of per-beat \|kick − snare\| against the kit 1.45 dB (4.67), further off than at m3 on 2 of 42 beats; htdemucs_ft 1.16 dB (2.86), 6 of 43 | no beat further off than at m3 |
+| Levels per role in single scenarios: bass_low's kick (the same swap); on htdemucs_ft, dynamics' and tempo72's snares | bass_low kick −15.4 dB against the kit (−12.1), snare −2.5 (−1.3); htdemucs_ft dynamics snare −3.8 (−1.0), tempo72 snare −2.9 (−0.4) | within 1 dB of the kit (an estimate) |
+| Balance is read across the drum and bass groups, whose kit offsets differ (htdemucs drums 5.52 dB under the truth's, bass 0.96 dB) | the 808's balance +2.70 dB (−1.76); htdemucs_ft −0.05 (−3.96) | balance scored within each stem group |
+| The 808's level: its fader matches the bass stem's whole-track RMS (item 1) | the 808 −1.87 dB against the kit (−1.98); htdemucs_ft −2.01 (−2.24) | match faders the way levels are scored |
+| A kick is read under the plan's own 808, so a change to the one-shot moves the drum levels | against the levels alone: 109 of 227 pad Volumes moved, by up to 1.7 dB; the distance from the kit worse in 11 of 22 scenarios, by up to 0.20 dB, better overall (1.27 → 1.25 dB) | measure the levels again after every 808 change |
+| A kick with no plan 808 to read under (no one-shot, or no bass stem) is read with the 808 in it, or on the drum stem alone | no suite beat lacks either | – |
+| Pad Volumes under 0 dB and the one-shot on its template's periods are not built or captured in Live (item 3) | not measured | the recording within 0.5 dB and 1 cent of the offline render (an estimate) |
+| A note's own cents: one Detune per Simpler (item 2) | full's plan note F1@50 0.851 (0.890), htdemucs_ft 0.890 (0.910); producer's median error 8.2 cents (6.8), htdemucs_ft 21.1 (15.2) | no plan 808 number of any scenario worse than m3's by more than 0.01 (1 cent) |
+| The 20 ms edge: two of swing58-1's 808 notes, 19.94–20.10 ms after the truth's, now fall outside it | plan strict F1@20 0.8756 (0.8757), 808 onset F1@20 0.9344 (0.9348); htdemucs_ft unchanged | – |
+| The one-shot's head, not judged by ear: the pitch step at the first crossing followed, and the quiet (20 %) or cut head that puts its attack where the template's is | not judged | listen |
 | melodic-1's kick lands late (B9): its template's window starts on the body; a view later on the sound than its main still takes its hits, late (pinned as an expected failure) | kick F1 at 15 ms 0.679 (0.748), median error 14.7 ms (11.8), scored on the truth kick alone | on the attack, as htdemucs_ft times the same kicks (0.5 ms) |
 | Hats held by a snare's top end at 15–24 ms (melodic-1, leadin-1, tempo160-1, producer); bass_low's hats almost missing | analysis hat timing p90 3.337 ms (3.329; 2.55 in the discovery lane); bass_low hat F1@20 0.006 | ≤ 3.3 ms over the suite, ≤ 10 ms in every scenario; 0.90 |
 | The plan's snare p90: producer-1's snare, now played by a pad, carries the analysis' 41.8 ms p90 | plan snare p90 3.45 ms (3.04) over the 20 scenarios m2g-vel times a plan snare in; htdemucs_ft 3.60 (2.91); over m3's 22, 3.18 and 3.31 ms | no worse than m2g-vel |
@@ -156,14 +174,16 @@ Measured on m3 against m2g-vel unless named; [12](12-replica-mode.md#known-limit
 | Library files over full scale play unscaled | 1 % of the entries peak over +6.4 dBFS, the loudest +19.4 | – |
 | An index built before the −60 dBFS floor reads each listed entry's file once | 4.7 % of match over 6 beats | `index-library` again |
 | Chords follow the sections, which follow the drum hits | full-2 majmin 0.999 → 0.961 in an intermediate run, with the same notes | ≥ 0.85 |
-| bass_low-2's htdemucs_ft template is read from its tail, 57 cents flat; `settle()` refuses its reading and only lowers a template | written note right 0.130 on that beat; bass_low 0.559 on htdemucs_ft | ≥ 0.95 |
+| bass_low-2's htdemucs_ft template is read from its tail, 57 cents flat; `settle()` refuses its reading and only lowers a template | written note right 0.130 on that beat; bass_low 0.559 on htdemucs_ft, its plan note F1@50 0.513 (bass_low-1 0.981) | ≥ 0.95 |
 | 808 candidates inside a silence are dropped after the segmentation, not before it; an attack under 9 dB with no kick stays in the note before (once on PIRAMIT, 6.5 dB) | no truth on PIRAMIT; one suite note moved onto a rise 19 ms after the truth's onset (bass_low-2, htdemucs_ft) | – |
 | The 808's slides (item 4 before). Legato notes are off by default, so no plan plays a slide; the plan and the build carry Glide Mode, Glide Time and one voice for a line with three legato notes or more, not verified in Live. The rule this replaced was right 6 times in 79; the opt-in rule (`slides=True`) made 18 legato notes, 6 of them right, on the beats its thresholds were chosen on | legato recall 0 (the truth: 24 on 5 beats) | slides that beat merging on note F1 |
 | The 3 s one-shot leaves long legato chains' tails silent | not scored | – |
 | Library layers are not played; kick sources are off by default | 75 of 95 templates with the right file (identify lane's 8 scenarios, m2g) | – |
 | The plan holds no meter; tempo72's bar line is wrong; meter68 is read in 4/4 at x2/3; the seed-1 swing beats read straight 8ths | plan meter right 0.909, plan downbeat F 0.892; tempo72 downbeat F 0 | – |
-| htdemucs_ft has better drums but worse 808 notes on short notes (bass_low) and on producer | plan drums 0.868 → 0.898; 808 note F1@50 0.936 → 0.924 | the default changes when a model is better on both drums and 808 notes |
+| htdemucs_ft has better drums but worse 808 notes on short notes (bass_low) and on producer | plan drums 0.868 → 0.898; 808 note F1@50 at analysis 0.936 → 0.924 (in the plan 0.934 on both at m4) | the default changes when a model is better on both drums and 808 notes |
 | PIRAMIT, not heard: its 3 new pads (a perc, the hat's file in the snare band, a snare-like sound); 6 of the perc's 8 notes lie within 15 ms of a main-hat note | no truth | listen |
+| PIRAMIT's levels, read on its stems: the perc, the loudest pad, mostly on hits it shares with the hat; the kick under the plan's 808 | the perc 3.0 dB lower on its 2 clear hits; the kick at −5.6 or −10.1 dB with that 808 1 dB quieter or louder (−8.5 dB as planned); no truth | listen |
+| PIRAMIT's one-shot: its pitch now follows the template's, its waveform matches the fit's reference less | NCC 0.880 (0.921 with the m3 code's one-shot) | listen |
 
 Songs have no truth to score against: every number here comes from synthetic beats.
 
