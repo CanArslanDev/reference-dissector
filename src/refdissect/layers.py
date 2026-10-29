@@ -300,12 +300,20 @@ def _order(hits: list[int], main: list[int | None]) -> list[int]:
     from more hits first, and each view (main[k]: the template k is a
     view of, discover()'s same_sound_as) right after its main, whatever
     its hits. By hits alone, melodic-1's kick in the snare band (18 hits)
-    came before the kick's own template (15) and explained it: the kick
-    was left out, and the view timed its moments, on the click or 12 or
-    35 ms late on the body (kick F1@20 0.929 -> 0.748). Right after, not
-    only after: a template taken between them (melodic-1's hat, 0.08 of
-    the view) got the view's hits when the view was left out, its null
-    rose 6 times and 20 of its hats went."""
+    came before the kick's own low-band template (15), explained it, and
+    the kick's template was left out: the view timed the kicks, 25 of 56
+    within 5 ms and 27 of them 10-40 ms late (htdemucs). With the main
+    first, the view is left out, and the main's window starts on the body
+    too: 23 within 5 ms and 29 at 10-20 ms late (18-20 ms in the plan), so
+    kick F1@20 0.748 -> 0.929 but F1@15 0.748 -> 0.679 (plan 0.748 ->
+    0.411, F1@5 0.435 -> 0), median error 11.8 -> 14.7 ms (plan 13.6 ->
+    18.6 ms), p90 35.5 -> 15.6 ms; htdemucs_ft's low-band template times
+    the same kicks at 0.5 ms. Only a view its main explains (relations():
+    lags within +-10 ms) is left out. One whose window sits later on the
+    sound stays, and its merge with the main (duplicates()) keeps the one
+    averaged from more hits: a view 12-20 ms late on a synthetic kick took
+    all 24 kicks, late (B9; its test is marked as an expected failure).
+    Where a left-out view's hits go no longer hangs on this order (HAND)."""
     root = [k if m is None else m for k, m in enumerate(main)]
     return sorted(range(len(hits)), key=lambda k: (-hits[root[k]], root[k], k != root[k], -hits[k]))
 
