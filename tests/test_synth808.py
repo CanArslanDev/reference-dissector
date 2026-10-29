@@ -199,3 +199,19 @@ def test_the_one_shot_leaves_the_template_s_periods_once_its_drop_has_settled():
     assert 0.2 < z[_settled_at(z, settles)] < 0.27 and _settled_at(z, dips) == _settled_at(z, settles)
     assert z[_settled_at(z, never)] < 0.25 <= z[_settled_at(z, never) + 1]
     assert _settled_at(z, [[s, 300 * np.exp(-s / 0.5)] for s in t]) == len(z) - 1
+
+
+def test_the_one_shot_takes_the_template_s_periods_once_its_drop_only_falls():
+    """One 808's templates (htdemucs) read -228 cents at 50 ms and +228 at
+    80 ms, where a kick plays; its truth falls from 995 to 67 cents over
+    0-80 ms. Followed from the first period, every note of the one-shot
+    swooped 456 cents up 50 ms in. The periods are followed from the first
+    past which the curve never reads 100 cents over its lowest point since;
+    a drop that only falls is followed from the first."""
+    from refdissect.synth808 import _falls_from
+    t = np.arange(0.0, 0.5, 0.01)
+    z = 0.015 + 0.03 * np.arange(16)
+    falls = [[s, 1200 * np.exp(-s / 0.04)] for s in t]
+    dips = [[s, -228.0 if round(s, 2) == 0.05 else 228.0 if round(s, 2) == 0.08 else c] for s, c in falls]
+    assert _falls_from(z, falls, 15) == 0
+    assert _falls_from(z, dips, 15) == 2

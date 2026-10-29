@@ -42,6 +42,12 @@ BOUNDS = [(25, 60), (25, 120), (2, 200), (0.1, 6), (0.3, 200), (0.1, 8), (-0.6, 
 # scenarios.pitch_curve), then the pitch eases there over EASE_S; the crossings the reader takes off the voice
 # are moved onto the template's in up to ROUNDS rounds, and within STEADY_S of them a round is final
 SETTLED_CENTS, SETTLED_S, EASE_S, ROUNDS, STEADY_S = 5.0, 0.1, 0.05, 3, 5e-5
+# an 808's own drop only falls: the periods are followed from the first one past which the template's curve
+# never reads RISE_CENTS over its lowest point since. Of the suite's 96 templates 12 rise that much, by
+# 106-456 cents at 50-80 ms, where a kick plays (11 of them are one 808's on htdemucs, whose truth falls
+# from 995 to 67 cents over 0-80 ms); 9 others rise 54-88 cents, among them a 58-cent hold at 140-170 ms
+# that a 50-cent line would leave out (that run's plan |cents| 1.9 -> 15.1)
+RISE_CENTS = 100.0
 
 
 @dataclass
@@ -266,6 +272,19 @@ def _settled_at(z: np.ndarray, curve) -> int:
     return len(z) - 1
 
 
+def _falls_from(z: np.ndarray, curve, last: int) -> int:
+    """The first of the crossings z from which the curve, up to z[last],
+    never reads RISE_CENTS over its lowest point since (the fitted drop
+    plays up to it)."""
+    c = np.asarray(curve, dtype=float)
+    for s in range(last - 1):
+        span = (c[:, 0] > z[s]) & (c[:, 0] <= z[last])
+        v = np.r_[np.interp(z[s], c[:, 0], c[:, 1]), c[span, 1]]
+        if np.max(v - np.minimum.accumulate(v)) <= RISE_CENTS:
+            return s
+    return last - 1
+
+
 def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int | None,
             blend: float = 0.5) -> tuple[np.ndarray, int, float]:
     """(cycles at times t, m, scale): the fitted drop at pitch_hz up to
@@ -330,19 +349,20 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: fl
     the template's own periods, and what synth808.json records of it: the
     fitted voice's envelope, drive and attack, crossing zero where the
     template does (periods() of its pitch curve, cents re curve_hz) from
-    its second crossing until its drop has settled (_settled_at), then
-    eased to pitch_hz. Before that, the fitted drop, started at the fit's
-    phase and scaled to end a whole cycle there: of the two counts nearest
-    its own, one whose crossings the rounds put in place (_along), the one
-    scaled least (0.58-2.1 on the suite's beats, median 1.04). None where
-    the curve holds under three crossings (one_shot's voice then).
+    its second crossing, or from the first past which the curve only falls
+    (_falls_from), until its drop has settled (_settled_at), then eased to
+    pitch_hz. Before that, the fitted drop, started at the fit's phase and
+    scaled to end a whole cycle there: of the two counts nearest its own,
+    one whose crossings the rounds put in place (_along), the one scaled
+    least (0.76-2.1 on the suite's beats, median 1.03-1.06). None where the
+    curve holds under three crossings (one_shot's voice then).
 
     scenarios.tuning reads the result as the analysis reads the template:
     on the suite's 96 beat runs, from 50 ms to the end of the periods
-    followed (450 ms at most), within 0.35 cents (median per one-shot; 5.2
+    followed (450 ms at most), within 0.35 cents (median per one-shot; 5.0
     at most) where it takes one crossing before the first period, as on the
-    template (39 one-shots on htdemucs, 29 on htdemucs_ft). Where it takes
-    none or two (the attack's low-passed start), it reads up to 209 cents
+    template (30 one-shots on htdemucs, 29 on htdemucs_ft). Where it takes
+    none or two (the attack's low-passed start), it reads up to 122 cents
     apart before the third crossing (55-70 ms; a fast note is read later):
     preferring one there scaled the attack by up to 2.5 for the same plan
     scores. heard_808's Detune correction at the common pitch then no
@@ -355,6 +375,10 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: fl
         return None
     z, rms = found
     last = _settled_at(z, curve)
+    first = _falls_from(z, curve, last)
+    z, last = z[first:], last - first
+    if last < 2 or z[0] < 0.005:
+        return None
     t = _times(int(seconds * SR))
     _, m0, scale0 = _cycles(p, t, pitch_hz, z, last, None)
     a = p.phase / (2 * np.pi)
@@ -364,7 +388,7 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: fl
     if not tries:
         return None
     pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
-    info = {"periods": len(z), "followed": last + 1, "until_s": round(float(z[last]), 4),
+    info = {"periods": len(z) + first, "from": first, "followed": last + 1, "until_s": round(float(z[last]), 4),
             "settled": last + 1 < len(z), "curve_rms_cents": round(rms, 3),
             "attack_scale": round(float(pick["scale"]), 3), "read_as_template": pick["j"] == 1,
             "worst_ms": round(1000 * pick["worst_s"], 3)}
