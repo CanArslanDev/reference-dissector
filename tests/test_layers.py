@@ -292,7 +292,7 @@ def test_merges_until_a_round_merges_none(sounds, monkeypatch):
                                                     ("clap", "snare"))]
     rounds = []
 
-    def three_rounds(cands, pairs, first, kind, clean=None):
+    def three_rounds(cands, pairs, first, kind, clean=None, band=None):
         rounds.append(1)
         cols = np.unique(cands.col)
         if len(rounds) > 3 or len(cols) < 2:
@@ -486,12 +486,11 @@ def test_a_view_never_holds_its_main(sounds):
 
 
 def test_a_merge_keeps_the_cleaner_template(sounds):
-    """Two templates of the snare that keep taking each other's hits: its
-    own, and one holding another sound too, averaged from more hits
-    (layers-2: the snare's template from the low band, 16 of 16 hits at
-    NCC 0.8 or more, and one from the snare band, 7 of 18). Merged into the
-    one from more hits, every snare came out under 0.8 (make_plan gives no
-    pad under 0.5 clean). The one with more clean hits keeps them."""
+    """Two snare-band templates of the snare that keep taking each other's
+    hits: its own, and one that also holds a sound the snare never plays,
+    averaged from more hits. Merged into the one from more hits, every
+    snare came out under NCC 0.8 (make_plan gives no pad under 0.5 clean).
+    Read in one band, the one with more clean hits keeps them."""
     hits = backbeat()
     x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
     templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
@@ -504,3 +503,20 @@ def test_a_merge_keeps_the_cleaner_template(sounds):
     snares = [t for n, t, _ in hits if n == "snare"]
     assert got.info["merged"] == {"held": {"into": "snare", "offset_ms": 0.0}}
     assert found(got.events, "snare", snares).all() and all(e["ncc"] >= 0.8 for e in got.events["snare"])
+
+
+def test_clean_hits_choose_a_merge_only_within_one_band():
+    """One sound found twice both ways (14 shared moments of 18 and 16
+    hits) in two bands: a snare-band template with 7 clean hits and a
+    low-band one with 16 (layers-2's snare). The low band reads high
+    whatever the template: the snare-band one read 16 of 18 there, and the
+    low-band one 1 of 16 in the snare band. Across bands the merge goes by
+    first (the template averaged from more hits); in one band, into the
+    one with more clean hits."""
+    col = np.r_[np.zeros(18, int), np.ones(16, int)]
+    p = np.r_[np.arange(18) * 4000, np.arange(16) * 4000 + 10]
+    cands = layers.Candidates(col, p, np.ones(34), ["matched"] * 34)
+    pairs = [(18 + k, k) if k % 2 else (k, 18 + k) for k in range(14)]  # (lost, kept), each keeps half
+    clean, kind = np.array([7, 16]), [False, False]
+    assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "low"]) == {1: (0, -10)}
+    assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "snare"]) == {0: (1, 10)}
