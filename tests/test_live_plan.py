@@ -543,11 +543,11 @@ def test_no_pad_plays_over_0_db(tmp_path):
 
 
 def test_the_pads_make_up_what_the_drum_fader_cannot(tmp_path):
-    """Stems 28 dB louder: the drum fader would need +10.1 dB (-17.9 dB
-    for the same kit at the stems' level), and Live's stops at +6 dB,
-    where every pad played 4.1 dB under its level. The pads under 0 dB
-    make it up: the hat plays where it should (+6 - 15.9 = +10.1 - 20 dB),
-    the kick, at 0 dB already, 4.1 dB under."""
+    """Stems 28 dB louder than the other kits': the drum fader would need
+    +10.1 dB (-17.9 dB in those), and Live's stops at +6 dB, where every
+    pad played 4.1 dB under its level. The pads under 0 dB make it up: the
+    hat plays where it should (+6 - 15.9 = +10.1 - 20 dB), the kick, at
+    0 dB already, 4.1 dB under."""
     plan = _kit(tmp_path, kick_in_bass=0.0, stem_gain=25.0)
     pads = plan["tracks"]["drums"]["pads"]
     assert plan["levels"]["drums_track_db"] == 6.0

@@ -628,10 +628,11 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     plays (layers-1, tempo160-1, v1orig-2 [bass_low-2]; tempo160-1 sat
     13.4 dB from a perfect kit under it and 5.1 dB under the stop), and on
     v1orig-3 [kick808-2, leadin-2, rolls-1, v1orig-3], whose stems hold no
-    kick the plan misses (there it costs v1orig-3 0.3 [0.2] dB and saves
-    the others 0.1 to 2.5). Where the fader would go over FADER_DB, the top
-    of Live's, the pads under 0 dB make up the rest, as far as 0 dB (no
-    suite beat: its drum faders reach -13.5 [-12.3] dB).
+    kick the plan misses (there it takes v1orig-3 0.3 [0.2] dB further from
+    a perfect kit and the others 0.1 to 2.5 dB closer). Where the fader
+    would go over FADER_DB, the top of Live's, the pads under 0 dB make up
+    the rest, as far as 0 dB (no suite beat: its drum faders reach -13.5
+    [-12.3] dB).
 
     Without pad levels every pad played its file at 0 dB under one RMS
     fader. On the 48 suite beats (plan level, mean over scenarios,
@@ -796,7 +797,7 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
           for key, (x, s) in shots.items()}
     heard: dict[str, list[float]] = {}
     alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
-    clear: dict[str, list[float]] = {}  # another sound at its hits clear of every other sound's
+    clear: dict[str, list[float]] = {}  # a sound that is no kick, at its hits clear of every other sound's
     for key, (x, s) in shots.items():
         kick = sound[key] in kicks
         b, name = ("kick", "low") if kick else (ATTACK_BAND.get(s["role"], "full"), "drums")
