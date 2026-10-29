@@ -310,7 +310,7 @@ def test_build_spec_for_build_tracks(tmp_path):
     assert re.fullmatch(r".+ 808 \(synth\) [0-9a-f]{8}\.wav", t808["instrument"]["sample"])
     assert t808["settings"]["Transpose"] == 36.0 and t808["clips"][0]["notes"]
     pad = drums["instrument"]["drum_rack"]["38"]
-    assert pad["sample"] == "snare.wav" and pad["settings"]["Transpose"] == -1.0
+    assert re.fullmatch(r"snare [0-9a-f]{8}\.wav", pad["sample"]) and pad["settings"]["Transpose"] == -1.0
     assert len(drums["clips"][0]["notes"]) == 16
     ref = spec["REF drums"]
     assert ref["kind"] == "audio" and ref["mute"] and ref["audio_clips"][0]["warping"] is False
@@ -334,14 +334,25 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
 
 
-def _fake_live(monkeypatch) -> list:
+def _fake_live(monkeypatch, library=None, held=None) -> list:
     """ableton-live-mcp faked for build: an empty set, build_tracks building
-    every track it is sent; returns the list of (tool, arguments) calls."""
+    every track it is sent, each Simpler holding the User Library copy its
+    spec names (held: another file, by pad note or "808"); returns the list
+    of (tool, arguments) calls."""
     import json
     import sys
     import types
 
     calls = []
+
+    def holds(path: str) -> str | None:
+        spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
+        pad = re.search(r"drum_pads (\d+)", path)
+        key = pad.group(1) if pad else "808"
+        sample = (spec["Drums (library)"]["instrument"]["drum_rack"][key] if pad
+                  else spec["808 (synth)"]["instrument"])["sample"]
+        copy = Path(library) / "Samples" / "AbletonMCP Generated" / sample if library else None
+        return (held or {}).get(key) or (str(copy) if copy else None)
 
     async def call_tool(name, args):
         calls.append((name, args))
@@ -351,6 +362,8 @@ def _fake_live(monkeypatch) -> list:
             text = json.dumps({"tracks": tracks})
         elif name == "build_tracks":
             text = json.dumps({"tracks": [{"track": t["name"], "problems": []} for t in args["tracks"]]})
+        elif name == "lom_get_object":
+            text = json.dumps({"file_path": holds(args["path"])})
         else:
             text = "{}"
         return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)], is_error=False)
@@ -405,6 +418,36 @@ def test_the_808_one_shot_is_named_by_its_content(tmp_path, monkeypatch):
     assert make_plan(analysis, matches, synth, tmp_path)["tracks"]["808"]["sample"] != first
     with pytest.raises(RuntimeError, match="plan again"):
         asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+
+
+def test_each_pad_loads_its_own_file_by_its_content(tmp_path, monkeypatch):
+    """build_tracks loads a pad through Live's browser by file name, and the
+    browser holds other files of a pad's name (the live check: an 808 on
+    v1orig-3's open-hat pad): each pad's file goes into the User Library
+    under its name and its content's digest, the spec loads that copy, and
+    the build reads back the file every Simpler holds and names a pad that
+    holds another."""
+    import asyncio
+
+    from refdissect.live import build, build_spec, one_shot_digest
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    snare = plan["tracks"]["drums"]["pads"]["38"]["path"]
+    pad = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]["38"]
+    assert pad["sample"] == f"snare {one_shot_digest(snare)}.wav"
+    lib = tmp_path / "lib"
+    _fake_live(monkeypatch, lib)
+    report = asyncio.run(build(plan, user_library=lib, log=lambda s: None))
+    assert (lib / "Samples" / "AbletonMCP Generated" / pad["sample"]).read_bytes() == Path(snare).read_bytes()
+    assert report["samples_checked"] == 2 and "wrong_samples" not in report  # the pad and the 808
+    other = tmp_path / "kit" / "snare.wav"  # another file of the pad's name, as the browser found one
+    other.parent.mkdir()
+    sf.write(other, np.random.default_rng(5).standard_normal(SR // 8) * 0.5, SR)
+    _fake_live(monkeypatch, lib, held={"38": str(other)})
+    logged = []
+    report = asyncio.run(build(plan, user_library=lib, log=logged.append))
+    assert list(report["wrong_samples"]) == ["38"] and report["wrong_samples"]["38"]["live"] == str(other)
+    assert any(line.startswith(f"pad 38 holds {other}") for line in logged)
 
 
 def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
