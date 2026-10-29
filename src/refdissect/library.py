@@ -422,7 +422,7 @@ class Library:
         first pass over every entry (_sweep) and, in a band with a speckle
         index, the speckle search (correlate_many) share each block of the
         library, which a search one template at a time transformed again for
-        each one (v1-1: 34 passes over 9,000 entries for 6 templates). The
+        each one (v1-1: 34 passes over 9,000 entries for 9 templates). The
         numbers are the same; they are kept, by template, until forget()."""
         self._ready = {}
         for role, ts in windows.items():

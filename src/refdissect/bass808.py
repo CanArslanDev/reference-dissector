@@ -25,12 +25,23 @@ operation Simpler performs:
 5. retriggers(): a note split where the 808 starts again inside it (two
    16th notes at one pitch at 160 BPM explain less than their penalty);
 6. refine(): each note's transposition to the cent over up to 300 ms;
-7. kick_splits(): a very short note on a kick at a transposition past the
-   search's whole semitones is the kick's attack split off the next note;
+7. written(): the notes as bass808.json holds them. settle() first reads
+   the template's settled pitch on the notes found where learn() had no
+   window in which its drop had settled (method notes_<a>_<b>ms: the
+   window of template time it was read over); audible() drops a note
+   whose own peak sits REST_DB or more under the notes' median peak (one
+   found in a rest); kick_splits(): a very short note on a kick at a
+   transposition past the search's whole semitones is the kick's attack
+   split off the next note;
 8. legato(): a note found where nothing attacks is the note before going
    on (a short attacked note whose follower comes back to the pitch before
-   it is a kick inside that held note); legato notes that slide there from
-   the note before are made only on request, with evidence (_slide).
+   it is a kick inside that held note), but never across a silence (the
+   808 band REST_DB under the note's peak for REST_S: every note ends
+   there, and a note found after it is one of its own), and a rise of
+   RISE_DB or more attacks a note, which then starts on its rise (_seam,
+   _repitch); legato notes that slide there from the note before are made
+   only on request, with evidence (_slide). Last, each note's written
+   pitch, cents and heard pitch.
 
 The template is learnt twice (from the re-attacks, then from the notes
 found) from three sets of onsets: those with a drum attack, those with a
@@ -83,11 +94,12 @@ ATTACKED_NCC = 0.9  # a note whose template fit (attack and drop included) reach
 # kick inside a held note may be split off as (seconds)
 SLIDES, LEGATO_STEP, LEGATO_SHORTEST, LEGATO_REACH, SPLIT_S = False, 0.75, 0.08, 12.75, 0.12
 SLIDE_AFTER = 0.1  # _slide: seconds after the note before starts that a slide may leave it (sooner: its own drop)
-# the 808 is silent where its band's RMS over 25 ms stays SILENT_DB or more under a note's peak (that RMS's highest
-# point over the note's first 200 ms) for SILENT_S seconds or more: inside the suite's 5,448 truth notes (both
+# the 808 rests where its band's RMS over 25 ms stays REST_DB or more under a note's peak (that RMS's highest
+# point over the note's first 200 ms) for REST_S seconds or more: inside the suite's 5,448 truth notes (both
 # models, 50 ms in to 10 ms before the end) it never fell more than 26.8 dB under the note's peak, and PIRAMIT's
-# rests sit 52-81 dB under its notes' median peak, the shortest 62 ms long
-SILENT_DB, SILENT_S = 40.0, 0.05
+# rests sit 52-81 dB under its notes' median peak, the shortest 62 ms long (dB under a note, where
+# library.SILENT_DB is dBFS)
+REST_DB, REST_S = 40.0, 0.05
 # settle(): the notes that must reach its window, its width (seconds of template time), how far apart (cents,
 # interquartile range) the notes in it may read, and how far (cents) under the template's a reading must lie to
 # move it (forced on the 79 templates whose drop settled, the reading's error reached 9.4 cents). Chosen on the
@@ -1015,7 +1027,7 @@ def _top(env: np.ndarray, n: dict, ms: float = 200.0) -> int:
     return i + int(np.argmax(env[i:i + max(1, samples(1000 * min(ms / 1000, n["end"] - n["t"])))]))
 
 
-def silent_from(env: np.ndarray, a: int, b: int, under: float, least_s: float = SILENT_S) -> int | None:
+def silent_from(env: np.ndarray, a: int, b: int, under: float, least_s: float = REST_S) -> int | None:
     """The first sample in [a, b) from which env stays under `under` for
     least_s or more (the stretch may run on past b); None where it does not."""
     n = samples(1000 * least_s)
@@ -1029,7 +1041,7 @@ def silent_from(env: np.ndarray, a: int, b: int, under: float, least_s: float = 
     return None
 
 
-def audible(notes: list[dict], env: np.ndarray, under_db: float = SILENT_DB) -> list[dict]:
+def audible(notes: list[dict], env: np.ndarray, under_db: float = REST_DB) -> list[dict]:
     """The notes whose own peak (env, the 808 band's 25 ms RMS, up to the
     note's end: _top) is less than under_db under the median of the
     notes' peaks: a note found where the 808 is silent is not one. On
@@ -1046,7 +1058,7 @@ def audible(notes: list[dict], env: np.ndarray, under_db: float = SILENT_DB) -> 
 def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, kicks: np.ndarray,
            attacked_ncc: float = ATTACKED_NCC, slides: bool = SLIDES, step: float = LEGATO_STEP,
            shortest: float = LEGATO_SHORTEST, reach: float = LEGATO_REACH, split_s: float = SPLIT_S,
-           silent_db: float = SILENT_DB) -> list[dict]:
+           silent_db: float = REST_DB) -> list[dict]:
     """Notes found where nothing attacks (no envelope foot within 20 ms, no
     drum attack from 30 ms before to 15 ms after, a template fit under
     attacked_ncc, and no restart of the sample's drop: _restarts) are not
@@ -1057,11 +1069,12 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     short notes 8-10 semitones low (kick808-2).
 
     Nothing goes on across a silence (the 808 band's 25 ms RMS silent_db
-    under the note's peak for SILENT_S: silent_from): a note found after
+    under the note's peak for REST_S: silent_from): a note found after
     the note before has fallen silent starts again, and every note ends
-    where it falls silent. On PIRAMIT a note of 0.06 s took in four notes
-    of an 808 playing alone after a 1.2 s rest, then a 7.4 s rest, and held
-    15.3 s: those notes start 27 ms before their envelope rises, and their
+    where it falls silent. On PIRAMIT one note took in four notes of an
+    808 playing alone after a 1.2 s rest, then a 7.4 s rest, and held
+    15.3 s (rests of 0.2 s or more, 40 dB under the median note peak):
+    those notes start 27 ms before their envelope rises, and their
     template fit is 0.887-0.893 (the fit trades time for pitch: at the
     foot, at the template's own pitch, 0.848-0.861).
 
@@ -1349,11 +1362,13 @@ def transcribe(bass: np.ndarray, drums: np.ndarray | None = None, passes: int = 
     bass808.json holds, {"template": ..., "notes": [...]}. With slides,
     legato notes (legato()).
 
-    Per note: t (where it starts: the template's onset), t_attack (where it
-    attacks: the template's attack at the note's rate, attack_s), end (cut,
-    or the next note), pitch (the written MIDI note: the settled pitch less
+    Per note: t (where it starts: the template's onset, or the rise that
+    attacks it: legato()), t_attack (where it attacks: the template's
+    attack at the note's rate, attack_s), end (where it falls silent, or
+    the next note), pitch (the written MIDI note: the settled pitch less
     the 808's own tuning, rounded), midi_settled (the template's settled
-    pitch plus the note's transposition), midi_float (the pitch heard,
+    pitch, read on the notes by settle() where learn() had none, plus the
+    note's transposition), midi_float (the pitch heard,
     sounding()), cents (midi_settled over pitch), transposition (cents re
     the template), gain (re the template), ncc, peak (the 808 band's 25 ms
     RMS peak over the first 200 ms, as notes_808 had it), kick (a drum
