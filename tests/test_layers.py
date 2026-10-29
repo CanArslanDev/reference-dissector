@@ -7,7 +7,7 @@ from conftest import burst
 
 from refdissect import layers
 from refdissect.audio import PRE, SR, fit, samples, transpose
-from refdissect.detect import MAX_MS, Template, detect
+from refdissect.detect import DETECT_MS, MAX_MS, THRESHOLD, Template, detect
 from refdissect.hits import Group, template
 
 BPM = 136.0
@@ -569,3 +569,30 @@ def test_a_left_out_view_gives_its_hits_to_its_main_not_to_a_hat_before_it(sound
     assert hat.hits > kick.hits + 3 and list(got.info["composite"]["view"]["by"]) == ["kick"]
     assert found(got.events, "kick", kicks, tol=0.001).all() and extra(got.events, "kick", kicks) == 0
     assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0
+
+
+def test_a_merge_survivor_that_is_an_echo_is_never_probed(sounds):
+    """The kick and the snare hold the hat. When the hat's hits went into
+    another column (here a hat template whose window starts 12 ms on), the
+    holders' probes went to that column, even where relations() had found
+    it an echo, whose matched filter repeats an earlier template's and is
+    never probed for: on PIRAMIT 7 kick notes came in that way. Probes
+    follow the column the hits went to, unless it is an echo."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    late = samples(12)
+    templates.append(Template("later", "hat", "hat", np.r_[templates[0].audio[late:], np.zeros(late, np.float32)],
+                              templates[0].hits - 10, {}, None))
+    xp = np.r_[np.zeros(layers.LEAD, np.float32), x, np.zeros(max(len(tp.audio) for tp in templates), np.float32)]
+    sc, _ = layers._scene(xp, templates, DETECT_MS, THRESHOLD, True)
+    cands, weak = layers._matched(sc, xp, THRESHOLD, layers.CLOSEST_MS)
+    cands, _ = layers._one_each(sc, cands)
+    cands, gains = layers._significant(sc, cands, layers.MATCHED_GAIN)
+    assert {h for held in sc.rel["holds"].values() for h, *_ in held} == {0} and 3 not in sc.rel["echo"]
+    merged = {sc.col_of[0]: (sc.col_of[3], late)}  # the hat's hits into the later template
+    got, _ = layers._probes(sc, cands, gains, merged, weak, xp, layers.MATCHED_GAIN, True)
+    assert np.sum(got.col == sc.col_of[3]) > 0
+    sc.rel["echo"][3] = 0.9
+    got, _ = layers._probes(sc, cands, gains, merged, weak, xp, layers.MATCHED_GAIN, True)
+    assert not np.any(got.col == sc.col_of[3])
