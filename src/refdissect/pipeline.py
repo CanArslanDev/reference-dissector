@@ -589,12 +589,13 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     The one-shot's pitch follows the template's own periods, read off
     bass808's pitch curve (synth808.tracked_shot; pitch_track records how),
     until its drop has settled; one_shot's fitted drop where the curve holds
-    none. The fitted drop alone (bass_low-1: 25.9 semitones with a 19 ms time
-    constant) had settled by 120 ms where the 808 holds 100 cents over its
-    settled pitch until 150-200 ms, so heard_808's Detune correction
-    followed the length of the notes at its common pitch (47.1, 123.4 and
-    82.6 cents for notes under 120 ms, 120-250 and 250-600), and the long
-    notes played 42-52 cents flat."""
+    none or has settled by its second crossing. The fitted drop alone
+    (bass_low-1: 25.9 semitones with a 19 ms time constant) had settled by
+    120 ms where the 808 holds 100 cents over its settled pitch until
+    150-200 ms, so heard_808's Detune correction followed the length of the
+    notes at its common pitch (47.1, 123.4 and 82.6 cents for notes under
+    120 ms, 120-250 and 250-600), and the long notes played 42-52 cents
+    flat."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])

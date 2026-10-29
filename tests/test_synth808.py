@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from refdissect.audio import SR
 from refdissect.synth808 import Params, compare, fit, laid_out, one_shot, voice
@@ -201,13 +202,12 @@ def test_the_one_shot_leaves_the_template_s_periods_once_its_drop_has_settled():
     assert _settled_at(z, [[s, 300 * np.exp(-s / 0.5)] for s in t]) == len(z) - 1
 
 
-def test_the_one_shot_takes_the_template_s_periods_once_its_drop_only_falls():
+def test_the_rise_is_found_where_the_curve_reads_100_cents_over_its_lowest_point_since():
     """One 808's templates (htdemucs) read -228 cents at 50 ms and +228 at
     80 ms, where a kick plays; its truth falls from 995 to 67 cents over
-    0-80 ms. Followed from the first period, every note of the one-shot
-    swooped 456 cents up 50 ms in. The periods are followed from the first
-    past which the curve never reads 100 cents over its lowest point since;
-    a drop that only falls is followed from the first."""
+    0-80 ms. The rise ends at the first crossing past which the curve never
+    reads 100 cents over its lowest point since; a drop that only falls has
+    none."""
     from refdissect.synth808 import _falls_from
     t = np.arange(0.0, 0.5, 0.01)
     z = 0.015 + 0.03 * np.arange(16)
@@ -215,3 +215,113 @@ def test_the_one_shot_takes_the_template_s_periods_once_its_drop_only_falls():
     dips = [[s, -228.0 if round(s, 2) == 0.05 else 228.0 if round(s, 2) == 0.08 else c] for s, c in falls]
     assert _falls_from(z, falls, 15) == 0
     assert _falls_from(z, dips, 15) == 2
+
+
+def test_the_periods_across_a_rise_are_pooled_into_ones_that_never_shorten():
+    """Pool adjacent violators: each run of periods that shortens becomes
+    its mean, so the first and last crossings, and the cycles between,
+    stay where they were."""
+    from refdissect.synth808 import _pooled
+    z = np.cumsum([0.03, 0.0175, 0.030, 0.0278, 0.0287, 0.0294, 0.0300])
+    got = _pooled(z, 4)
+    assert np.all(np.diff(np.diff(got[:5])) >= -1e-12)
+    assert got[0] == z[0] and got[4] == pytest.approx(z[4]) and np.array_equal(got[5:], z[5:])
+    assert np.diff(got)[1:4] == pytest.approx([0.028833] * 3, abs=1e-6)
+    assert np.array_equal(_pooled(z[:3], 2), z[:3])
+
+
+def test_the_one_shot_only_falls_where_its_template_rises():
+    """A kick in the template: its curve reads 228 cents under the drop at
+    60-80 ms and 228 over it at 90-110 ms. Followed, every note of the
+    one-shot swooped 456 cents up; with the fitted drop played up to the
+    rise instead (081b962), it left the template's periods before it and
+    read up to 577 cents apart. Pooled, the periods never shorten across
+    the rise, so the one-shot's pitch never rises there, and the crossings
+    before and after it stay the template's."""
+    from refdissect.scenarios import crossings, drop, tuning
+    from refdissect.synth808 import periods, tracked_shot
+    _, f0, curve, kept = _held()
+    dipped = [[s, c - 228.0 if 0.059 < s < 0.081 else c + 228.0 if 0.089 < s < 0.111 else c] for s, c in kept]
+    y, info = tracked_shot(HELD, f0, dipped, f0)
+    assert info["pooled"] > 0 and info["read_as_template"]
+    g0, c = tuning(y)
+    tt = np.arange(0.05, info["until_s"], 0.001)
+    heard = drop(c, tt) + 1200 * np.log2(g0 / f0)
+    assert np.max(heard - np.minimum.accumulate(heard)) < 15
+    z = periods(dipped, f0)[0]
+    read = crossings(y, g0)[1:]
+    near = [read[np.argmin(np.abs(read - q))] - q for q in (z[0], z[info["pooled"] + 1])]
+    assert np.max(np.abs(near)) < 1e-4
+
+
+def test_a_drop_done_by_its_second_crossing_keeps_the_fitted_one_shot():
+    """An 808 whose drop is over by its second crossing (a 3.5 ms glide) has
+    a flat curve: periods() put its first crossing where the curve first
+    moves (0.93 s in; the template's own second crossing is at 45 ms), and
+    the one-shot played the scaled fitted drop until there, 10 cents off at
+    every length. One_shot's voice sounds within 2 cents."""
+    from refdissect.scenarios import drop, sounding, tuning
+    from refdissect.synth808 import tracked_shot
+    P = Params(f_end_hz=39.95, f_start_hz=85.36, glide_ms=3.54, decay_s=1.19, attack_ms=1.38, drive=1.31, asym=0.033,
+               phase=0.3)
+    x = voice(P, 1.0)
+    f0, curve = tuning(x)
+    kept = [[s, round(c, 1)] for s, c in curve[::2]]
+    fitted = Params(39.95, 85.36 * 1.04, 3.54 * 0.95, 1.19, 1.38, 1.31, 0.033, 2.0)
+    assert tracked_shot(fitted, f0, kept, f0) is None
+    g0, c = tuning(one_shot(fitted, f0))
+    off = [100 * sounding(lambda q: drop(c, q) / 100, d) + 1200 * np.log2(g0 / f0)
+           - 100 * sounding(lambda q: drop(curve, q) / 100, d) for d in (0.11, 0.2, 0.4)]
+    assert np.max(np.abs(off)) < 2.0
+
+
+def test_the_one_shot_eases_on_from_where_the_reader_reads_its_last_period():
+    """Past the last period followed, the reader's crossings keep landing
+    on the template's: the crossings made past it move with the last one,
+    so the ease starts from the slope the reader reads there (a strong
+    drive and asymmetry move the crossings 0.3-0.7 ms; left where they
+    were, the first periods past it were 0.15-0.65 ms off, a blip of up to
+    12 cents on the suite's one-shots)."""
+    from refdissect.scenarios import crossings, tuning
+    from refdissect.synth808 import tracked_shot
+    P = Params(f_end_hz=45.0, f_start_hz=90.0, glide_ms=20, decay_s=1.5, attack_ms=3, drive=5.9, asym=-0.39, phase=0.3)
+    x = voice(P, 1.5)
+    t = np.arange(len(x)) / SR
+    x = np.interp(np.cumsum(2 ** (1.5 * np.exp(-t / 0.15) / 12)), np.arange(len(x)), x).astype(np.float32)
+    f0, curve = tuning(x)
+    kept = [[s, round(c, 1)] for s, c in curve[::2]]
+    y, info = tracked_shot(Params(45.0, 90.0 * 1.05, 18.0, 1.5, 3, 5.9, -0.39, 2.0), f0, kept, f0)
+    own, read = crossings(x, f0), crossings(y, tuning(y)[0])
+    after = own[own > info["until_s"] + 1e-4][:3]
+    assert len(after) == 3 and max(abs(read[np.argmin(np.abs(read - q))] - q) for q in after) < 1e-4
+
+
+def test_a_curve_that_falls_through_the_one_shot_s_settled_pitch_is_left_there():
+    """One htdemucs_ft template's settled pitch was read on its unsettled
+    tail: its curve falls on through it, -260 cents by its end, and the
+    fit's settled pitch, which the one-shot takes, sits 49 cents under it.
+    Followed to the curve's end, the one-shot dipped 147 cents under its
+    own settled pitch and rose back; it is left before the curve passes
+    that pitch (between two of its points), so it never reads under it
+    (the reader's cubic overshoots 13 cents where the ease begins)."""
+    from refdissect.scenarios import drop, tuning
+    from refdissect.synth808 import tracked_shot
+    hz = 23.43
+    t = np.round(np.arange(0.0, 0.211, 0.01), 2)
+    falls = np.where(t <= 0.04, 958.0, -260.0 + 1218.0 * np.exp(-((t - 0.04) / 0.09) ** 2))
+    curve = [[float(a), float(round(b, 1))] for a, b in zip(t, falls)]
+    pitch = hz * 2 ** (-49.1 / 1200)
+    y, info = tracked_shot(Params(pitch, 90.0, 60.0, 1.2, 0.3, 3.0, 0.05, 1.0), pitch, curve, hz)
+    g0, c = tuning(y)
+    heard = drop(c, np.arange(0.05, 0.6, 0.005)) + 1200 * np.log2(g0 / pitch)
+    assert info["followed"] < info["periods"] and heard.min() > -5
+    assert np.max(heard - np.minimum.accumulate(heard)) < 20
+
+
+def test_attack_cycles_that_cannot_reach_the_first_period_are_none():
+    """A first period more than 2.4 times the next gives the PCHIP no
+    slope at its start: no cycle reaches z[0] (the scale was infinite and
+    the voice NaN; the rounds kept the best of what was left)."""
+    from refdissect.synth808 import _cycles, _times
+    z = np.array([0.03, 0.10, 0.125, 0.15, 0.175, 0.2])
+    assert _cycles(HELD, _times(int(0.5 * SR)), 32.7, z, 4, None) is None
