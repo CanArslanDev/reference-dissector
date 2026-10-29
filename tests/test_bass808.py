@@ -511,6 +511,38 @@ def test_heard_808_reads_each_note_from_where_the_plan_starts_it():
     assert abs(expected) > 10 and heard_808(notes, shot, -24.0, late) == pytest.approx(expected, abs=0.5)
 
 
+def test_plan_808_reads_its_correction_from_where_it_starts_the_notes(tmp_path):
+    """A one-shot that attacks 7 ms in, not laid out as its template: the
+    plan starts each note that much before its attack, and heard_808 reads
+    the notes from those starts (heard_cents), as estimate_from_plan plays
+    them. Read from the onsets, the short notes' correction was more than
+    10 cents off."""
+    import soundfile as sf
+
+    from refdissect.audio import read
+    from refdissect.live import heard_808, plan_808, tune_808
+    from refdissect.scenarios import drop, sounding, tuning
+    x = voice(Params(32.70, 65.4, 30, 1.5, 3, 2.0, 0.05, 0.3), 2.0)
+    t = np.arange(len(x)) / SR
+    w = np.clip((t - 0.007) / 0.002 + 1, 0.0, 1.0)
+    path = tmp_path / "808 (synth).wav"
+    sf.write(path, (x * (0.15 + 0.85 * w * w * (3 - 2 * w))).astype(np.float32), SR, subtype="FLOAT")
+    shot = read(path)
+    f0, curve = tuning(shot)
+    own = 69 + 12 * np.log2(f0 / 440)
+    notes = [{"t": 0.5 + i, "t_attack": 0.5 + i, "end": 0.5 + i + d, "pitch": 24, "peak": 1.0, "midi_settled": own,
+              "midi_float": own + sounding(lambda q: drop(curve, q) / 100, d)}
+             for i, d in enumerate((0.1, 0.11, 0.115, 0.3, 0.5))]
+    synth = {"root_midi": 24, "pitch_hz": f0, "file": str(path), "file_name": path.name}
+    track = plan_808({"tuning": {"808": own - 24}, "notes_808": notes}, synth, tmp_path / "stems", 2.0)
+    starts = [p["start_time"] / 2.0 for p in track["notes"]]
+    assert max(n["t"] - s for n, s in zip(notes, starts)) > 0.005
+    semis, detune = tune_808(own, 100 * (own - 24))
+    shift0 = semis + detune / 100 - 60
+    from_starts, from_onsets = heard_808(notes, shot, shift0, starts), heard_808(notes, shot, shift0)
+    assert abs(from_starts - from_onsets) > 10 and track["heard_cents"] == pytest.approx(from_starts, abs=0.1)
+
+
 def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     """A legato note is planned where its glide starts, with the note before
     held over it, one voice and Glide; what Live would play (render_plan,
