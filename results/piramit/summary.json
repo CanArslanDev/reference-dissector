@@ -149,7 +149,7 @@
   "consensus": 0.0,
   "a4_hz": 440.0,
   "808": 0.1185,
-  "808_agreement": 0.868
+  "808_agreement": 0.799
  },
  "duration_s": 126.168,
  "sections": [
@@ -185,7 +185,7 @@
   },
   {
    "start_bar": 33,
-   "end_bar": 48,
+   "end_bar": 47,
    "name": "A",
    "plays": [
     "808",
@@ -195,9 +195,17 @@
    ]
   },
   {
-   "start_bar": 49,
-   "end_bar": 56,
+   "start_bar": 48,
+   "end_bar": 51,
    "name": "D",
+   "plays": [
+    "808"
+   ]
+  },
+  {
+   "start_bar": 52,
+   "end_bar": 56,
+   "name": "E",
    "plays": []
   },
   {
@@ -214,7 +222,7 @@
   {
    "start_bar": 72,
    "end_bar": 73,
-   "name": "E",
+   "name": "D",
    "plays": [
     "808"
    ]
@@ -352,7 +360,7 @@
   "sound_3": {
    "found_in_band": "low",
    "hits_in_template": 24,
-   "detected_hits": 0,
+   "detected_hits": 1,
    "clean_share": 0.0,
    "grid_slots_of_template_hits": {
     "8": 23,
@@ -1214,14 +1222,13 @@
   }
  },
  "808": {
-  "notes": 94,
+  "notes": 101,
   "by_pitch": {
-   "24": 79,
+   "24": 87,
    "23": 5,
    "22": 3,
    "37": 3,
    "31": 2,
-   "28": 1,
    "36": 1
   },
   "slides_over_1.5_semitones": 0,
@@ -1240,7 +1247,7 @@
    "pitch_hz": 32.9277,
    "fit": {
     "loss": 0.1212,
-    "seconds": 50.1
+    "seconds": 49.2
    },
    "vs_reference": {
     "ncc": 0.938,
@@ -1263,9 +1270,23 @@
  },
  "plan": {
   "tempo": 136.999,
-  "drum_notes": 607,
+  "drum_notes": 630,
   "pads": {
+   "36": {
+    "role": "kick",
+    "sample": "Core Library: Kick Doctor M.wav",
+    "transpose": -3,
+    "ncc": 0.8475,
+    "verdict": "no close match"
+   },
    "38": {
+    "role": "snare",
+    "sample": "user library snare #d76487c9",
+    "transpose": 0,
+    "ncc": 0.4664,
+    "verdict": "no close match"
+   },
+   "40": {
     "role": "snare",
     "sample": "user library snare #9cb42e08",
     "transpose": 0,
@@ -1288,24 +1309,31 @@
    },
    "46": {
     "role": "hat",
+    "sample": "user library hat #b4cac0a0",
+    "transpose": 0,
+    "ncc": 0.9468,
+    "verdict": "same family"
+   },
+   "43": {
+    "role": "perc",
+    "sample": "user library perc #84280561",
+    "transpose": 0,
+    "ncc": 0.9297,
+    "verdict": "candidate: maybe the same sample, processed (check by ear)"
+   },
+   "49": {
+    "role": "hat",
     "sample": "user library hat #6b0ee162",
     "transpose": 1,
     "ncc": 0.925,
     "verdict": "same family"
    },
-   "36": {
-    "role": "kick",
-    "sample": "Core Library: Kick Doctor M.wav",
-    "transpose": -3,
-    "ncc": 0.8475,
-    "verdict": "no close match"
-   },
-   "40": {
+   "39": {
     "role": "snare",
-    "sample": "user library snare #d76487c9",
+    "sample": "user library snare #d0c608be",
     "transpose": 0,
-    "ncc": 0.4664,
-    "verdict": "no close match"
+    "ncc": 0.8865,
+    "verdict": "candidate: maybe the same sample, processed (check by ear)"
    },
    "54": {
     "role": "snare",
@@ -1315,11 +1343,11 @@
     "verdict": "same family"
    }
   },
-  "808_notes": 94,
+  "808_notes": 101,
   "levels": {
    "headroom_db": 4.0,
    "drums_track_db": -20.2,
-   "808_track_db": -13.6,
+   "808_track_db": -13.9,
    "stems_track_db": -4.0
   },
   "locators": [
@@ -1340,15 +1368,19 @@
     128.053
    ],
    [
-    "D (49)",
-    192.053
+    "D (48)",
+    188.053
+   ],
+   [
+    "E (52)",
+    204.053
    ],
    [
     "A (57)",
     224.053
    ],
    [
-    "E (72)",
+    "D (72)",
     284.053
    ]
   ]

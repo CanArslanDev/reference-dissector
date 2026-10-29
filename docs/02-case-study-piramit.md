@@ -3,8 +3,8 @@
 A Turkish trap track (album *VERITAS II*), 2:06.
 - **Goal.** Take it apart and build a near replica in Ableton Live from a personal sample library and Live's own devices.
 - **Starting point.** The Demucs stems and a prototype whose beat tracker gave 68.18 BPM.
-- **Where the numbers come from.** The run of 2026-10-22 with replica mode: `analyze`, `melodic`, `match`, `fit-808` and `plan` with the code of 9ccc759 (the code the suite's m2g run measured), on the same stems. `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
-- **No truth.** Nobody has transcribed PIRAMIT by hand. Where the two runs differ, this page says which one is right only where a measurement on the stems shows it; everything else is not verified.
+- **Where the numbers come from.** The run of 2026-10-29: `analyze`, `melodic`, `match`, `fit-808` and `plan` with replica mode's code of c758437, on the same stems and with the options of the run of 2026-10-22 (the defaults); `--no-cache`, so every step was computed. Two more runs of the same code wrote the same files, value for value but for the fit's seconds. `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *2026-10-22* come from the first run with replica mode (analysis, matches and fit with the code of 9ccc759, the plan with 4f30623's). Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
+- **No truth.** Nobody has transcribed PIRAMIT by hand. Where the runs differ, this page says which one is right only where a measurement on the stems shows it; everything else is not verified.
 - **What is not here.** The song, its stems and the note-by-note transcription stay local: see [09](09-data-and-copyright.md).
 
 ## Grid: 137.00 BPM, not 136.36
@@ -46,9 +46,9 @@ Before replica mode the medians were within 0.4 ms of these and the p90s within 
 
 **Correction 1.** This section first said the whole track sat at +0.28 semitones (A4 ≈ 447 Hz). That came from `librosa.estimate_tuning`, which is off by up to 60 cents on synthetic tones. Measured with stable spectral peaks (within 1 cent on synthetic tones) and checked with pyin (+2 to +3 cents on piano and other), the melodic stems are at A440.
 
-**Correction 2.** The 808 is detuned, but by +11.8 cents, not +33. The +33 was the circular mean of each note's pYIN median over 60–450 ms, and that window hears the 808's drop. The 808 reader now learns the song's own 808 from its long notes (53 notes, all starting on a kick) and reads its settled pitch by QIFFT over 300–600 ms, where the window's two halves agree within 3 cents. Each note is a transposition of it; the notes' settled pitches agree on +10.7 cents (0.868).
+**Correction 2.** The 808 is detuned, but by +11.8 cents, not +33. The +33 was the circular mean of each note's pYIN median over 60–450 ms, and that window hears the 808's drop. The 808 reader now learns the song's own 808 from its long notes (53 notes, all starting on a kick) and reads its settled pitch by QIFFT over 300–600 ms, where the window's two halves agree within 3 cents. Each note is a transposition of it; the notes' settled pitches agree on +11.5 cents (0.799). On 2026-10-22 they agreed on +10.7 (0.868): six of the eight notes the reader now adds settle 42–53 cents over C1 ([808](#808)).
 
-**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. Before replica mode, with the +33 cents removed before rounding, 107 of 126 notes were C1. Now 79 of 94 are.
+**What it explains.** The prototype's 808 notes split between C (90) and C# (82), and its key estimate wavered between C minor and C major. Notes at C + 30 cents round either way. Before replica mode, with the +33 cents removed before rounding, 107 of 126 notes were C1. Now 87 of 101 are (79 of 94 on 2026-10-22).
 
 **What it is not.** It could have been a whole track sped up: 1.5 % faster would also turn 135 BPM into 137. Matching every drum sample shifted by +0.26 semitones made the matches *worse*: the snare fell from 0.86 to 0.25 and the hat from 0.90 to 0.63. The drums are at their own pitch, and so are the melodic parts.
 
@@ -73,17 +73,19 @@ Before replica mode the table had sound_1 (236 hits, "same sample": 0.981, margi
 The other new templates are small:
 - a perc every 4 bars (8 hits, a "candidate" at 0.930);
 - the hat's file again, found in the snare band (7 hits);
-- a snare-like sound on steps 10–11 (hat band, 8 hits, a "candidate" at 0.887);
+- a snare-like sound on steps 10–11 (hat band, 8 hits, a "candidate" at 0.886);
 - a low sound of 11 hits, and a low-band template of 56 hits that matches nothing above 0.672.
 
-Four keep almost no hits: the joint fit merged a snare-band view of the kick into sound_2 and one of the hat into sound_1, and two low-band views of beat 3 keep 3 hits between them.
+Four keep almost no hits: the joint fit merged a snare-band view of the kick into sound_2 and one of the hat into sound_1, and two low-band views of beat 3 keep 4 hits between them (3 on 2026-10-22; the fourth at NCC 0.60).
+
+The drums' analysis is otherwise 2026-10-22's: the same 16 templates, sample for sample, the same merges and the same hits per sound, none of them moved. Only the gains of 23 hits changed: 9 of the hat's, all 11 of the low sound's, and one each of the kick, the unmatched snare and the hat 2 semitones down.
 
 What the table says about the beat:
 - **Two snares alternate bar by bar** on beat 3. This was invisible to a band-energy transcriber, but obvious once hits are grouped by waveform: the two groups never merge, NCC between them stays < 0.75. Bars are counted from 1, as the sections are: the identified snare plays on bars 1, 3, 5 … **Correction:** this page and the README had odd and even swapped before replica mode.
 - **The same snare file at its own pitch** plays 30 times in bars 24–31, where this page said "no snares" before replica mode. The residual pass found it. A same-file twin at another pitch plays on a pad of its own, so the plan has the file twice: Transpose 0 and −1. Not checked by ear.
 - **Pitched hats.** From bar 35 on, the end of most bars has a hat 2 semitones down or a hat a semitone up (40 hits). The first is the hat's own recording (a copy under another kit's name). Not checked by ear.
 - **The hat under the snares.** 54 of the hat's 389 hits were found under other sounds by the joint fit: 36 under the two snares, 10 under the kick. Before replica mode, one template per moment and band could not find them.
-- **The "kick" is mostly the 808's start plus a click.** 75 of its 93 hits fall within 20 ms of an 808 note's attack. The click no longer has a template of its own. Its file is now the kick template's best match in the kick band (0.81).
+- **The "kick" is mostly the 808's start plus a click.** 76 of its 93 hits fall within 20 ms of an 808 note's attack (75 on 2026-10-22: one of the 808's new notes starts on a kick). The click no longer has a template of its own. Its file is now the kick template's best match in the kick band (0.81).
 - **The hi-hat** is a library sample untouched: 98 % correlation after mix, master, mp3 and separation. Its verdict fell from "same sample" to "same family" only because the margin did. The search now tries every noisy sound at any pitch, and another kit's hat 3 semitones up reaches 0.958. The hits still choose the file: 310 of 327.
 - **The −1 snare** took three tries to find before replica mode:
   - 0.86 for a *related* snare, when template and library were lined up on different onset definitions;
@@ -95,20 +97,34 @@ What the table says about the beat:
 
 ## 808
 
-- **Notes.** 94 notes by written pitch (126 before replica mode):
+- **Notes.** 101 notes by written pitch (94 on 2026-10-22, 126 before replica mode):
 
-  | pitch | C1 | B0 | A#0 | C#2 | G1 | E1 | C2 |
+  | pitch | C1 | B0 | A#0 | C#2 | G1 | C2 | E1 |
   |---|---|---|---|---|---|---|---|
-  | notes | 79 | 5 | 3 | 3 | 2 | 1 | 1 |
+  | notes | 87 | 5 | 3 | 3 | 2 | 1 | – |
+  | 2026-10-22 | 79 | 5 | 3 | 3 | 2 | 1 | 1 |
   | before replica mode | 107 | – | – | – | 3 | 1 | 1 |
 
   Before replica mode there were also 12 at C#1 and one each at D#1 and G0.
   - 13 notes first read as C#2: 60–90 ms each, each followed at once by a C1 note. The 10 that start on a kick are its attack split off that C1 note, which now starts there (flag `split`). 3 C#2 notes remain.
   - No note slides: legato notes are off by default. Before replica mode 3 notes slid by more than 1.5 semitones (not played).
-- **Wrong: one note from bar 48 to bar 57.** The reader holds one B0 note for 15.3 s. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −27 dB where the 808 plays) for 1.0 s. Then the 808 plays alone for bars 49–51, with no kick: four rises of its envelope (the reader before replica mode wrote five notes there). Then it stays under −82 dB for 7.2 s, the breakdown.
-  - The cause, measured: the reader finds four C1 notes there, but their onsets sit 27 ms before the feet of their envelope rises, past the 20 ms that `bass808.legato` allows. Their template fit is 0.887–0.893, under its 0.9. With no kick there, each reads as the note before going on, and that note takes their end.
-  - Three more notes hold 0.24–1.26 s of silence. Before replica mode no note held 0.2 s of silence.
-  - Not fixed.
+- **Fixed: notes held over silence.** On 2026-10-22 the reader held one B0 note for 15.3 s, through sections D and E. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −27 dB where the 808 plays) for 1.0 s. Then the 808 plays alone, with no kick, to the end of D; then the stem stays under −82 dB for 7.2 s, the breakdown (E). The reader found C1 notes in D, but their onsets sat 27 ms before the feet of their envelope rises, past the 20 ms that `bass808.legato` allows, and their template fit was 0.887–0.893, under its 0.9: each read as the note before going on. Two rules of the reader changed ([01](01-pipeline.md#808-notes-bass808transcribe)):
+  - a note ends where the 808 falls silent (its 25 ms RMS 40 dB or more under the note's peak for 50 ms), and a note found after that is a note of its own;
+  - a rise of 9 dB or more attacks a note, and such a note starts on its rise.
+
+  Silence measured on the stem the same way for both runs: the 25 ms RMS of the bass stem's 808 band 40 dB or more under the median note peak, for 0.2 s or more inside a note.
+
+  | | 2026-10-22 | now |
+  |---|---|---|
+  | notes held over silence | 4 (0.27, 0.65, 1.57 and 8.63 s of it; the last in two rests, 1.22 and 7.41 s) | 0 |
+  | longest note | 15.33 s | 1.75 s |
+  | C1 notes in section D, where the 808 plays alone | 0 | 4 |
+
+  - 93 of the 94 notes of 2026-10-22 are found again within 50 ms. None moved in onset, attack or written pitch. 6 end earlier, by 0.3 to 15.3 s.
+  - 8 notes are new, all C1: five start on a rise of 11–21 dB inside what 2026-10-22 read as one longer note (one of them on a kick), three after a rest. Each attacks 5.2–5.45 ms after its onset, as the others do (median 5.44 ms).
+  - 1 is gone: the E1 note, found in a rest, whose peak sat 49 dB under the other notes'.
+- **Still wrong in section D: a fifth note.** The stem shows one more attack there: its pitch (80 ms windows) falls about 4 semitones within 120 ms, as it does at the attacks the reader finds there. But no kick plays there, and the 808 band rises only 6.5 dB over the note still ringing, where a rise needs 9. The reader keeps it in the note before; the reader before replica mode wrote a note there. Not checked by ear.
+- **Read sharp: the notes of section D.** The reader settles them at +42 to +43 cents over C1. The stem's own sustain, read as the template is (QIFFT over 300–600 ms after the attack), gives +11.8 to +12.3 cents on three of them, the template's pitch; the fourth's window holds the fifth attack. Two other new notes settle at +52 to +53 cents; under 0.6 s long, they are too short for that window. All are written C1 either way, and the plan plays every 808 note at the track's one tuning.
 - **Silences.** The stem's 808 rests in bars 52–56: the breakdown.
 - **The template.** 53 long C1 notes, all starting on a kick, averaged into a 1.5 s template. Before replica mode, 74 C1 notes that rang 600 ms alone were the reference.
 - **Pitch drop.** The template's period-by-period pitch reads 5.0 semitones over its settled pitch at 50 ms (about 44 Hz; the first reading needs two zero crossings), 1.8 at 70 ms, 0.9 at 80 ms and 0.16 at 200 ms. From 250 ms to 1.0 s it stays within 8 cents of 32.93 Hz (−7.3 to +4.2 cents; median 0.9 cents off). Before replica mode this page read 42–44 Hz falling to 33.2 Hz in about 60 ms.
@@ -124,7 +140,9 @@ What the table says about the beat:
 | decay | 0.51 s | 0.46 s |
 | drive | 2.88 (tanh), asym −0.028 | 1.95, nearly symmetric |
 | one-shot pitch | 32.93 Hz, the template's (the fit's 33.05 Hz is 6.5 cents off it) | 33.33 Hz, the +33 cents |
-| fit | 50 s | 49 s |
+| fit | 49 s, beside another job (50 s on 2026-10-22) | 49 s |
+
+The fit is 2026-10-22's: the template and its 53 notes are the same, and so are the parameters, the loss, the comparison below and the one-shot, byte for byte.
 
 **Compared with the reference** (in brackets: before replica mode, against its own reference):
 
@@ -149,7 +167,7 @@ See [05](05-808-synthesis.md) for why a fit on waveform alone loses the grit ent
 `melodic` runs Basic Pitch on the other, piano and vocal stems, each moved onto A440 first (−2, +2 and −38 cents taken out). Other and piano start at 34.65 Hz, a semitone over C1, at or under which the 808 sounds 95 % of its time ([01](01-pipeline.md#melodic)), so the 808 bleeding into them is not transcribed.
 - other: 330 notes; one loop found (section B, a 1-bar period), nothing restored or dropped;
 - piano: 311 notes; vocals: 509;
-- chords: 141 segments.
+- chords: 143 segments (141 on 2026-10-22). The notes are the same; the chords take the 808's notes as their bass, and the segments that changed all lie where the 808's notes did (four places, the breakdown among them).
 
 None of this is checked against the song (no truth). On the suite's melodic and full beats (4 synthetic beats) the same step scores note F1 0.63 and chords 0.98 (major/minor; [03](03-calibration.md)).
 
@@ -160,12 +178,13 @@ None of this is checked against the song (no truth). On the suite's melodic and 
 | A | 1–24 | everything |
 | B | 25–28 | no hats or snares on beat 3; the snare file at its own pitch, kick and 808 |
 | C | 29–32 | as B without the kick |
-| A | 33–48 | |
-| D | 49–56 | nothing |
+| A | 33–47 | |
+| D | 48–51 | the 808 alone |
+| E | 52–56 | nothing: the breakdown |
 | A | 57–71 | |
-| E | 72–73 | outro: the 808 |
+| D | 72–73 | outro: the 808 alone, as in D |
 
-Before replica mode: A 1–24 · B 25–28 · C 29–32 · A 33–47 · D 48–51 (808 only) · E 52–56 (breakdown: drums and 808 out) · A 57–71 · F 72–73. D now takes in the 808-only bars because the 808's held note starts in bar 48, and a bar's 808 is a note that starts in it (see 808 above). The stem's 808 band agrees with the old reading: it plays through bar 51 and rests from bar 52.
+These are the sections read before replica mode, but for the outro's name: it plays what D plays, so it is D again (F before replica mode). On 2026-10-22 the held 808 note started in bar 48, and a bar's 808 is a note that starts in it, so D (49–56) took in the 808's bars and the breakdown, and A ran to bar 48 (see 808 above). The stem's 808 band agrees with this reading: it plays through bar 51 and rests from bar 52.
 
 The prototype's per-stem activity map (at 68 BPM bars) had the breakdown at bars 25–28 of its grid, which is 49–56 here. It also had the "other" stem dropping out earlier, and the vocals thinning at the end.
 
@@ -190,21 +209,35 @@ Measured on the way (Live 12.4):
 - Locators at fractional beats were refused, whole beats work.
 
 **The plan with replica mode** (not built yet, so nothing in it is verified in Live):
-- 607 drum notes on 7 pads (549 on 6 before);
+- 630 drum notes on 10 pads (607 on 7 on 2026-10-22, 549 on 6 before replica mode);
   - the hat, its copy at Transpose −2 / Detune −1, and the other hat at +1 / −2;
   - the snare file at 0 and at −1;
   - the unmatched snare, and the kick;
-  - the click and a second kick no longer get pads;
-- 94 808 notes at Transpose +36 and Detune +2, one per note, no Glide;
+  - new: the perc (8 notes, a "candidate" at 0.930), the hat's file found in the snare band (7 notes, 0.947) and the snare-like sound (8 notes, a "candidate" at 0.886);
+  - the click and a second kick get no pads, as on 2026-10-22;
+- 101 808 notes at Transpose +36 and Detune +2, one per note, no Glide;
 - three muted MIDI tracks (other, piano, vocals) with Drift as a placeholder;
-- 7 locators, the 808's fader at −13.6 dB and the drums' at −20.2 dB. Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, under which velocity 127 plays 7.9 dB over the Volume; taken as linear levels (v/127), the same notes had the faders at −6.6 and −12.3 dB (the 808's at −6.2 dB before replica mode).
+- 8 locators, the 808's fader at −13.9 dB (−13.6 on 2026-10-22) and the drums' at −20.2 dB. Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, under which velocity 127 plays 7.9 dB over the Volume. On 2026-10-22, taken as linear levels (v/127), the same notes had the faders at −6.6 and −12.3 dB (the 808's at −6.2 dB before replica mode).
+
+**What changed in the plan since 2026-10-22:**
+- **Three pads are new**, and none is gone. The new ones are sounds of the residual pass that the 12-hit floor kept out. A pad now takes, here, 5 hits (one per 16 bars), clean 0.5, and for a sound of the residual pass, hits that recur: at least half of them with another hit at their place of the bar (within 6 ms) 1–8 bars away ([12](12-replica-mode.md)). The perc recurs at 0.75 and is clean 0.875; the hat 1.0 and 1.0; the snare-like sound 0.75 and 1.0. None of the three is checked by ear.
+  - 6 of the perc's 8 notes lie 0.7 ms before a note of the main hat: a layer, or the hat found again (not verified).
+  - The new hat plays a copy of the hat's file (NCC 1.0 between the two files) on step 14 of 7 bars. In 5 the main hat has no note there; the other 2 double a main-hat note 0.3 ms away, at gains of 0.29 and 0.35 where its other hits have 0.71–1.12. The rule that plays a strike once looks at one pad, not at one recording on two.
+  - The snare-like sound lies within 15 ms of no other pad's note.
+- **The 7 earlier pads play the same notes**, one for one. The rules that play each strike once (the backbone's kicks and snares, and one sample per moment on a pad) drop nothing here. 7 of their 607 notes moved 1–3 velocity steps, with the gains above.
+- **A note starts as early as its pad's sample takes to attack**: the kick 0.16 ms, the unmatched snare 0.57, the snare file 2.93 (3.11 a semitone down), the perc 1.04, the snare-like sound 0.18, the hats 0. Each earlier pad's note lies within 0.05 ms of its 2026-10-22 note less that lead.
+- **Pads moved.** The backbone (a kick or snare found on the places of the beat, clean and played throughout) is now placed first: the unmatched snare took pad 38 and the snare file 40, the other way round before. The new hat took 46 by its NCC, and the other hat moved to 49.
+- **Pads still sound together** within 15 ms as on 2026-10-22: the kick and the hat on 61 notes, the −1 snare and the hat on 28, the unmatched snare and the hat on 20, the kick and the snare file on 5.
+- **The 808**: the 93 notes found again start where they did, at the same pitch; 6 are shorter. 22 of them play a velocity step lower: velocity 115 is the line's median peak, which rose 0.045 dB with the new notes.
+- **Locators**: D (48) and E (52) where 2026-10-22 had D (49), and D (72) for the outro.
 
 See [07](07-building-in-live.md).
 
 ## Still open
 
 - **The even-bar snare.** Nothing in the library comes close (0.466): synthesize it, or find a better library.
-- **The 808 in bars 48–57** is one held note (see 808). Until the reader ends a note at silence and accepts these notes' attacks, the plan holds one B0 note there for 15 s (the 3 s one-shot plays once) instead of four C1 notes and a rest.
+- **The 808 in section D** has four notes where the stem shows five: one attack rises 6.5 dB over the note still ringing, under the 9 dB a rise needs, and no kick marks it (see 808). The reader also settles these notes about 30 cents over what their sustain reads; the plan does not play that.
+- **One recording on two pads.** The hat's file found in the snare band doubles 2 of the main hat's notes (see In Live).
 - **The 808 voice** now starts like a kick. Fitting it on notes without a kick, or from after the kick's decay, would tell whether the kicks in the reference cause it.
 - **808 slides** are not read by default; PIRAMIT's reading has none.
 - **Melody, chords and vocal chops.** They are transcribed and planned as muted MIDI tracks. The original stems still play them; choosing instruments is the next stage.
