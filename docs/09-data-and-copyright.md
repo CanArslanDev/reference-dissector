@@ -19,8 +19,8 @@ This project analyses commercial recordings and uses sample libraries. What it p
 - `results/piramit/summary.json`:
   - the grid without its beat times (`tempo_map` stays local), the tuning and the sections;
   - per sound: counts, slots, descriptors and its top three matches;
-  - the 808: note counts per pitch and the synth's parameters;
-  - the plan: pads, levels and section locators.
+  - the 808: note counts per pitch, the synth's parameters, and how the one-shot the plan plays compares with the reference and follows the template's periods (numbers only, never its pitch curve);
+  - the plan: pads (each with its Transpose, Detune and Volume), the 808's Transpose and Detune, levels and section locators.
   - No event time and no note.
 - `results/calibration/summary.json`: the six v1 calibration beats' scores.
 - `results/calibration/suite-<tag>.json`: one calibration-v2 run's means per scenario and overall, and how the run was made.
