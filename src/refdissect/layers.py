@@ -869,15 +869,20 @@ def _probes(sc: Scene, cands: Candidates, gains: np.ndarray, merged: dict, weak:
     """4. Where the kept hits leave something out: a held template at its
     offset under the hits of the one holding it (the co-detections' offset,
     else the containment lag), and each noisy template at its weak
-    matched-filter peaks and the onsets of its band. Returns the probe hits
-    that pass and the offsets used."""
+    matched-filter peaks and the onsets of its band. A merged template is
+    looked for as the column its hits went to, and an echo is never looked
+    for, merged into or not: holds are found before the merges, and on
+    PIRAMIT a residual kick template held the kick's main, whose hits went
+    into its view, an echo of it; the view was probed under the holder and
+    7 kick notes came in 5-8 ms after its hits (93 -> 100 on the kick pad;
+    no truth). Returns the probe hits that pass and the offsets used."""
     kit, columns, col_of = sc.kit, sc.kit.columns, sc.col_of
     layers, offsets = Candidates(), {}
     for s_tp, held in sc.rel["holds"].items():
         for h_tp, _, held_lag, _ in held:
             (s, s_off), (h, h_off) = _root(merged, col_of[s_tp]), _root(merged, col_of[h_tp])
             sp, hp = cands.p[cands.col == s], cands.p[cands.col == h]
-            if s == h or not len(sp):
+            if s == h or not len(sp) or columns[h].template in sc.rel["echo"]:
                 continue
             lag, agree = pair_offset(sp, hp)
             lag = held_lag + h_off - s_off if lag is None else lag
