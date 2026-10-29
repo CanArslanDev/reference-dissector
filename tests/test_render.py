@@ -131,7 +131,10 @@ def test_velocity_law_faders_and_the_drums_sum(kit, tmp_path):
 
 def test_the_808_plays_each_note_at_its_pitch_and_stops_at_its_end(tmp_path):
     """A one-shot at C1 (MIDI 24) with the build's Transpose +36: MIDI 36
-    sounds an octave up, cut 5 ms after its 0.25 s note."""
+    sounds an octave up (and lasts half as long, as the note does). A 0.25
+    s note at MIDI 31 ends in Live's 808 release: from its end the one-shot
+    falls 1.683 dB a ms and stops 35.7 ms on."""
+    from refdissect.render import RELEASE_DB_MS, RELEASE_S
     t = np.arange(2 * SR) / SR
     shot = wav(tmp_path, "808.wav", 0.8 * np.sin(2 * np.pi * 32.703 * t))
     t808 = {"sample_path": shot, "root_midi": 24, "transpose": 36,
@@ -141,12 +144,37 @@ def test_the_808_plays_each_note_at_its_pitch_and_stops_at_its_end(tmp_path):
     seg = x[int(0.1 * SR):int(0.9 * SR)] * np.hanning(int(0.8 * SR))
     spectrum = np.abs(np.fft.rfft(seg, 1 << 19))
     assert np.argmax(spectrum) * SR / (1 << 19) == pytest.approx(65.406, abs=0.1)
-    assert np.abs(x[int(1.0 * SR) + samples(5) + 1:int(2.0 * SR)]).max() == 0.0
-    assert np.abs(x[int(2.25 * SR) + samples(5) + 1:]).max() == 0.0
+    assert np.abs(x[int(1.0 * SR) + 1:int(2.0 * SR)]).max() == 0.0
+    end, tail = int(2.25 * SR), int(round(RELEASE_S * SR))
+    free = rendered(tmp_path / "f", render_plan(plan({}, [], t808), tmp_path / "f", cut_808=False), "808")
+    k = np.arange(tail)
+    on = np.abs(free[end + k]) > 1e-3
+    assert 20 * np.log10(np.abs(x[end + k][on] / free[end + k][on])) == pytest.approx(
+        -RELEASE_DB_MS * 1000 * k[on] / SR, abs=0.01)
+    assert np.abs(x[end + tail:]).max() == 0.0
     notes = estimate_from_plan(plan({}, [], t808))["bass808"]
     assert [n["midi"] for n in notes] == [36.0, 31.0] and notes[0]["end"] == 1.0
     t808["cents"] = 30.0  # the one-shot's own tuning over root_midi
     assert estimate_from_plan(plan({}, [], t808))["bass808"][0]["midi"] == pytest.approx(36.3)
+
+
+def test_an_808_note_after_one_of_its_pitch_restarts_its_voice_1_ms_late(tmp_path):
+    """Live restarts the 808's voice of a pitch as it does a pad's: a note
+    that comes while the release of the note before at its pitch still
+    runs fades that voice out over 1 ms from its note and starts 1 ms late
+    (estimate_from_plan times it so); a note of another pitch starts on
+    time over the release. Velocities at unity ("flat")."""
+    from refdissect.render import RETRIGGER_S
+    t = np.arange(2 * SR) / SR
+    sine = 0.8 * np.sin(2 * np.pi * 32.703 * t)
+    t808 = {"sample_path": wav(tmp_path, "808.wav", sine), "root_midi": 24, "transpose": 36,
+            "notes": [note(24, 0.0, duration=0.999), note(24, 1.0, duration=0.999), note(31, 2.0, duration=0.5)]}
+    x = rendered(tmp_path / "r", render_plan(plan({}, [], t808), tmp_path / "r", "flat"), "808")
+    a, late = int(0.5 * SR), int(round(RETRIGGER_S * SR))
+    assert np.allclose(x[a + late:a + late + SR // 4], sine[:SR // 4], atol=1e-6)  # the second, 1 ms late
+    assert np.abs(x[a + late - 1]) < 0.02 * np.abs(sine[a + late - 1])  # the first gone by then
+    est = estimate_from_plan(plan({}, [], t808))["bass808"]
+    assert [round(n["t"], 4) for n in est] == [0.0, 0.501, 1.0] and [n["flags"] for n in est] == [[], ["retrigger"], []]
 
 
 def test_levels_from_the_render(kit, tmp_path):
@@ -240,6 +268,22 @@ def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
     assert short["midi"] == pytest.approx(heard, abs=0.1) and 2.5 < short["midi"] - short["midi_settled"] < 3.5
     del p["tracks"]["808"]["cents"]
     assert estimate_from_plan(p)["bass808"][0]["midi_settled"] == pytest.approx(24.458, abs=0.01)
+
+
+def test_an_808_note_live_starts_late_sounds_from_where_it_starts(tmp_path):
+    """A note Live restarts 1 ms late sounds from there to its end: its
+    heard pitch (midi, the one-shot's drop through scenarios.sounding) is
+    that of the same note written 1 ms later, on a one-shot that falls an
+    octave onto its pitch."""
+    from refdissect.synth808 import Params, one_shot
+    shot = wav(tmp_path, "808 (synth).wav", one_shot(Params(41.2, 82.4, 60, 1.2, 2, 1.5, 0.05, 0.3), 32.703))
+    t808 = {"sample_path": shot, "root_midi": 24, "transpose": 36,
+            "notes": [note(24, 0.0, duration=0.299), note(24, 0.3, duration=0.2)]}
+    late = estimate_from_plan(plan({}, [], t808))["bass808"][1]
+    t808["notes"] = [note(24, 0.302, duration=0.198)]  # the same sound, nothing before it
+    alone = estimate_from_plan(plan({}, [], t808))["bass808"][0]
+    assert late["flags"] == ["retrigger"] and late["t"] == pytest.approx(alone["t"], abs=1e-5)
+    assert late["midi"] == pytest.approx(alone["midi"], abs=1e-4) and late["midi"] - late["midi_settled"] > 0.3
 
 
 def test_missing_files_play_nothing(tmp_path):
