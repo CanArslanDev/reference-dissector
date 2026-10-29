@@ -21,7 +21,7 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
   - Pitched copies play on pads of their own. Library layers are searched (`matches.json`) but not played.
 - **The 808's notes**, read as transpositions of the song's own 808:
   - note F1 (50 ms, 50 cents): 0.278 → 0.936 at analysis, 0.229 → 0.934 in the plan;
-  - median pitch error: 55 → 6 cents at analysis, 70 → 4.5 cents in the plan;
+  - median pitch error: 55 → 6 cents at analysis, 70 → 4.4 cents in the plan;
   - the written note is right for 0.970 of the notes (0.947 at m2g-vel). Where a template's own notes never settle, its settled pitch is read on the notes that reach past it: bass_low 0.487 → 0.987.
   - A note ends where the 808 falls silent, and a 9 dB rise attacks one. On PIRAMIT no note is held over 0.2 s or more of silence (4 before), and the 808 alone and the breakdown are two sections again.
 - **Sounds at any pitch.** The snare and hat bands are matched to a quarter cent (the speckle index), and pads play their match's Transpose and Detune. No pad that plays its sound's file is off pitch now; before Detune per pad, drum_pitch's snare played 30 cents off.
