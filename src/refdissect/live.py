@@ -896,7 +896,8 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     [tempo160-1's extra snare, 21 of whose 37 hits play no snare: -13.3 ->
     -23.8]. The other 4 spread their clear hits 4.9 to 13.8 dB (three play
     another role's file) and keep all their hits."""
-    pads = plan["tracks"]["drums"]["pads"]
+    bps = plan["tempo"] / 60
+    pads, notes = plan["tracks"]["drums"]["pads"], plan["tracks"]["drums"]["notes"]
     shots = {}
     for key, pad in pads.items():
         s = pad_settings(pad)
@@ -919,7 +920,8 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     # levels.vs_kit_abs_db 1.20 -> 1.30 dB, htdemucs_ft 1.19 -> 1.27; balance_abs_db 0.49 -> 0.60, 0.50 -> 0.51)
     hits = {key: pad_hits(plan, {key: x}, {key: {**s, "volume_db": 0.0}}, faders=False, mono=False)
             for key, (x, s) in shots.items()}
-    at = {key: np.array([h["t"] for h in hits[key]]) + attack_time(x, s["role"]) for key, (x, s) in shots.items()}
+    at = {key: np.array([e["start_time"] / bps for e in notes if str(e["pitch"]) == key]) + attack_time(x, s["role"])
+          for key, (x, s) in shots.items()}
     heard: dict[str, list[float]] = {}
     alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
     clear: dict[str, list[float]] = {}  # a sound that is no kick, at its hits clear of every other sound's
