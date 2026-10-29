@@ -33,17 +33,18 @@ Before the fit, a template that holds another (a snare template holds the
 hat that plays on every snare) has it subtracted, else it takes that
 sound's place at every hit (purification), and a template the others
 explain (a duplicate, a kick+hat found where they always coincide) is left
-out, its hits handed to the templates that explain it. Two kinds of
-template are never held or probed for, as they only find another
-template's sound a second time: one of discover()'s residual pass (found
-where no template of its band plays: it keeps its matched-filter hits, and
-gets no pitched copies), and one that a bigger template of its fit band
-holds within NEAR_MS (a variant of that sound). Re-fit on discover()'s
-templates of the 48 suite beats (htdemucs), the drums' F1 at 20 ms went
-0.847 -> 0.879 (mean over sounds; 0.801 -> 0.844 over hits) and the false
-hits from 68.6 to 43.1 a beat; open hats 0.901 -> 0.979, snares 0.933 ->
-0.961; claps 0.580 -> 0.500, as the layers scenario's clap had been found
-only by a residual template held under the snare.
+out, its hits handed to the templates that explain it (those at HAND of
+their level or more). Two kinds of template are never held or probed for,
+as they only find another template's sound a second time: one of
+discover()'s residual pass (found where no template of its band plays: it
+keeps its matched-filter hits, and gets no pitched copies), and one that a
+bigger template of its fit band holds within NEAR_MS (a variant of that
+sound). Re-fit on discover()'s templates of the 48 suite beats (htdemucs),
+the drums' F1 at 20 ms went 0.847 -> 0.879 (mean over sounds; 0.801 ->
+0.844 over hits) and the false hits from 68.6 to 43.1 a beat; open hats
+0.901 -> 0.979, snares 0.933 -> 0.961; claps 0.580 -> 0.500, as the layers
+scenario's clap had been found only by a residual template held under the
+snare.
 
 On 22 calibration-suite beats (layers, rolls, flams, dynamics, v1, v1orig,
 producer, full, kick808), against one template per moment and band: hats
@@ -77,6 +78,13 @@ NULL_SHIFTS_MS = (-47, -29, 29, 47)
 NULL_QUANTILE = 0.95
 HOLDS = ((0.3, 2.0), (0.015, 0.3))  # S holds H: LS coefficient c, share of S's energy over H's span
 COMPOSITE = 0.8  # share of a template the earlier ones explain: not a sound of its own
+# A left-out template's hits go to the ones that explain it at HAND of their
+# level or more (else to the one that explains it most). At any level, the
+# hand-off hung on the order: on melodic-1 with the hat averaged from 16
+# hits to the kick main's 15, the hat came first, explained 0.08 of the
+# kick's view the main left out, got its hits, and 32 of its 92 hits went
+# (hat F1@20 0.49 -> 0.30; 15 hits to 15 put the main first by its index)
+HAND = 0.1
 ECHO = 0.5  # share of a template's own band an earlier one explains: its matched filter repeats that one
 SAME_SOUND = 0.6  # placed templates this alike are one sound found twice
 # Share of a template's hits that are another's found twice: one sound. A
@@ -309,7 +317,8 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
     bands (own[k][j]: template j in k's band), taking them in _order()'s
     order (main: each one's main, if it is a view):
     - composite: the earlier ones explain COMPOSITE of it in all bands (a
-      duplicate, or a kick+hat where both have templates): left out;
+      duplicate, or a kick+hat where both have templates): left out, its
+      hits to go to those of them (by) at HAND of their level or more;
     - echo: an earlier one explains ECHO of it in its own band, so its
       matched filter repeats that one's (a kick+hat found in the hat band
       finds every hat): never probed for;
@@ -322,9 +331,9 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
     for k in order:
         share, coef, lags = explained(full[k][:, :n[k]], [full[j] for j in kept], near)
         if kept and share >= COMPOSITE:
-            composite[k] = {"share": round(share, 3),
-                            "by": {kept[j]: (round(float(c), 3), lag) for j, (c, lag) in enumerate(zip(coef, lags))
-                                   if c > 0}}
+            by = {kept[j]: (round(float(c), 3), lag) for j, (c, lag) in enumerate(zip(coef, lags)) if c > 0}
+            composite[k] = {"share": round(share, 3), "by": {j: v for j, v in by.items() if v[0] >= HAND}
+                            or dict([max(by.items(), key=lambda kv: kv[1][0])])}
             continue
         mine, _, _ = explained(own[k][k][:, :n[k]], [own[k][j] for j in kept], near)
         if kept and mine >= ECHO:

@@ -520,3 +520,27 @@ def test_clean_hits_choose_a_merge_only_within_one_band():
     clean, kind = np.array([7, 16]), [False, False]
     assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "low"]) == {1: (0, -10)}
     assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "snare"]) == {0: (1, 10)}
+
+
+def test_a_left_out_view_gives_its_hits_to_its_main_not_to_a_hat_before_it(sounds):
+    """A view of the kick (same_sound_as) holding a little of the hat too:
+    the kick's template explains it and leaves it out. The hat, averaged
+    from more hits (48) than the kick's template (24), is taken before both
+    and explains the view at 0.07 of its level. A left-out template's hits
+    went to every template that explained it: on melodic-1 with its hat
+    averaged from 16 hits to the kick's 15, the hat got the kick view's
+    hits at 0.08 and lost 32 of its 92 hits. Only one at HAND of its level
+    or more gets them: here the kick."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    hat, kick = templates[0], templates[1]
+    audio = kick.audio + 0.05 * np.max(np.abs(kick.audio)) / np.max(np.abs(hat.audio)) * hat.audio
+    view = Template("view", "kick", "snare", audio.astype(np.float32), kick.hits + 3, {}, None,
+                    same_sound_as="kick", found="residual")
+    from refdissect.detect import explain as detect_explain
+    got = detect_explain(x, templates + [view])
+    kicks, hats = ([t for n, t, _ in hits if n == name] for name in ("kick", "hat"))
+    assert hat.hits > kick.hits + 3 and list(got.info["composite"]["view"]["by"]) == ["kick"]
+    assert found(got.events, "kick", kicks, tol=0.001).all() and extra(got.events, "kick", kicks) == 0
+    assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0
