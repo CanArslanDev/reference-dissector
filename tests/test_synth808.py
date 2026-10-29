@@ -58,3 +58,43 @@ def test_envelope_and_harmonics_match_their_direct_forms():
     lv = [p[(f > h * 33.3 * 0.97) & (f < h * 33.3 * 1.03)].max() for h in range(1, 13)]
     masks = np.maximum(10 * np.log10(np.array(lv[1:]) / lv[0] + 1e-12), -60)
     assert np.allclose(harmonics(y, 33.3), masks)
+
+
+def test_a_fit_is_read_back_while_nothing_it_depends_on_changed(tmp_path, monkeypatch):
+    """A cached fit is the one the search would find again (it is seeded);
+    another template, f1 or setting, or no cache folder, searches."""
+    from refdissect import synth808
+
+    searches = []
+    search = synth808.differential_evolution
+    monkeypatch.setattr(synth808, "differential_evolution", lambda *a, **k: searches.append(1) or search(*a, **k))
+    reference = laid_out(TRUE, int(0.6 * SR))
+    p, info = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    again, kept = fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    assert again == p and kept["loss"] == info["loss"] and "cached" not in info
+    assert len(searches) == 1 and [f.name for f in tmp_path.glob("fit-808-*.json")] == [kept["cached"]]
+    fit(reference, 41.2, maxiter=4, popsize=4, cache=tmp_path)
+    fit(reference, 41.3, maxiter=3, popsize=4, cache=tmp_path)
+    fit(reference * 0.5, 41.2, maxiter=3, popsize=4, cache=tmp_path)
+    fit(reference, 41.2, maxiter=3, popsize=4)
+    assert len(searches) == 5
+    assert fit(reference, 41.2, maxiter=3, popsize=4, cache=tmp_path)[0] == p
+
+
+def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
+    """Each loss reads the 808 band, the harmonics' window and the voice's
+    sample times made once (butter alone was 0.13 ms of a 2.6 ms
+    candidate), with the same numbers as before."""
+    from refdissect import audio, describe, synth808
+
+    made = []
+    butter, hanning = audio.butter, np.hanning
+    monkeypatch.setattr(audio, "butter", lambda *a, **k: made.append("butter") or butter(*a, **k))
+    monkeypatch.setattr(describe.np, "hanning", lambda n: made.append("hanning") or hanning(n))
+    audio._design.cache_clear(), describe._hann.cache_clear(), synth808._times.cache_clear()
+    reference = laid_out(TRUE, int(0.6 * SR))
+    fit(reference, 41.2, maxiter=2, popsize=4)
+    assert made.count("butter") == 1 and made.count("hanning") == 1 and synth808._times.cache_info().misses <= 2
+    x = np.random.default_rng(0).standard_normal(4410).astype(np.float32)
+    assert np.array_equal(audio.band(x, "808"), audio.sosfiltfilt(butter(4, 1500.0, fs=SR, output="sos"), x)
+                          .astype(np.float32))

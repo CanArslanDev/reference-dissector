@@ -25,6 +25,7 @@ from . import detect as det
 from .audio import PRE, SR, band, read, samples, shift, transpose, write
 from .audio import fit as fit_to
 from .beats import track_stems
+from .cache import keep, kept, key
 from .detect import (
     LENGTH_MS,
     Template,
@@ -65,10 +66,37 @@ def _load(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print) -> tuple[dict, str | None]:
+    """bass808.transcribe, kept in cache under what decides it (cache.key:
+    the two stems' samples, the versions and the package's code) and read
+    back, its log lines too, when those are the same: the reader is 20-40 s
+    of a suite beat's analyze. Returns its result (through JSON, read back
+    or not: what bass808.json holds) and the file it was read back from, or
+    None when it ran."""
+    path = Path(cache) / f"808-{key((bass, drums), {})}.json" if cache else None
+    found = kept(path, log)
+    if found and isinstance(found.get("bass808"), dict) and isinstance(found.get("log"), list):
+        log(f"808 reader: read back from {path}; its log when it ran:")
+        for line in found["log"]:
+            log(line)
+        return found["bass808"], str(path)
+    lines: list[str] = []
+
+    def both(msg) -> None:
+        lines.append(str(msg))
+        log(msg)
+    out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both), default=float))
+    keep(path, {"bass808": out, "log": lines}, log)
+    return out, None
+
+
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
-            meter: str | None = None, tracker: bool = True) -> dict:
+            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = False) -> dict:
     """tracker=False (or a tracker that cannot run) fits the grid as before:
-    fit_grid in bpm_range, first grid beat as phase."""
+    fit_grid in bpm_range, first grid beat as phase. cache: the folder the
+    808 reader's results are kept in and read back from (_transcribe; True:
+    work/cache, as the command has it; by default none). One read back is
+    named in source.cached."""
     stems_dir, work = Path(stems_dir), Path(work)
     drums, bass = read(stems_dir / "drums.wav"), read(stems_dir / "bass.wav")
     duration = len(drums) / SR
@@ -128,7 +156,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808 = bass808.transcribe(bass, drums, log=log)
+    b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]
@@ -153,6 +181,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                 "templates": out_templates, "events": events, "layers": found.info, "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
+    if read_back:  # not read by this run: what the run that kept it read (same stems, code and versions)
+        analysis["source"]["cached"] = {"808_reader": read_back}
     _save(work / "analysis.json", analysis)
     return analysis
 
@@ -312,10 +342,7 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     0-8 ms from hit to hit (the suite's layers scenario) is smeared in the
     average: found in neither of 2 beats."""
     main, n = ranked[0], len(t)
-    tb = band(t, b)
-    atom, _ = library.atoms(t, b, [main])
-    g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
-    rest = (tb - g * atom[0]).astype(np.float32)
+    tb, rest = band(t, b), _rest(library, t, b, main)
     seen, partners = {main["i"]}, []
     for r in library.distinct(ranked, n, keep=pool) + library.distinct(_search(library, rest, b, None)[0], n,
                                                                         keep=pool):
@@ -350,6 +377,15 @@ def _layer(library: Library, t: np.ndarray, b: str, ranked: list[dict], taken: l
     if better < min_db:
         return [], {**evidence, "accepted": False, "why": f"the partner takes off less than {min_db:g} dB"}
     return [layer], {**evidence, "accepted": True}
+
+
+def _rest(library: Library, t: np.ndarray, b: str, main: dict) -> np.ndarray:
+    """What a template window leaves in band b once its top match is fitted
+    (least squares, never added): where _layer looks for a second sound."""
+    tb = band(t, b)
+    atom, _ = library.atoms(t, b, [main])
+    g = max(0.0, float(np.dot(tb, atom[0]) / (np.dot(atom[0], atom[0]) or 1.0)))
+    return (tb - g * atom[0]).astype(np.float32)
 
 
 def _role(top: list[dict], named: Counter, guess: str, b: str) -> str:
@@ -424,8 +460,13 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     ranked_by: dict[tuple[str, str], list[dict]] = {}
     windows: dict[tuple[str, str], np.ndarray] = {}
     method: dict[tuple[str, str], str] = {}
+    fulls = {name: _template(work, name) for name in templates}
+    # every template's window searched together in each band: the same rankings, each block of the
+    # library transformed once for all of them instead of once per template (Library.prepare)
+    library.prepare({role: [full[: samples(LENGTH_MS[role])] for full in fulls.values()]
+                     for role in ("kick", "snare", "hat")})
     for name in templates:
-        full = _template(work, name)
+        full = fulls[name]
         by_band[name] = {}
         for role in ("kick", "snare", "hat"):
             t = windows[name, role] = full[: samples(LENGTH_MS[role])]
@@ -486,6 +527,9 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
             out[name]["speckle_index"] = library.speckle_info["version"]
         if name in same_as:
             out[name]["verdict"] = f"same sound as {same_as[name]}"
+    layered = [n for n in templates if n not in same_as and band_of[n] != "kick"]
+    library.prepare({b: [_rest(library, windows[n, b], b, ranked_by[n, b][0]) for n in layered if band_of[n] == b]
+                     for b in {band_of[n] for n in layered}})
     for name in templates:
         b, m = band_of[name], out[name]
         if name in same_as or b == "kick":
@@ -501,6 +545,7 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
         where = f"{b}, {m['source']}" if m.get("source") else b
         log(f"  {name:9s} -> {m['role']:6s} {m['top'][0]['file'][:34]:34s} st {m['top'][0]['semitones']:+.2f} "
             f"ncc {m['top'][0]['ncc']:.3f} margin {m['margin']:+.3f} [{where}] ({m['verdict']}){layer} | {others}")
+    library.forget()
     _save(work / "matches.json", out)
     return out
 
@@ -524,10 +569,14 @@ def _fit_notes(work: Path, analysis: dict) -> tuple[list[int], int, float | None
 
 
 def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: Library | None = None,
-            log=print, **fit_options) -> dict:
+            log=print, cache: str | Path | bool = False, **fit_options) -> dict:
     """Fit the 808 on bass808's template notes (drums + bass, so the attack
     is in) and write a one-shot at the 808's settled pitch. fit_options go
-    to synth808.fit (maxiter, popsize: a smaller search for tests).
+    to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
+    the folder synth808.fit keeps its fits in (True: work/cache, as the
+    command has it; by default none), so a run whose template, settings and
+    code are unchanged reads its fit back (synth808.json's fit.cached names
+    the file).
 
     The pitch is the template's settled pitch as bass808 measured it (the
     QIFFT of its notes' sustain, 300-600 ms: on PIRAMIT C1 +11.8 cents,
@@ -549,7 +598,10 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     # the template's own pitch, or the 808's tuning (analyses written before bass808: the track's)
     f1 = hz or float(librosa.midi_to_hz(root + analysis["tuning"].get("808", analysis["tuning"]["consensus"])))
     log(f"808: {used} notes at MIDI {root}, {f1:.2f} Hz ({method or 'tuning'}); fitting (1-3 min)")
-    params, info = fit(ref, f1, **fit_options)
+    kept_in = work / "cache" if cache is True else cache or None
+    params, info = fit(ref, f1, cache=kept_in, log=log, **fit_options)
+    if info.get("cached"):
+        log(f"808: fit read back from {Path(kept_in) / info['cached']} ({info['seconds']} s when it ran)")
     apart = 1200 * np.log2(params.f_end_hz / f1)
     if abs(apart) <= 2 or method == "qifft_tail":
         pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"

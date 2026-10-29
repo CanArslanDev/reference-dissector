@@ -590,6 +590,13 @@ def candidates(x: np.ndarray, tpl: Template, extra=(), min_ncc: float = 0.45, he
     ks |= {int(round(i)) for i in extra if 0 <= i < len(best)}
     shifts = np.arange(-low(shift_ms), low(shift_ms) + 1, max(1, low(step_ms)))
     out, seen = [], set()
+    fitted: dict[tuple[int, float], tuple[float, int, float]] = {}
+
+    def best_fit(k: int, c: float) -> tuple[float, int, float]:
+        # neighbouring semitones share fine steps (+75 is the next one's -25): 21 % of the fits on v1-1
+        if (k, c) not in fitted:
+            fitted[k, c] = _best_fit(x, tpl.at(c), k, shifts, n, w)
+        return fitted[k, c]
     for k in sorted(ks):
         a, b = max(0, k - low(reach_ms)), min(len(best), k + low(reach_ms) + 1)
         near = scores[:, a:b].max(axis=1)
@@ -597,7 +604,7 @@ def candidates(x: np.ndarray, tpl: Template, extra=(), min_ncc: float = 0.45, he
             if (k // low(5), j) in seen:
                 continue
             seen.add((k // low(5), j))
-            fits = [(*_best_fit(x, tpl.at(cs[j] + d), k, shifts, n, w), cs[j] + d) for d in (0, *fine)]
+            fits = [(*best_fit(k, cs[j] + d), cs[j] + d) for d in (0, *fine)]
             gain, kk, g, c = max(fits)
             if gain > 0:
                 head = x[kk:kk + n]
