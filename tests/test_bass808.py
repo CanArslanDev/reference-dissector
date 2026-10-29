@@ -238,9 +238,9 @@ def test_a_note_never_holds_across_a_silence():
     (no kick) on a note whose onset sits 27 ms before its envelope rises
     and whose template fit is 0.89; a note found in the rest, 60 dB under
     the others. Both were the note before going on, which then held the
-    rest (15.3 s on PIRAMIT). Now the note before ends where it falls
-    silent (0.4 s), the note after the rest is a note of its own, and the
-    note in the rest is none."""
+    rest (on PIRAMIT, through two sections). Now the note before ends
+    where it falls silent (0.4 s), the note after the rest is a note of
+    its own, and the note in the rest is none."""
     lo = tone([(0.0, 0.4, 1.0, None), (1.4, 2.4, 1.0, None), (0.9, 1.0, 1.0, lambda t: 1e-3)])
     notes = [note(0.0, 0.9, 0.97), note(0.9, 1.373, 0.4), note(1.373, 2.4, 0.89)]
     feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
