@@ -13,8 +13,8 @@ check:
   [detune_cents 0] semitones the way Simpler does with warping off
   (audio.transpose: pitch and length change together);
 - gain = track fader (build_spec's min(6, levels[...]) dB) x 10^(volume_db/20)
-  [volume_db 0: build_spec sets Simpler to 0 dB] x the velocity's level
-  ["live": velocity_db, Live 12.4.6's law, at the pad's or the 808's
+  [volume_db 0; build_spec sets a Simpler's Volume to it] x the velocity's
+  level ["live": velocity_db, Live 12.4.6's law, at the pad's or the 808's
   vol_vel, which build_spec sets as Simpler's "Vol < Vel" (VOL_VEL);
   "linear", v/127, was the assumption before the law was measured];
 - pads are One-Shot [playback_mode "one_shot"]: a note's length does not cut

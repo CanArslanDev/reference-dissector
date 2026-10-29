@@ -412,13 +412,19 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
     Live 12.4.6's law there: hits at 1, 0.5 and 0.3 of the 90th
     percentile's gain play 0, -6.02 and -10.46 dB from it (within half a
     velocity step, 0.07 dB). The faders are worked out under the same law,
-    so the render puts each track on its stem's RMS less the headroom."""
-    from refdissect.audio import rms_db
+    so the render puts each track on its stem's RMS less the headroom (a
+    drum stem of the pad's own hits at those gains)."""
+    from refdissect.audio import rms_db, transpose
     from refdissect.live import build_spec
     from refdissect.render import render_plan
     analysis, matches, synth = _fixture(tmp_path)
     gains = [1.0, 0.5, 0.3, 1.0, 1.0, 0.5, 0.3, 1.0]
     analysis["events"] = {"sound_1": [{"t": 0.5 * k, "gain": g} for k, g in enumerate(gains)], "sound_2": []}
+    played = transpose(sf.read(tmp_path / "snare.wav", dtype="float32")[0], -1)
+    stem = np.zeros(4 * SR, np.float32)
+    for k, g in enumerate(gains):
+        stem[int(0.5 * k * SR):int(0.5 * k * SR) + len(played)] += 0.2 * g * played
+    sf.write(tmp_path / "drums.wav", stem, SR, subtype="FLOAT")
     plan = make_plan(analysis, matches, synth, tmp_path)
     spec = {t["name"]: t for t in build_spec(plan)}
     assert spec["808 (synth)"]["settings"]["Vol < Vel"] == 0.35
@@ -432,6 +438,148 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
     bass = sf.read(tmp_path / "bass.wav", dtype="float32")[0]
     t808 = sf.read(tmp_path / "r" / m["tracks"]["808"], dtype="float32")[0]
     assert rms_db(t808) == pytest.approx(rms_db(bass) - plan["levels"]["headroom_db"], abs=0.1)
+
+
+def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
+         extra: dict | None = None, hat_only: bool = False):
+    """A kick (120 Hz) and a hat file at one peak level, and stems that hold
+    the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
+    stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
+    hands part of a kick to the bass stem. With `under`, the bass stem also
+    holds the plan's own 808, at that gain, under every kick; with
+    copy_gain, the last hat is 3 semitones up (a pitched copy), held at
+    that gain. extra: more sounds, {name: (role, file, events)}; hat_only:
+    the analysis found the hat alone (the stems still hold the kick)."""
+    from refdissect.audio import attack_time, transpose
+    from refdissect.render import render_808
+    t = np.arange(int(0.3 * SR)) / SR
+    kick = 0.9 * np.sin(2 * np.pi * 120 * t) * np.exp(-t / 0.08)
+    hat = 0.9 * np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.03)
+    sf.write(tmp_path / "kick.wav", kick, SR, subtype="FLOAT")
+    sf.write(tmp_path / "hat.wav", hat, SR, subtype="FLOAT")
+    drums, bass = np.zeros(4 * SR), np.zeros(4 * SR)
+    for k in range(4):
+        drums[k * SR:k * SR + len(t)] += 0.5 * (1 - kick_in_bass) * kick
+        bass[k * SR:k * SR + len(t)] += 0.5 * kick_in_bass * kick
+        x = 0.05 * hat if copy_gain is None or k < 3 else copy_gain * transpose(hat.astype(np.float32), 3)
+        drums[k * SR + SR // 2:k * SR + SR // 2 + len(x)] += x
+    a_kick, a_hat = attack_time(kick, "kick"), attack_time(hat, "hat")
+    events = {"sound_1": [{"t": float(k), "t_attack": k + a_kick, "gain": 1.0} for k in range(4)],
+              "sound_2": [{"t": k + 0.5, "t_attack": k + 0.5 + a_hat, "gain": 1.0} for k in range(4)]}
+    if copy_gain is not None:
+        events["sound_2"][3] |= {"semitones": 3, "t_attack": 3.5 + attack_time(transpose(hat, 3), "hat")}
+    file = {"sound_1": ("kick", "kick.wav"), "sound_2": ("hat", "hat.wav")}
+    for name, (role, path, hits) in (extra or {}).items():
+        events[name], file[name] = hits, (role, path)
+    if hat_only:
+        del events["sound_1"]
+    analysis = {"grid": {"bpm": 120.0}, "source": {"duration_s": 4.0}, "events": events,
+                "notes_808": [{"t": float(k), "end": k + 0.45, "pitch": 24, "peak": 1.0} for k in range(4)] if under
+                else [], "templates": {k: {"detected_hits": 20, "clean": 1.0} for k in events}}
+    matches = {k: {"role": file[k][0], "verdict": "same sample", "same_as": None,
+                   "top": [{"path": str(tmp_path / file[k][1]), "ncc": 0.97, "semitones": 0.0}]} for k in events}
+    synth = None
+    if under:
+        shot = tmp_path / "808 (synth).wav"
+        sf.write(shot, np.sin(2 * np.pi * 33.2 * np.arange(SR) / SR) * 0.9, SR)
+        synth = {"root_midi": 24, "file_name": shot.name, "file": str(shot)}
+        sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
+        t808 = make_plan(analysis, matches, synth, tmp_path, min_hits=1)["tracks"]["808"]
+        bass = bass + under * render_808(t808, sf.read(shot, dtype="float32")[0], 4 * SR, 2.0, 0, True, 1.0, "live")
+    sf.write(tmp_path / "drums.wav", drums, SR, subtype="FLOAT")
+    sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
+    return make_plan(analysis, matches, synth, tmp_path, min_hits=1)
+
+
+def _volume(spec_pad: dict) -> float:
+    return float(spec_pad["settings"]["Volume"].removesuffix(" dB"))
+
+
+def test_each_pad_plays_where_the_stems_hold_its_sound(tmp_path):
+    """Two files at one peak level, the stems holding the hat 20 dB under
+    the kick and 60 % of the kick in the bass stem: the hat's pad plays 20
+    dB under the kick's, and the build sends each pad's Volume. Every pad
+    at its file's level, the suite's open hats sat 11.6 dB over a perfect
+    kit (htdemucs); read on the drum stem alone, this kick would have been
+    8 dB short (the hat 12 dB under it)."""
+    from refdissect.live import build_spec
+    plan = _kit(tmp_path)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.2)
+    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert rack["36"]["settings"]["Volume"] == "0.0 dB"
+    assert _volume(rack["42"]) == pads["42"]["volume_db"] and max(_volume(p) for p in rack.values()) <= 0.0
+
+
+def test_a_perfect_kit_plays_at_the_stems_level(tmp_path):
+    """Stems made of the pads' own files at their own balance: the render
+    holds each pad's hits and the whole drum track the headroom under the
+    drum stem, the perfect kit evaluate.level_scores scores against."""
+    from refdissect.audio import band, rms_db
+    from refdissect.render import render_plan
+    plan = _kit(tmp_path, kick_in_bass=0.0)
+    m = render_plan(plan, tmp_path / "r", n_samples=4 * SR)
+    drums = sf.read(tmp_path / "r" / m["drums"], dtype="float32")[0]
+    stem = sf.read(tmp_path / "drums.wav", dtype="float32")[0]
+    head = plan["levels"]["headroom_db"]
+    assert rms_db(drums) == pytest.approx(rms_db(stem) - head, abs=0.1)
+    hats = [slice(k * SR + SR // 2, k * SR + SR // 2 + SR // 20) for k in range(4)]
+    ours, theirs = (sum(float(np.sum(np.square(band(x, "hat")[h], dtype=np.float64))) for h in hats)
+                    for x in (drums, stem))
+    assert 10 * np.log10(ours / theirs) == pytest.approx(-head, abs=0.2)
+
+
+def test_the_drum_fader_stops_where_the_loudest_pad_meets_its_stem(tmp_path):
+    """A stem that holds a sound no pad plays (here the kick: the analysis
+    found the hat alone) has more RMS than the plan can match: matched by
+    RMS, the hat played 17 dB over the stem, 21 dB over the headroom under
+    it. The fader stops where the loudest pad plays as loud as the stem
+    holds its sound, the headroom under it (tempo160-1, with no kick pad:
+    13.4 -> 5.1 dB from a perfect kit)."""
+    from refdissect.audio import band
+    from refdissect.render import render_plan
+    plan = _kit(tmp_path, kick_in_bass=0.0, hat_only=True)
+    assert list(plan["tracks"]["drums"]["pads"]) == ["42"]
+    m = render_plan(plan, tmp_path / "r", n_samples=4 * SR)
+    drums = sf.read(tmp_path / "r" / m["drums"], dtype="float32")[0]
+    stem = sf.read(tmp_path / "drums.wav", dtype="float32")[0]
+    hats = [slice(k * SR + SR // 2, k * SR + SR // 2 + SR // 20) for k in range(4)]
+    ours, theirs = (sum(float(np.sum(np.square(band(x, "hat")[h], dtype=np.float64))) for h in hats)
+                    for x in (drums, stem))
+    assert 10 * np.log10(ours / theirs) == pytest.approx(-plan["levels"]["headroom_db"], abs=0.2)
+
+
+def test_the_808_under_a_kick_is_not_the_kicks(tmp_path):
+    """The bass stem holds the plan's own 808 under every kick (here 1.6 dB
+    under the kick over the kick's first 50 ms; the suite's 808s sit 1.3
+    dB over its kicks there, median): read on drums + bass, the kick takes
+    its own energy, not the 808's too, which put it 2.3 dB high here (and
+    the hat that much lower)."""
+    from refdissect.live import pad_levels
+    from refdissect.render import render_808
+    plan = _kit(tmp_path, kick_in_bass=0.0, under=0.15)
+    assert plan["tracks"]["drums"]["pads"]["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
+    drums, bass = (sf.read(tmp_path / f"{s}.wav", dtype="float32")[0] for s in ("drums", "bass"))
+    held = 0.15 * render_808(plan["tracks"]["808"], sf.read(tmp_path / "808 (synth).wav", dtype="float32")[0],
+                             4 * SR, 2.0, 0, True, 1.0, "live")
+    alone, under = pad_levels(plan, drums, drums + bass), pad_levels(plan, drums, drums + bass, held)
+    assert alone["36"] - under["36"] > 1.5 and under["36"] - under["42"] == pytest.approx(20.0, abs=0.3)
+
+
+def test_a_sounds_pitched_copy_shares_its_level_and_a_silent_file_has_none(tmp_path):
+    """A copy's few hits sit where the stem may hold anything (here its one
+    hit, 3 semitones up, 12 dB over the hat's others); it takes its sound's
+    level, read over all of the sound's hits (rolls-1, htdemucs_ft: a copy
+    read alone sat 22.9 dB over a perfect kit). A file that peaks under
+    -60 dBFS gets no level and keeps 0 dB."""
+    sf.write(tmp_path / "fx.wav", np.full(SR // 4, 1e-22), SR, subtype="FLOAT")
+    extra = {"sound_3": ("perc", "fx.wav", [{"t": k + 0.75, "t_attack": k + 0.75, "gain": 1.0} for k in range(4)])}
+    plan = _kit(tmp_path, copy_gain=0.2, extra=extra)
+    pads = plan["tracks"]["drums"]["pads"]
+    copy = next(k for k, p in pads.items() if p.get("semitones") == 3)
+    assert pads[copy]["volume_db"] == pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.2)
+    silent = next(k for k, p in pads.items() if p["path"].endswith("fx.wav"))
+    assert pads[silent]["volume_db"] == 0.0 and pads["36"]["volume_db"] == 0.0
 
 
 def test_a_match_between_semitones_is_played_with_detune(tmp_path):
