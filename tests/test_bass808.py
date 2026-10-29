@@ -489,6 +489,28 @@ def test_plan_808_detunes_the_one_shot_to_the_pitch_heard(tmp_path):
     assert (track["transpose"], track["detune_cents"]) == (36, 15) and track["heard_cents"] == pytest.approx(15, abs=1)
 
 
+def test_heard_808_reads_each_note_from_where_the_plan_starts_it():
+    """estimate_from_plan reads a note's drop from where the plan starts the
+    note: bass_low-1's one-shot, started 7 ms after the onset, read its
+    notes under 120 ms 38 cents over the analysis'. heard_808 reads each
+    note from the start it is given (the note's onset by default), so its
+    Detune follows what the plan plays."""
+    from refdissect.live import heard_808
+    from refdissect.scenarios import drop, sounding, tuning
+    shot = voice(Params(32.70, 65.4, 30, 1.5, 3, 2.0, 0.05, 0.3), 2.0)
+    f0, curve = tuning(shot)
+    own = 69 + 12 * np.log2(f0 / 440)
+
+    def heard(start, end):
+        return sounding(lambda q: drop(curve, q) / 100, end - start)
+    notes = [{"t": 1.0 * i, "t_attack": 1.0 * i + 0.007, "end": 1.0 * i + d, "pitch": 24, "midi_settled": own,
+              "midi_float": own + heard(1.0 * i, 1.0 * i + d)} for i, d in enumerate((0.1, 0.11, 0.115, 0.3, 0.5))]
+    late = [n["t"] + 0.007 for n in notes]
+    expected = float(np.median([100 * (heard(n["t"], n["end"]) - heard(s, n["end"])) for n, s in zip(notes, late)]))
+    assert heard_808(notes, shot, -24.0) == pytest.approx(0.0, abs=0.5)
+    assert abs(expected) > 10 and heard_808(notes, shot, -24.0, late) == pytest.approx(expected, abs=0.5)
+
+
 def test_a_legato_note_slides_in_the_plan_and_in_its_render(tmp_path):
     """A legato note is planned where its glide starts, with the note before
     held over it, one voice and Glide; what Live would play (render_plan,

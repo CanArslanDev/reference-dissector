@@ -595,7 +595,11 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     150-200 ms, so heard_808's Detune correction followed the length of the
     notes at its common pitch (47.1, 123.4 and 82.6 cents for notes under
     120 ms, 120-250 and 250-600), and the long notes played 42-52 cents
-    flat."""
+    flat. The one-shot is laid out as the template is: it attacks where the
+    template does after its onset (bass808.json attack_ms), so plan_808,
+    which puts each note's attack on the analysis' t_attack, starts the
+    note at its onset and the copied periods play where the template's
+    do."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])
@@ -619,7 +623,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     else:
         pitch, source = f1, method or "tuning"
     tpl = (_load(work / "bass808.json") if (work / "bass808.json").is_file() else {}).get("template") or {}
-    tracked = tracked_shot(params, pitch, tpl["curve"], tpl["hz"]) if tpl.get("curve") else None
+    onset_attack = tpl["attack_ms"] / 1000 - PRE / SR if tpl.get("attack_ms") is not None else None
+    tracked = tracked_shot(params, pitch, tpl["curve"], tpl["hz"], attack_s=onset_attack) if tpl.get("curve") else None
     shot = tracked[0] if tracked else one_shot(params, pitch)
     name = "808 (synth).wav"
     write(work / name, shot, peak=None)
@@ -645,7 +650,9 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
         tr = tracked[1]
         log(f"808: its pitch on the template's periods, {tr['followed']} of {tr['periods']} (to "
             f"{1000 * tr['until_s']:.0f} ms{', settled there' if tr['settled'] else ''}), the attack scaled "
-            f"x{tr['attack_scale']}{'' if tr['read_as_template'] else ', its first crossing read apart'}")
+            f"x{tr['attack_scale']}{'' if tr['read_as_template'] else ', its first crossing read apart'}"
+            + ("" if onset_attack is None else f", its attack {tr['attack_ms']:.1f} ms in (the template's "
+                                               f"{1000 * onset_attack:.1f})"))
     log(json.dumps(result["compare"]))
     _save(work / "synth808.json", result)
     return result

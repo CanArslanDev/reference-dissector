@@ -154,25 +154,32 @@ def sample_808(song: str, synth: dict) -> str:
         return f"{song} {name.name}"
 
 
-def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | None:
+def heard_808(notes: list[dict], shot: np.ndarray, shift0: float, starts: list[float] | None = None) -> float | None:
     """How many cents the one-shot, tuned to settle where the 808 settled,
     sounds below the 808 as analysed: per note (legato notes aside), the
     drop the analysis heard (midi_float over midi_settled) less the
     one-shot's own drop heard at the note's pitch (shift0 + pitch semitones
     over its own) and length, both by the truth's rule (scenarios.sounding);
     the median over the notes at the line's most common written pitch, None
-    without notes. A one-shot that falls as one exponential (synth808's
-    fitted voice) had settled where the songs' 808s still hold 100 cents
-    or so over their settled pitch, so tuned to settle where the 808
-    settled the plan's 808 sounded flat; how much depended on the rate and
-    length of each note, and Detune is one per Simpler: it is fitted where
-    most notes are. bass_low-1's notes under 120 ms, 120-250 and 250-600
-    took 47.1, 123.4 and 82.6 cents, and the long ones played 42-52 flat.
-    fit_808's one-shot now follows the template's own periods
-    (synth808.tracked_shot): those corrections are 0.1, -0.1 and -0.1, and
-    the line's lies within 8 cents of 0 on 95 of the suite's 96 beat runs
-    (37 and 43 before; |median| 4.4 and 3.2 -> 1.05 and 0.6 cents), the
-    96th a template whose settled pitch was read on its tail.
+    without notes. Each note is read from where the plan starts it (starts,
+    plan_808's; by default the note's onset) to its end, as
+    estimate_from_plan plays it. A one-shot that falls as one exponential
+    (synth808's fitted voice) had settled where the songs' 808s still hold
+    100 cents or so over their settled pitch, so tuned to settle where the
+    808 settled the plan's 808 sounded flat; how much depended on the rate
+    and length of each note, and Detune is one per Simpler: it is fitted
+    where most notes are. bass_low-1's notes under 120 ms, 120-250 and
+    250-600 took 47.1, 123.4 and 82.6 cents, and the long ones played 42-52
+    flat. fit_808's one-shot now follows the template's own periods, laid
+    out as the template is (synth808.tracked_shot): those corrections are
+    -0.1, -0.2 and -0.1 (htdemucs_ft: 3.8, -0.1, -0.2), the plan's notes
+    sound 0.6, 0.7 and 0.8 cents from the analysis' by length (4.5, 1.3,
+    1.1), and the line's correction lies within 8 cents of 0 on 95 of the
+    suite's 96 beat runs (37 and 43 before; |median| 4.4 and 3.2 -> 1.15
+    and 0.6 cents), the 96th a template whose settled pitch was read on its
+    tail. Read from the onset while the one-shot started 7 ms later, they
+    had been 0.1, -0.1, -0.1 where the plan sounded 37.7, 2.0 and 2.0 over
+    the analysis.
 
     Re-scored on the 808-after4 plans (plan level, mean over the 10 lane
     scenarios; htdemucs, then htdemucs_ft): the guard this replaces (a
@@ -184,14 +191,15 @@ def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | Non
     this rule 0.886 and 0.834, 8.4 and 31.4 cents (producer-2: 0.576)."""
     from .scenarios import drop, sounding, tuning
     curve = tuning(shot)[1]
-    use = [n for n in notes if n.get("midi_settled") is not None and (n.get("glide") or {}).get("kind") != "legato"]
+    use = [(n, s) for n, s in zip(notes, starts if starts is not None else [n["t"] for n in notes])
+           if n.get("midi_settled") is not None and (n.get("glide") or {}).get("kind") != "legato"]
     if not use:
         return None
-    pitches = [n["pitch"] for n in use]
+    pitches = [n["pitch"] for n, _ in use]
     common = max(set(pitches), key=lambda p: (pitches.count(p), -p))
     d = [100 * (n["midi_float"] - n["midi_settled"] - sounding(
-            lambda t, r=2 ** ((n["pitch"] + shift0) / 12): drop(curve, t * r) / 100, n["end"] - n["t"]))
-         for n in use if n["pitch"] == common]
+            lambda t, r=2 ** ((n["pitch"] + shift0) / 12): drop(curve, t * r) / 100, n["end"] - s))
+         for n, s in use if n["pitch"] == common]
     return float(np.median(d))
 
 
@@ -203,9 +211,11 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     settled pitch against the 808's tuning, analysis tuning "808"), and each
     note moved so that the one-shot's attack, as Simpler plays it at the
     note's pitch, lands on the note's t_attack (it lands t_attack - t after
-    t otherwise: 0.3-13 ms, the drop's own attack against the template's).
-    Detune also takes heard_808's correction where the notes agree on it
-    (heard_cents; the long notes' tails then settle that much sharp).
+    t otherwise: 0.3-13 ms, the drop's own attack against the template's;
+    a one-shot laid out as its template, fit_808's, starts there at t).
+    Detune also takes heard_808's correction, the notes read from those
+    starts (heard_cents; the long notes' tails then settle that much
+    sharp).
     cents is the one-shot's own pitch over root_midi (metadata).
 
     A legato note (notes_808 glide kind "legato": no attack of its own)
@@ -226,6 +236,16 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     med = float(np.median(peaks)) or 1.0
     track: dict = {}
     shot, shift0 = None, 0.0
+    leads: dict[float, float] = {}
+
+    def lead(pitch: int) -> float:
+        shift = round(pitch + shift0, 2)
+        if shot is None:
+            return 0.0
+        if shift not in leads:
+            leads[shift] = attack_time(transpose(shot, shift), "808")
+        return leads[shift]
+
     if synth:
         root = synth["root_midi"]
         own = 69 + 12 * math.log2(synth["pitch_hz"] / 440) if synth.get("pitch_hz") else float(root)
@@ -237,7 +257,10 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
             shot = read(synth["file"])
         except (OSError, RuntimeError):
             shot = None
-        heard = None if shot is None else heard_808(notes, shot, semis + detune / 100 - 60)
+        shift0 = semis + detune / 100 - 60
+        # each note heard from where it starts below: its attack on t_attack
+        starts = [n["t_attack"] - lead(n["pitch"]) if "t_attack" in n else n["t"] for n in notes]
+        heard = None if shot is None else heard_808(notes, shot, shift0, starts)
         if heard is not None:  # sound as the notes were heard, not only settle where they settled
             semis, detune = tune_808(own, tuning + heard)
         # named after the song and the one-shot's content: the User Library keeps one file per name
@@ -246,15 +269,6 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
                      detune_cents=detune, vol_vel=VOL_VEL, root_midi=root, cents=round(100 * (own - root), 1),
                      tuning_cents=round(tuning, 1), heard_cents=None if heard is None else round(heard, 1))
         shift0 = semis + detune / 100 - 60
-    leads: dict[float, float] = {}
-
-    def lead(pitch: int) -> float:
-        shift = round(pitch + shift0, 2)
-        if shot is None:
-            return 0.0
-        if shift not in leads:
-            leads[shift] = attack_time(transpose(shot, shift), "808")
-        return leads[shift]
 
     out, slid, slides = [], [], []
     gliding = sum((n.get("glide") or {}).get("kind") == "legato" for n in notes[1:]) >= GLIDE_LEAST

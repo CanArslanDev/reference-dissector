@@ -254,6 +254,54 @@ def test_the_one_shot_only_falls_where_its_template_rises():
     assert np.max(np.abs(near)) < 1e-4
 
 
+def _late(x: np.ndarray, ms: float) -> np.ndarray:
+    """x at 15 % of its level until ms, then up to it over 2 ms: a template
+    that attacks ms after its onset (bass_low-1's: 7 ms)."""
+    t = np.arange(len(x)) / SR
+    w = np.clip((t - ms / 1000) / 0.002 + 1, 0.0, 1.0)
+    return (x * (0.15 + 0.85 * w * w * (3 - 2 * w))).astype(np.float32)
+
+
+def test_the_one_shot_attacks_where_its_template_does_after_its_onset(tmp_path):
+    """bass_low-1's template attacks 7 ms after its onset, its fitted voice
+    (a 0.3 ms attack) at once: plan_808, which puts each note's attack on
+    the analysis' t_attack, started the one-shot 7 ms late, its drop with
+    it, and the notes under 120 ms sounded 38 cents over the analysis'.
+    Laid out as the template is (a fast voice quiet until the template's
+    attack, a slow one with its head left out), the one-shot attacks where
+    the template does: plan_808 starts each note at its onset, and each
+    length sounds as the analysis heard it."""
+    import soundfile as sf
+
+    from refdissect.audio import attack_time
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.live import plan_808
+    from refdissect.scenarios import drop, sounding, tuning
+    from refdissect.synth808 import tracked_shot
+    x = _late(_held()[0], 8.0)
+    f0, curve = tuning(x)
+    kept = [[s, round(c, 1)] for s, c in curve[::2]]
+    onset_attack = attack_time(x, "808")
+    own = 69 + 12 * np.log2(f0 / 440)
+    lengths = (0.07, 0.11, 0.2, 0.4)
+    notes = [{"t": 0.25 + 0.5 * i, "t_attack": 0.25 + 0.5 * i + onset_attack, "end": 0.25 + 0.5 * i + d,
+              "pitch": 24, "peak": 1.0, "midi_settled": own,
+              "midi_float": own + sounding(lambda q: drop(curve, q) / 100, d)} for i, d in enumerate(lengths)]
+    for k, attack_ms in enumerate((0.3, 90.0)):
+        y, info = tracked_shot(Params(32.70, 32.70 * 2 ** (6 / 12), 20, 1.5, attack_ms, 4.0, 0.05, 1.9), f0, kept, f0,
+                               attack_s=onset_attack)
+        assert abs(attack_time(y, "808") - onset_attack) < 0.0005
+        shot = tmp_path / f"808 {k}.wav"
+        sf.write(shot, y, SR, subtype="FLOAT")
+        synth = {"root_midi": 24, "pitch_hz": f0, "file": str(shot), "file_name": shot.name}
+        track = plan_808({"tuning": {"808": own - 24}, "notes_808": notes}, synth, tmp_path / "stems", 2.0)
+        assert [p["start_time"] / 2.0 for p in track["notes"]] == pytest.approx([n["t"] for n in notes], abs=0.0005)
+        plan = {"tempo": 120.0, "length_beats": 8.0, "tracks": {"drums": {"pads": {}, "notes": []}, "808": track},
+                "levels": {}}
+        heard = estimate_from_plan(plan)["bass808"]
+        assert [h["midi"] for h in heard] == pytest.approx([n["midi_float"] for n in notes], abs=0.015)
+
+
 def test_a_drop_done_by_its_second_crossing_keeps_the_fitted_one_shot():
     """An 808 whose drop is over by its second crossing (a 3.5 ms glide) has
     a flat curve: periods() put its first crossing where the curve first
