@@ -1,6 +1,6 @@
 """refdissect: take a reference track apart and rebuild it in Ableton Live.
 
-    refdissect inventory ~/Music/Ableton/"User Library" --out work/inventory.json
+    refdissect inventory "<your User Library>" --out work/inventory.json
     refdissect index-library work/inventory.json --out work/library.npz      (and library_speckle.npz)
     refdissect index-library work/inventory.json --808 --out work/library_808.npz
     refdissect index-speckle work/library.npz       (the speckle index of a library indexed before it existed)

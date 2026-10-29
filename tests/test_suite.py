@@ -312,24 +312,29 @@ def test_a_failed_beat_is_recorded_and_resume_runs_it_again(library, tmp_path, m
     assert [suite.scored(root / b, "x") for b in ("v1-1", "v1-2", "v1-3")] == [True, False, False]
 
 
+# A user's home, put together here so that the repo holds no user path: the export must still catch one.
+USERS = "/".join(("", "Users", ""))
+HOME = USERS + "someone"
+
+
 def test_the_export_keeps_means_per_scenario_only(tmp_path):
     ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
     ns["suite_scores"].__globals__["ROOT"] = tmp_path
     agg = {"schema": "refdissect.suite/1", "tag": "t", "model": "htdemucs", "options": [{}], "render": [True],
            "refdissect": [{"version": "0.1.0"}], "beats": 2, "last_run": {"beats": 2},
            "separation": {"model": "htdemucs", "seed": 0, "shifts": 1, "devices": ["mps"], "versions": {},
-                          "audio": "/Users/someone/beat/mix_mp3.wav"},
+                          "audio": HOME + "/beat/mix_mp3.wav"},
            "failed": ["v1-3"], "overall": {"scenarios": 1, "analysis": {"strict_f1_20": 0.5}},
            "scenarios": {"v1": {"beats": 2, "seeds": [1, 2], "analysis": {"strict_f1_20": 0.5}, "plan": {},
-                                "seconds": {}, "records": [{"beat": "v1-1", "path": "/Users/someone/x.wav"}]}}}
+                                "seconds": {}, "records": [{"beat": "v1-1", "path": HOME + "/x.wav"}]}}}
     (tmp_path / "scores-t.json").write_text(json.dumps(agg))
     out = ns["suite_scores"](tmp_path, "t")
     text = (tmp_path / "results" / "calibration" / "suite-t.json").read_text()
-    assert out["failed"] == 1 and "/Users/" not in text and ".wav" not in text and "v1-3" not in text
+    assert out["failed"] == 1 and USERS not in text and ".wav" not in text and "v1-3" not in text
     assert json.loads(text)["scenarios"]["v1"]["analysis"] == {"strict_f1_20": 0.5}
     # an option a later step adds may hold a path or a file name: only numbers, booleans, null and short
     # identifiers go out
-    for bad in ("/Users/someone/model.npz", "/Volumes/Samples/Some Kit/", "~/Music/Reference Dissect/work",
+    for bad in (HOME + "/model.npz", "/Volumes/Samples/Some Kit/", "~/Some Folder/work",
                 "/private/tmp/x", "C:\\Users\\me", "some kit snare 1", "kick.m4a", "set.als", "rack.adg", "take.ogg"):
         agg["options"] = [{"analyze": {"templates": bad}}]
         (tmp_path / "scores-t.json").write_text(json.dumps(agg))
@@ -341,7 +346,7 @@ def test_the_export_keeps_means_per_scenario_only(tmp_path):
     (tmp_path / "scores-t.json").write_text(json.dumps(agg))
     out = ns["suite_scores"](tmp_path, "t")
     assert (out["options"], out["steps"], out["reuse"]) == (agg["options"], agg["steps"], agg["reuse"])
-    for bad in ("/Volumes/Samples/kick", "~/Music/x", "/Applications/Some App.app/x", "a.m4a"):
+    for bad in ("/Volumes/Samples/kick", "~/Some Folder/x", "/Applications/Some App.app/x", "a.m4a"):
         assert ns["LOCAL"].search(json.dumps({"x": bad})), bad
 
 
@@ -378,7 +383,7 @@ def test_public_names_are_keyed(tmp_path):
     ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
     key = ns["export_key"](tmp_path)
     assert len(key) == 32 and (tmp_path / "work" / "export-key").is_file() and ns["export_key"](tmp_path) == key
-    path = "/Users/someone/Music/Ableton/User Library/Some Kit/snare 1.wav"
+    path = HOME + "/Ableton/User Library/Some Kit/snare 1.wav"
     name = ns["public_name"](path, "snare", key)
     assert re.fullmatch(r"user library snare #[0-9a-f]{8}", name)
     assert name == ns["public_name"](path, "snare", key) != ns["public_name"](path, "snare", b"another key")
@@ -388,8 +393,8 @@ def test_public_names_are_keyed(tmp_path):
     core = "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library/Samples/kick.wav"
     assert ns["public_name"](core, "kick", key) == "Core Library: kick.wav"
     index = tmp_path / "library_808.npz"
-    np.savez(index, paths=np.array(["/Users/someone/Samples/808s/808 low.wav", "/Users/someone/Samples/808 b.wav"]))
-    assert ns["library_path"](index, "808 low.wav") == "/Users/someone/Samples/808s/808 low.wav"
+    np.savez(index, paths=np.array([HOME + "/Samples/808s/808 low.wav", HOME + "/Samples/808 b.wav"]))
+    assert ns["library_path"](index, "808 low.wav") == HOME + "/Samples/808s/808 low.wav"
     assert ns["library_path"](index, "808 c.wav") == "808 c.wav"  # not in the index: the name itself
     assert ns["library_path"](tmp_path / "none.npz", "808 low.wav") == "808 low.wav"
 
