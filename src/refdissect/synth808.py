@@ -10,6 +10,13 @@ way the comparison does: waveform match in the 808 band, plus harmonics
 (the grit) and the loudness envelope. Scored on the waveform alone, the fit
 gets the highest correlation and loses the distortion entirely (harmonics
 25 dB off on PIRAMIT): you get what you measure.
+
+One exponential falls too fast: the suite's 808s hold 100 cents or so over
+their settled pitch until 150-200 ms, where the fitted drop (bass_low-1:
+25.9 semitones, 19 ms) has long settled. tracked_shot() makes the one-shot
+with the template's own periods instead: the fitted voice's envelope, drive
+and attack, its pitch crossing zero where the template's does
+(periods(), from bass808's pitch curve) until the drop has settled.
 """
 
 from __future__ import annotations
@@ -20,7 +27,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import differential_evolution
+from scipy.interpolate import PchipInterpolator
+from scipy.optimize import differential_evolution, least_squares
 
 from .audio import PRE, SR, band, samples
 from .cache import keep, kept, key
@@ -29,6 +37,11 @@ from .xcorr import ncc
 
 NAMES = ("f_end_hz", "f_start_hz", "glide_ms", "decay_s", "attack_ms", "drive", "asym", "phase")
 BOUNDS = [(25, 60), (25, 120), (2, 200), (0.1, 6), (0.3, 200), (0.1, 8), (-0.6, 0.6), (0, 2 * np.pi)]
+# tracked_shot(): the template's periods are followed until its drop has settled, SETTLED_CENTS or less from
+# its settled pitch for SETTLED_S (the suite's 808s stay within 5 cents of it from 0.14-0.98 s on:
+# scenarios.pitch_curve), then the pitch eases there over EASE_S; the crossings the reader takes off the voice
+# are moved onto the template's in up to ROUNDS rounds, and within STEADY_S of them a round is final
+SETTLED_CENTS, SETTLED_S, EASE_S, ROUNDS, STEADY_S = 5.0, 0.1, 0.05, 3, 5e-5
 
 
 @dataclass
@@ -63,17 +76,24 @@ def _times(n: int) -> np.ndarray:
     return t
 
 
-def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarray:
-    """The voice, peak-normalized; pitch_hz moves the whole pitch curve (the
-    drop keeps its size in semitones)."""
-    n = int(seconds * SR)
-    ratio = (pitch_hz / p.f_end_hz) if pitch_hz else 1.0
-    t = _times(n)
-    f = (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * ratio
-    phi = p.phase + 2 * np.pi * np.cumsum(f) / SR
+def _drop_hz(p: Params, t: np.ndarray, ratio: float = 1.0) -> np.ndarray:
+    """The fitted pitch (Hz) at times t, moved by ratio."""
+    return (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * ratio
+
+
+def _sound(p: Params, t: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    """The voice at phase phi (radians) at times t: its envelope and drive, peak-normalized."""
     amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)
     y = np.tanh(p.drive * (amp * np.sin(phi) + p.asym)) - np.tanh(p.drive * p.asym)
     return (y / (np.max(np.abs(y)) or 1.0)).astype(np.float32)
+
+
+def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarray:
+    """The voice, peak-normalized; pitch_hz moves the whole pitch curve (the
+    drop keeps its size in semitones)."""
+    t = _times(int(seconds * SR))
+    f = _drop_hz(p, t, (pitch_hz / p.f_end_hz) if pitch_hz else 1.0)
+    return _sound(p, t, p.phase + 2 * np.pi * np.cumsum(f) / SR)
 
 
 def laid_out(p: Params, length: int) -> np.ndarray:
@@ -155,9 +175,197 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
     return p, info
 
 
-def one_shot(p: Params, pitch_hz: float, seconds: float = 3.0, fade_ms: float = 10) -> np.ndarray:
-    """A sample for Simpler: the voice at pitch_hz, -1 dBFS, faded out at the end."""
-    y = voice(p, seconds, pitch_hz)
+def _finished(y: np.ndarray, fade_ms: float) -> np.ndarray:
+    """A voice as a sample for Simpler: -1 dBFS, faded out at the end."""
     fade = samples(fade_ms)
     y[-fade:] *= np.linspace(1, 0, fade)
     return (y * 10 ** (-1 / 20) / (np.max(np.abs(y)) or 1.0)).astype(np.float32)
+
+
+def one_shot(p: Params, pitch_hz: float, seconds: float = 3.0, fade_ms: float = 10) -> np.ndarray:
+    """A sample for Simpler: the voice at pitch_hz, -1 dBFS, faded out at the end."""
+    return _finished(voice(p, seconds, pitch_hz), fade_ms)
+
+
+# ── The template's own periods ──
+
+def _slope_cents(z: np.ndarray, t: np.ndarray, hz: float) -> np.ndarray:
+    """What scenarios.pitch_track reads at times t off crossings z (the
+    slope of a PCHIP through them, one period each, held outside them),
+    in cents re hz."""
+    slope = PchipInterpolator(z, np.arange(len(z), dtype=float)).derivative()
+    return 1200 * np.log2(np.maximum(slope(np.clip(t, z[0], z[-1])), 1e-9) / hz)
+
+
+def _guess(t: np.ndarray, c: np.ndarray, hz: float, extra: int) -> np.ndarray:
+    """Crossings from the curve integrated between its plateaus (the first
+    ends at the first crossing, the last starts at the last), as many
+    periods as that holds, `extra` more or fewer, evenly in cycles."""
+    moved = np.flatnonzero(np.abs(c - c[0]) > 0.05)
+    first = (t[moved[0] - 1] + t[moved[0]]) / 2 if len(moved) else t[0]
+    moved = np.flatnonzero(np.abs(c - c[-1]) > 0.05)
+    last = (t[moved[-1]] + t[moved[-1] + 1]) / 2 if len(moved) else t[-1]
+    fine = np.arange(first, last + 1e-4, 1e-4)
+    cycles = np.r_[0.0, np.cumsum(hz * 2 ** (np.interp(fine[:-1], t, c) / 1200)) * 1e-4]
+    n = max(2, int(round(cycles[-1])) + extra)
+    return np.interp(np.arange(n + 1) * cycles[-1] / n, cycles, fine)
+
+
+def periods(curve, hz: float) -> tuple[np.ndarray, float] | None:
+    """The upward zero crossings (s) a pitch curve was read off, found back
+    from the curve ([s, cents re hz], as bass808.json keeps the template's:
+    every 10 ms of scenarios.pitch_curve), and how far (rms cents) their
+    reading lies from it: the curve integrated between its plateaus
+    (_guess: as many periods as it holds, one more or one fewer), then
+    moved by least squares until _slope_cents reads the curve. On the
+    suite's 96 template curves (both models) the crossings found read them
+    within 0.03 cents (rms); off the 10 ms points of a tone whose crossings
+    are known they land within 0.04 ms of them. None without three."""
+    c = np.asarray(curve, dtype=float)
+    if c.ndim != 2 or len(c) < 4:
+        return None
+    t, v = c[:, 0], c[:, 1]
+
+    def crossings(x):  # the first crossing, then the periods' logs (each 4-200 ms long)
+        return x[0] + np.r_[0.0, np.cumsum(np.exp(x[1:]))]
+    best = None
+    for extra in (0, -1, 1):
+        z = _guess(t, v, hz, extra)
+        if len(z) < 3:
+            continue
+        lo = np.r_[z[0] - 0.01, np.full(len(z) - 1, np.log(0.004))]
+        hi = np.r_[z[0] + 0.01, np.full(len(z) - 1, np.log(0.2))]
+        x0 = np.clip(np.r_[z[0], np.log(np.diff(z))], lo + 1e-9, hi - 1e-9)
+        fit_ = least_squares(lambda x: _slope_cents(crossings(x), t, hz) - v, x0, bounds=(lo, hi), xtol=1e-12,
+                             ftol=1e-12, x_scale="jac")
+        rms = float(np.sqrt(np.mean(fit_.fun ** 2)))
+        if best is None or rms < best[1]:
+            best = (crossings(fit_.x), rms)
+    return best
+
+
+def _settled_at(z: np.ndarray, curve) -> int:
+    """The last of the crossings z the one-shot follows: the first one past
+    the point of the curve from which it stays within SETTLED_CENTS of the
+    settled pitch for SETTLED_S; on a curve that never does, the last one
+    before it first reads more than SETTLED_CENTS under that pitch after
+    coming that close; else the last one. An 808's own drop ends at its
+    settled pitch: past that, a template holds its ripple and, near its
+    end, the next note coming in (one reads -109 cents over its last 50 ms,
+    one -78 from 230 ms on, one drops an octave at 1.1 s)."""
+    c = np.asarray(curve, dtype=float)
+    t, v = c[:, 0], c[:, 1]
+    near = np.abs(v) <= SETTLED_CENTS
+    reached = np.flatnonzero(near & (t > z[0]))
+    for i in reached:
+        if t[-1] >= t[i] + SETTLED_S and near[(t >= t[i]) & (t <= t[i] + SETTLED_S)].all():
+            return int(min(len(z) - 1, max(2, np.searchsorted(z, t[i], side="right"))))
+    under = np.flatnonzero((t > t[reached[0]]) & (v < -SETTLED_CENTS)) if len(reached) else []
+    if len(under):
+        return int(min(len(z) - 1, max(2, np.searchsorted(z, t[under[0]], side="left") - 1)))
+    return len(z) - 1
+
+
+def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int | None,
+            blend: float = 0.5) -> tuple[np.ndarray, int, float]:
+    """(cycles at times t, m, scale): the fitted drop at pitch_hz up to
+    z[0], blended into the first period's slope over its last `blend`
+    period and scaled so that it starts at the fit's phase and m cycles
+    end there (by default the whole number nearest the drop's own), then a
+    PCHIP through z[:last + 1] (a cycle each), then the slope there eased
+    to pitch_hz over EASE_S."""
+    pchip = PchipInterpolator(z, np.arange(len(z), dtype=float))
+    slope = pchip.derivative()
+    d0, i0 = float(slope(z[0])), int(np.ceil(z[0] * SR))
+    w = np.clip((t[:i0] - z[0]) * d0 / blend + 1, 0.0, 1.0)
+    w = w * w * (3 - 2 * w)
+    f = (1 - w) * _drop_hz(p, t[:i0], pitch_hz / p.f_end_hz) + w * d0
+    so_far = np.r_[0.0, np.cumsum(f[:-1])] / SR
+    reach = so_far[-1] + f[-1] * (z[0] - t[i0 - 1])  # cycles from 0 to z[0]
+    a = p.phase / (2 * np.pi)
+    m = int(round(a + reach)) if m is None else m
+    scale = (m - a) / reach
+    u = np.empty(len(t))
+    u[:i0] = a + so_far * scale
+    inside = (t >= z[0]) & (t <= z[last])
+    u[inside] = m + pchip(t[inside])
+    after = t > z[last]
+    if after.any():
+        ta = t[after]
+        g = pitch_hz * 2 ** (np.log2(float(slope(z[last])) / pitch_hz) * np.exp(-(ta - z[last]) / EASE_S))
+        u[after] = m + last + g[0] * (ta[0] - z[last]) + np.r_[0.0, np.cumsum(g[:-1])] / SR
+    return u, m, scale
+
+
+def _along(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int) -> dict:
+    """The voice whose crossings, as scenarios.tuning reads them, land on
+    z[:last + 1]: in each round the crossings it is made through move by
+    how far the reader's nearest ones land off them (the low-pass, and the
+    DC the drive's asymmetry adds, move them 0.2-0.7 ms), the closest kept.
+    j: how many crossings the reader takes before z[0] (on the template,
+    one: the attack's, which it leaves out)."""
+    from .scenarios import crossings, native_f0
+    made, best = z.copy(), None
+    for _ in range(ROUNDS + 1):
+        u, m, scale = _cycles(p, t, pitch_hz, made, last, m)
+        y = _sound(p, t, 2 * np.pi * u)
+        read = crossings(y, native_f0(y) or pitch_hz)
+        if len(read) < 2:
+            break
+        i = np.clip(np.searchsorted(read, z[:last + 1]), 1, len(read) - 1)
+        i -= np.abs(read[i - 1] - z[:last + 1]) < np.abs(read[i] - z[:last + 1])
+        off = read[i] - z[:last + 1]
+        worst = float(np.max(np.abs(off)))
+        if best is None or worst < best["worst_s"]:
+            best = {"y": y, "j": int(i[0]), "worst_s": worst, "scale": scale}
+        made[:last + 1] -= off
+        if worst <= STEADY_S or np.any(np.diff(made) < 0.002):
+            break
+    return best
+
+
+def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: float = 3.0,
+                 fade_ms: float = 10) -> tuple[np.ndarray, dict] | None:
+    """A sample for Simpler (one_shot's level and fade) whose pitch follows
+    the template's own periods, and what synth808.json records of it: the
+    fitted voice's envelope, drive and attack, crossing zero where the
+    template does (periods() of its pitch curve, cents re curve_hz) from
+    its second crossing until its drop has settled (_settled_at), then
+    eased to pitch_hz. Before that, the fitted drop, started at the fit's
+    phase and scaled to end a whole cycle there: of the two counts nearest
+    its own, one whose crossings the rounds put in place (_along), the one
+    scaled least (0.58-2.1 on the suite's beats, median 1.04). None where
+    the curve holds under three crossings (one_shot's voice then).
+
+    scenarios.tuning reads the result as the analysis reads the template:
+    on the suite's 96 beat runs, from 50 ms to the end of the periods
+    followed (450 ms at most), within 0.35 cents (median per one-shot; 5.2
+    at most) where it takes one crossing before the first period, as on the
+    template (39 one-shots on htdemucs, 29 on htdemucs_ft). Where it takes
+    none or two (the attack's low-passed start), it reads up to 209 cents
+    apart before the third crossing (55-70 ms; a fast note is read later):
+    preferring one there scaled the attack by up to 2.5 for the same plan
+    scores. heard_808's Detune correction at the common pitch then no
+    longer follows the length of the notes: on bass_low-1 47.1 / 123.4 /
+    82.6 cents (notes under 120 ms, 120-250, 250-600) become 0.1 / -0.1 /
+    -0.1 (htdemucs_ft: 38.4 / 114.5 / 84.0 -> 3.9 / 0.0 / -0.2). About 0.2 s
+    a one-shot."""
+    found = periods(curve, curve_hz)
+    if found is None or found[0][0] < 0.005:
+        return None
+    z, rms = found
+    last = _settled_at(z, curve)
+    t = _times(int(seconds * SR))
+    _, m0, scale0 = _cycles(p, t, pitch_hz, z, last, None)
+    a = p.phase / (2 * np.pi)
+    natural = a + (m0 - a) / scale0
+    tries = [r for m in (int(np.floor(natural)), int(np.floor(natural)) + 1)
+             if m > a and (r := _along(p, t, pitch_hz, z, last, m))]
+    if not tries:
+        return None
+    pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
+    info = {"periods": len(z), "followed": last + 1, "until_s": round(float(z[last]), 4),
+            "settled": last + 1 < len(z), "curve_rms_cents": round(rms, 3),
+            "attack_scale": round(float(pick["scale"]), 3), "read_as_template": pick["j"] == 1,
+            "worst_ms": round(1000 * pick["worst_s"], 3)}
+    return _finished(pick["y"], fade_ms), info

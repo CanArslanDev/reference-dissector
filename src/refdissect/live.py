@@ -161,12 +161,18 @@ def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | Non
     one-shot's own drop heard at the note's pitch (shift0 + pitch semitones
     over its own) and length, both by the truth's rule (scenarios.sounding);
     the median over the notes at the line's most common written pitch, None
-    without notes. The fitted one-shot falls as one exponential, faster
-    than the songs' 808s after about 100 ms (v1-1: 42 cents over its
-    settled pitch at 150 ms, the beat's 808 117), so tuned to settle where
-    the 808 settled the plan's 808 sounded flat. How much depends on the
-    rate a note plays the one-shot at, and Detune is one per Simpler: it is
-    fitted where most notes are.
+    without notes. A one-shot that falls as one exponential (synth808's
+    fitted voice) had settled where the songs' 808s still hold 100 cents
+    or so over their settled pitch, so tuned to settle where the 808
+    settled the plan's 808 sounded flat; how much depended on the rate and
+    length of each note, and Detune is one per Simpler: it is fitted where
+    most notes are. bass_low-1's notes under 120 ms, 120-250 and 250-600
+    took 47.1, 123.4 and 82.6 cents, and the long ones played 42-52 flat.
+    fit_808's one-shot now follows the template's own periods
+    (synth808.tracked_shot): those corrections are 0.1, -0.1 and -0.1, and
+    the line's lies within 8 cents of 0 on 95 of the suite's 96 beat runs
+    (37 and 43 before; |median| 4.4 and 3.2 -> 1.1 and 0.9 cents), the
+    96th a template whose settled pitch was read on its tail.
 
     Re-scored on the 808-after4 plans (plan level, mean over the 10 lane
     scenarios; htdemucs, then htdemucs_ft): the guard this replaces (a
