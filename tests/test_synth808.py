@@ -98,3 +98,104 @@ def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
     x = np.random.default_rng(0).standard_normal(4410).astype(np.float32)
     assert np.array_equal(audio.band(x, "808"), audio.sosfiltfilt(butter(4, 1500.0, fs=SR, output="sos"), x)
                           .astype(np.float32))
+
+
+HELD = Params(f_end_hz=32.70, f_start_hz=32.70 * 2 ** (5 / 12), glide_ms=25, decay_s=1.5, attack_ms=3, drive=2.0,
+              asym=0.05, phase=0.3)
+
+
+def _held(seconds: float = 1.5, tail: float = 1.5):
+    """HELD's drop ending in a slow tail (`tail` semitones more, falling
+    with a 150 ms time constant: the suite's 808s hold about 100 cents over
+    their settled pitch until 150-200 ms), its settled pitch and pitch curve
+    (scenarios.tuning), and the curve as bass808.json keeps a template's
+    (every 10 ms, to a tenth of a cent)."""
+    from refdissect.scenarios import tuning
+    x = voice(HELD, seconds)
+    t = np.arange(len(x)) / SR
+    x = np.interp(np.cumsum(2 ** (tail * np.exp(-t / 0.15) / 12)), np.arange(len(x)), x).astype(np.float32)
+    f0, curve = tuning(x)
+    return x, f0, curve, [[s, round(c, 1)] for s, c in curve[::2]]
+
+
+def test_the_crossings_a_pitch_curve_was_read_off_are_found_back():
+    from refdissect.scenarios import crossings
+    from refdissect.synth808 import periods
+    x, f0, _, kept = _held()
+    z, rms = periods(kept, f0)
+    assert rms < 0.1
+    assert np.max(np.abs(z - crossings(x, f0)[1:len(z) + 1])) < 1e-4
+
+
+def test_a_one_shot_on_the_template_s_periods_sounds_as_it_at_any_length():
+    """bass_low-1's failure in the plan: the fitted drop (one exponential)
+    has settled where the 808 still holds its tail, so notes of 0.11, 0.2
+    and 0.4 s, read as the truth reads a note, sound 86, 65 and 35 cents
+    under the template's, and no one Detune fits them all. On the
+    template's own periods each sounds within a cent of it, read off the
+    one-shot as estimate_from_plan reads it."""
+    from refdissect.scenarios import drop, sounding, tuning
+    from refdissect.synth808 import tracked_shot
+    _, f0, curve, kept = _held()
+    y, info = tracked_shot(HELD, f0, kept, f0)
+    assert info["read_as_template"] and info["settled"] and info["followed"] < info["periods"]
+    assert abs(20 * np.log10(np.max(np.abs(y))) + 1.0) < 0.05 and abs(y[-1]) < 1e-3
+
+    def under(shot):  # cents each note length sounds under the template's (the settled pitches lined up)
+        g0, c = tuning(shot)
+        return np.array([100 * sounding(lambda q: drop(curve, q) / 100, d) - 1200 * np.log2(g0 / f0)
+                         - 100 * sounding(lambda q: drop(c, q) / 100, d) for d in (0.11, 0.2, 0.4)])
+    assert np.all(np.abs(under(y)) < 1.0)
+    plain = under(one_shot(HELD, f0))
+    assert plain.min() > 30 and plain.max() - plain.min() > 40
+
+
+def test_fit_808_writes_its_one_shot_on_the_template_s_periods(tmp_path):
+    """fit_808 reads bass808.json's template curve: its one-shot follows the
+    template's periods (synth808.json pitch_track) and reads as the curve,
+    within SETTLED_CENTS where it eases to the settled pitch."""
+    import json
+
+    import soundfile as sf
+
+    from refdissect import pipeline
+    from refdissect.scenarios import drop, tuning
+    from refdissect.synth808 import SETTLED_CENTS
+    x, f0, curve, kept = _held(0.9)
+    onsets = [0.5, 1.5, 2.5, 3.5]
+    bass = np.zeros(int(4.5 * SR), np.float32)
+    for s in onsets:
+        bass[int(s * SR):int(s * SR) + len(x)] += x
+    stems = tmp_path / "stems"
+    stems.mkdir()
+    sf.write(stems / "bass.wav", bass, SR)
+    sf.write(stems / "drums.wav", np.zeros_like(bass), SR)
+    work = tmp_path / "work"
+    (work / "templates").mkdir(parents=True)
+    (work / "analysis.json").write_text(json.dumps({"source": {"stems": str(stems)}, "tuning": {"808": 0.0},
+                                                    "notes_808": []}))
+    (work / "bass808.json").write_text(json.dumps({"template": {
+        "onsets_s": onsets, "root_midi": 24, "hz": f0, "method": "qifft_300_600ms", "length_s": 0.6, "curve": kept}}))
+    out = pipeline.fit_808(work, log=lambda *a: None, maxiter=2, popsize=4)
+    assert out["pitch_track"]["read_as_template"] and out["pitch_track"]["periods"] >= 20
+    g0, c = tuning(sf.read(out["file"], dtype="float32")[0])
+    t = np.arange(0.06, 0.45, 0.005)
+    assert np.max(np.abs(drop(c, t) + 1200 * np.log2(g0 / f0) - drop(curve, t))) < SETTLED_CENTS
+
+
+def test_the_one_shot_leaves_the_template_s_periods_once_its_drop_has_settled():
+    """A template's curve past its settled point holds its ripple and, near
+    its end, the next note coming in (-100 cents over its last 100 ms
+    here): the one-shot follows the periods to the first one past the point
+    from which the curve stays within 5 cents for 100 ms. A curve that never
+    holds that long is followed until it first reads 5 cents under its
+    settled pitch after coming that close."""
+    from refdissect.synth808 import _settled_at
+    t = np.arange(0.0, 0.8, 0.01)
+    z = 0.03 * np.arange(1, 27)
+    settles = [[s, 300 * np.exp(-s / 0.05)] for s in t]
+    dips = [[s, c if s < 0.7 else -100.0] for s, c in settles]
+    never = [[s, c if s < 0.25 else -30.0] for s, c in settles]
+    assert 0.2 < z[_settled_at(z, settles)] < 0.27 and _settled_at(z, dips) == _settled_at(z, settles)
+    assert z[_settled_at(z, never)] < 0.25 <= z[_settled_at(z, never) + 1]
+    assert _settled_at(z, [[s, 300 * np.exp(-s / 0.5)] for s in t]) == len(z) - 1
