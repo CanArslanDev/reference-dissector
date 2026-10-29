@@ -441,15 +441,16 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
-         extra: dict | None = None, hat_only: bool = False):
+         extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
     stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
     hands part of a kick to the bass stem. With `under`, the bass stem also
-    holds the plan's own 808, at that gain, under every kick; with
-    copy_gain, the last hat is 3 semitones up (a pitched copy), held at
-    that gain. extra: more sounds, {name: (role, file, events)}; hat_only:
-    the analysis found the hat alone (the stems still hold the kick)."""
+    holds the plan's own 808, at that gain, under every kick, duck_db
+    quieter over the kick's first 100 ms (a sidechain); with copy_gain, the
+    last hat is 3 semitones up (a pitched copy), held at that gain. extra:
+    more sounds, {name: (role, file, events)}; hat_only: the analysis found
+    the hat alone (the stems still hold the kick)."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
     t = np.arange(int(0.3 * SR)) / SR
@@ -485,7 +486,11 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
         synth = {"root_midi": 24, "file_name": shot.name, "file": str(shot)}
         sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
         t808 = make_plan(analysis, matches, synth, tmp_path, min_hits=1)["tracks"]["808"]
-        bass = bass + under * render_808(t808, sf.read(shot, dtype="float32")[0], 4 * SR, 2.0, 0, True, 1.0, "live")
+        duck = np.ones(4 * SR)
+        for k in range(4):
+            duck[k * SR:k * SR + SR // 10] = 10 ** (-duck_db / 20)
+        bass = bass + under * duck * render_808(t808, sf.read(shot, dtype="float32")[0], 4 * SR, 2.0, 0, True, 1.0,
+                                                "live")
     sf.write(tmp_path / "drums.wav", drums, SR, subtype="FLOAT")
     sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
     return make_plan(analysis, matches, synth, tmp_path, min_hits=1)
@@ -564,6 +569,18 @@ def test_the_808_under_a_kick_is_not_the_kicks(tmp_path):
                              4 * SR, 2.0, 0, True, 1.0, "live")
     alone, under = pad_levels(plan, drums, drums + bass), pad_levels(plan, drums, drums + bass, held)
     assert alone["36"] - under["36"] > 1.5 and under["36"] - under["42"] == pytest.approx(20.0, abs=0.3)
+
+
+def test_a_kick_under_a_ducked_808_is_read_on_the_drum_stem(tmp_path):
+    """The bass stem holds the 808 louder than the kick but 6 dB quieter
+    over each kick's first 100 ms (a sidechain), the plan's 808 track does
+    not: taken off drums + bass, it leaves nothing of the kick, which went
+    without a level, both pads at 0 dB under a fader set by the hat. The
+    drum stem alone holds the least of a kick there is: the kick is read
+    there, and the hat 20 dB under it."""
+    plan = _kit(tmp_path, kick_in_bass=0.0, under=0.6, duck_db=6.0)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
 
 
 def test_a_sounds_pitched_copy_shares_its_level_and_a_silent_file_has_none(tmp_path):
