@@ -1,6 +1,6 @@
 # 11 – A new beat in a song's style: what went wrong, and the checks that came of it
 
-The second study (HAYIR DEMELİYDİM, Motive) did not rebuild the song. It wrote a new beat "by the same producer, on the same album": the same sounds, effects and groove, but new notes. Two complete beats were built in Live, mixed and measured, and the user rejected both by ear. This page records why, what each step cost, and what changed in the code because of it. As in [09](09-data-and-copyright.md), no audio, stems or transcriptions of the song are published; the numbers below are measurements.
+The second study (HAYIR DEMELİYDİM) did not rebuild the song. It wrote a new beat "by the same producer, on the same album": the same sounds, effects and groove, but new notes. Two complete beats were built in Live, mixed and measured, and the user rejected both by ear. This page records why, what each step cost, and what changed in the code because of it. As in [09](09-data-and-copyright.md), no audio, stems or transcriptions of the song are published; the numbers below are measurements.
 
 ## What the ear caught and the numbers did not
 
