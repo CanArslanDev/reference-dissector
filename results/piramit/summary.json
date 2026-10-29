@@ -1300,7 +1300,7 @@
     "sample": "Core Library: Kick Doctor M.wav",
     "transpose": -3,
     "detune_cents": 0,
-    "volume_db": -8.5,
+    "volume_db": -8.1,
     "ncc": 0.8475,
     "verdict": "no close match"
    },
@@ -1395,7 +1395,7 @@
   },
   "levels": {
    "headroom_db": 4.0,
-   "drums_track_db": -12.5,
+   "drums_track_db": -12.6,
    "808_track_db": -13.9,
    "stems_track_db": -4.0
   },
