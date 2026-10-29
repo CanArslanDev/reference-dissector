@@ -157,7 +157,7 @@ A hit's time is where its file starts. Its attack (`t_attack`) adds `audio.attac
 
 `evaluate.score` compares an estimate in the same schema with the truth. There are two estimates per beat:
 - **Analysis level** (`estimate_from_analysis`): what the pipeline heard, from `analysis.json`, `matches.json` and `melodic.json`.
-- **Plan level** (`estimate_from_plan`): what Live would play, from `plan.json` as `render.py` plays it. Each pad plays its sample at its Transpose, Detune and Volume (at most 0 dB), and the 808 its one-shot per note, each velocity at its level under Live 12.4.6's law. Live itself is not in the loop yet ([12](12-replica-mode.md)).
+- **Plan level** (`estimate_from_plan`): what Live would play, from `plan.json` as `render.py` plays it. Each pad plays its sample at its Transpose, Detune and Volume (at most 0 dB), on one voice, and the 808 its one-shot per note, released as Live releases it, each velocity at its level under Live 12.4.6's law. Live itself is not in the loop: two live checks recorded built plans and compared them with this render ([07](07-building-in-live.md#live-behaviour-measured-here)).
 
 The rules:
 - **Strict.** No offset is removed. Both sides time a hit at its attack, and a hit counts within 20 ms (50 ms is reported too). Pairs come from a maximum one-to-one matching (mir_eval).
@@ -190,9 +190,11 @@ Means over the 22 scenarios, all 48 beats, rendered:
 - `m3`: with the fixes of 2026-10-29 (6d96bc5): the pad gate, the kick view, the 808's silences and settled pitch, the speed changes and the pad-files round ([12](12-replica-mode.md#what-each-stage-measured)). match, fit-808, plan and score ran at 6d96bc5 over the analyze and melodic of `m3a`, a run of every step at e2a5ab4, whose code for those two steps is the same;
 - `m3-ft`: the same on htdemucs_ft stems;
 - `m4`: m3 with the last two fixes of 2026-10-29 merged (e7ea748): a level per drum pad (levels/pads) and the 808 one-shot on its template's periods (glide/808). fit-808, plan and score ran at e7ea748 over m3's analyze, melodic and match;
-- `m4-ft`: the same on htdemucs_ft stems.
+- `m4-ft`: the same on htdemucs_ft stems;
+- `m5`: m4 with the fixes of the first live check merged (live/build, a4f2358): each pad on one voice and the 808's release and restart in the render and the estimates, a note Live starts late placed 1 ms early, and the plan's meter. plan and score ran at a4f2358 over m4's other outputs;
+- `m5-ft`: the same on htdemucs_ft stems.
 
-Each of these tags ran every step except m3, m3-ft, m4 and m4-ft, as above. m2 and m2-ft measured the first merge (ba7b69d), before m2g's five fixes. m2g-vel and m2g-ft-vel, the baseline of the fixes of 2026-10-29, are m2g's and m2g-ft's plans under Live's velocity law; they differ from m2g and m2g-ft only in the level scores (below). Each tag's means per scenario are in `results/calibration/suite-<tag>.json`.
+Each of these tags ran every step except m3, m3-ft, m4, m4-ft, m5 and m5-ft, as above. m2 and m2-ft measured the first merge (ba7b69d), before m2g's five fixes. m2g-vel and m2g-ft-vel, the baseline of the fixes of 2026-10-29, are m2g's and m2g-ft's plans under Live's velocity law; they differ from m2g and m2g-ft only in the level scores (below). Each tag's means per scenario are in `results/calibration/suite-<tag>.json`.
 
 **Per drum role, strict F1@20, analysis / plan** (in brackets: the scenarios that have the role):
 
@@ -266,11 +268,24 @@ m3's and m3-ft's seconds are m3a's and m3a-ft's, which ran every step at e2a5ab4
 
 The exports give m4's note F1@20 as 0.9095 and m4-ft's note F1@50 as 0.9345: their means over scenarios, from the beats' counts, are 0.9094 and 0.9344. m4 ran only fit-808, plan and score, at 4 jobs: 57.4 s a beat over scenarios (fit-808 56.2 s), 695 s wall for the 48 beats (m4-ft 698 s), not comparable with the seconds above.
 
-**Levels under Live's velocity law.** m2g and m2g-ft rendered velocities as linear levels (v/127). m2g-vel and m2g-ft-vel ran plan and score again on their other outputs, with velocities from Live 12.4.6's law at "Vol < Vel" 35 % (`suite-m2g-vel.json`, `suite-m2g-ft-vel.json`). Distance from a perfect kit 3.67 and 3.21 dB, balance 2.24 and 1.98 dB, the 808 −1.97 and −2.24 dB against the kit; every other number is unchanged. With v/127 velocities, Live would have played m2g's plans 9.30 dB from a perfect kit and m2g-ft's 9.59 dB (computed from the law: pads at 45 %, the 808 at 35 %). Not verified in Live.
+**m4 → m5.** m5 and m5-ft equal m4 and m4-ft on every number above but the seconds and these (plan level):
+
+| | m4 | m5 | m4-ft | m5-ft |
+|---|---|---|---|---|
+| downbeats, F | 0.892 | 0.924 | 0.892 | 0.924 |
+| meter right | 0.91 | 0.95 | 0.91 | 0.95 |
+| 808 pitch, median abs error | 4.47 cents | 4.42 cents | 9.65 cents | 9.63 cents |
+| 808 onsets, median error | 1.360 ms | 1.355 ms | 1.435 ms | 1.433 ms |
+| levels: median abs distance from a perfect kit | 1.247 dB | 1.198 dB | 1.231 dB | 1.152 dB |
+| levels: median abs balance | 0.552 dB | 0.512 dB | 0.497 dB | 0.476 dB |
+
+meter34 is planned in 3/4 now (meter right 0 → 1, downbeat F 0.29 → 1.0 there). The levels are worse in single scenarios: dynamics 1.27 → 2.16 dB from a perfect kit, where one voice per pad plays dynamics-2's drum track 1.3 dB quieter at unity and its RMS-matched fader rose by as much; balance in 11 scenarios (htdemucs_ft 6), by up to 0.23 dB (0.08). No scenario of either model is further off on either than at m3. Each drum role's timing median and p90 moved 0.01 ms at most. m5 ran plan and score only, at 4 jobs: 5.8 s a beat over scenarios (m5-ft 4.4 s), 74 s wall for the 48 beats (53 s). [12](12-replica-mode.md#what-each-stage-measured) has each fix alone.
+
+**Levels under Live's velocity law.** m2g and m2g-ft rendered velocities as linear levels (v/127). m2g-vel and m2g-ft-vel ran plan and score again on their other outputs, with velocities from Live 12.4.6's law at "Vol < Vel" 35 % (`suite-m2g-vel.json`, `suite-m2g-ft-vel.json`). Distance from a perfect kit 3.67 and 3.21 dB, balance 2.24 and 1.98 dB, the 808 −1.97 and −2.24 dB against the kit; every other number is unchanged. With v/127 velocities, Live would have played m2g's plans 9.30 dB from a perfect kit and m2g-ft's 9.59 dB (computed from the law: pads at 45 %, the 808 at 35 %). In Live the law held from velocity 35 to 127, on pads and on the 808 (the first live check, [07](07-building-in-live.md#live-behaviour-measured-here)).
 
 **Levels with the pad gate.** m3's plans sit 4.09 dB from a perfect kit, against 3.67 dB at m2g-vel (htdemucs_ft 3.70 against 3.21), and their balance is 3.03 against 2.24 dB (2.84 against 1.98). On the sounds both tags measure, the per-beat median moved only 3.55 → 3.58 dB (3.09 → 2.97 dB). Most of the rise comes from sounds measured for the first time, which the gate now plays: 44 open hats at a median 11.4 dB over a perfect kit (47 at 9.1 dB on htdemucs_ft), 6 snares at +3.5 dB, a crash, a rim and a tom at +3 to +5 dB. At m3 no pad had a level of its own: a pad played its sample at 0 dB, and only the drum fader was matched, by RMS over all the pads. The 808 sat −1.98 and −2.24 dB against the kit, as at m2g-vel.
 
-**Levels per pad** (m4). Each pad plays where the stems hold its sound, a kick on drums + bass less the plan's own 808, the loudest pad at 0 dB ([01](01-pipeline.md#plan)). m3 → m4: 4.09 → 1.25 dB from a perfect kit (htdemucs_ft 3.70 → 1.23), balance 3.03 → 0.55 dB (2.84 → 0.50); no scenario of either model is further off on either than at m3. Against m2g-vel, no scenario's distance is worse, and balance only in rolls, 0.745 → 0.88 dB (htdemucs_ft full, 0.815 → 1.33). Per role against the kit, m3 → m4: hats +6.23 → −1.10 dB, open hats +11.57 → −0.09, snares +3.28 → −0.17, kicks −1.57 → −0.96 (htdemucs_ft +6.47 → −0.69, +10.54 → −0.83, +2.21 → −0.80, −0.57 → −0.08). The 808 sits −1.87 and −2.01 dB against the kit. Pad Volumes run −19.7 to 0 dB (−20.7 to 0). Not verified in Live: no pad Volume under 0 dB has been built or captured.
+**Levels per pad** (m4). Each pad plays where the stems hold its sound, a kick on drums + bass less the plan's own 808, the loudest pad at 0 dB ([01](01-pipeline.md#plan)). m3 → m4: 4.09 → 1.25 dB from a perfect kit (htdemucs_ft 3.70 → 1.23), balance 3.03 → 0.55 dB (2.84 → 0.50); no scenario of either model is further off on either than at m3. Against m2g-vel, no scenario's distance is worse, and balance only in rolls, 0.745 → 0.88 dB (htdemucs_ft full, 0.815 → 1.33). Per role against the kit, m3 → m4: hats +6.23 → −1.10 dB, open hats +11.57 → −0.09, snares +3.28 → −0.17, kicks −1.57 → −0.96 (htdemucs_ft +6.47 → −0.69, +10.54 → −0.83, +2.21 → −0.80, −0.57 → −0.08). The 808 sits −1.87 and −2.01 dB against the kit. Pad Volumes run −19.7 to 0 dB (−20.7 to 0). In Live a pad's Volume is held a display step under the text sent, and a hit plays what is held within 0.003 dB (the first live check).
 - **Worse per beat.** Against a perfect kit, the kick against the snare is further off than at m3 on 2 of 42 beats (6 of 43): bass_low-2, whose kick's hits play the hat's file (the analysis gave its kick sound the hat's file, and its hats, found 29 ms early, a kick file that is neither sound's; bass_low's kick 12.1 → 15.4 dB under the kit, its snare 1.3 → 2.5 dB), and tempo95-2, whose kick plays where it did at m3 and its snare 2.2 dB louder: its kick reads 1.7 dB lower under the new one-shot than under m3's, and the RMS-matched drum fader made that up, which lifted the other pads. On htdemucs_ft, dynamics' snare sits 3.8 dB under the kit (1.0 at m3-ft) and tempo72's 2.9 dB (0.4).
 - **Balance across two groups.** Balance is each sound against the median sound, the 808 included, and the htdemucs drum stem sits 5.52 dB under the truth's drums where its bass stem sits 0.96 dB under the truth's bass. With the drums at their kit level the 808's balance reads +2.70 dB (−1.76 at m3; htdemucs_ft −0.05 and −3.96).
 - **The level against the truth stem** (`level_db`) is worse by that kit offset: the drums now sit at their kit level, 5.52 dB (2.51) under the truth's drums. Over the suite it is worse by up to 5.8 dB (hats; toms 4.3, crashes 4.1, snares 3.4, rims 2.5 dB), and by up to 7.8 dB in one scenario (rolls' hats); open hats are not worse. On htdemucs_ft only snares (3.0 dB) and toms (1.0 dB) are worse. `vs_kit_db` is the number within the kit.
@@ -282,7 +297,7 @@ The exports give m4's note F1@20 as 0.9095 and m4-ft's note F1@50 as 0.9345: the
 - **The drum numbers** come from the discovery and joint-fit lanes and the merge's fixes ([12](12-replica-mode.md) gives each lane alone). From m2g to m3, the kick view changes the analysis' drums, and the pad gate and the notes' early start the plan's.
 - **m4** changes only the plan's 808 and its levels. Every analysis number, and every drum note, pad (but its Volume) and melodic track of the plan, equals m3's on all 48 beats of both models. Every 808 number equals the glide/808 branch's own tag (g8-f1), and its one-shots are the same, byte for byte.
 
-**Still weak** (m4):
+**Still weak** (m4; m5 moved only the plan's levels and meter):
 - **layers** (drums F1@20 0.614, plan 0.562): its clap always plays with the snare and gets no template of its own.
 - **full** (0.656): its hats (0.617), copied at several pitches with few hits each. Its plan 808 notes fell 0.890 → 0.851 at m4 (htdemucs_ft 0.910 → 0.890): the analysis writes one note a semitone high and hears 5 short notes 41 cents low, which m3's one-shot happened to offset.
 - **rare** (0.672): sounds of 1–12 hits each. Perc scores 0; tom, crash and rim 0.5 each, in the plan too since the pad gate.
@@ -293,7 +308,7 @@ The exports give m4's note F1@20 as 0.9095 and m4-ft's note F1@50 as 0.9345: the
   - Snare: 24.0 ms on flams, 21.1 ms on producer.
   - Hat: 32.0 ms on bass_low, 11.1 ms on melodic, 10.4 ms on tempo160.
 
-**htdemucs or htdemucs_ft.** On the final code (m4 against m4-ft), htdemucs_ft's drums are better:
+**htdemucs or htdemucs_ft.** On m4 against m4-ft, and on m5 against m5-ft with the same numbers, htdemucs_ft's drums are better:
 - 0.883 → 0.895 at analysis, 0.868 → 0.898 in the plan (at m2g the plan's gain was +0.039 [+0.017, +0.062], a paired 95 % bootstrap over the 48 beats);
 - kick 0.882 → 0.935, hat 0.860 → 0.913.
 
@@ -328,6 +343,7 @@ Seven changes were made on branches of their own, each measured there, then merg
 - **Pad levels** (plan; levels/pads, tag lv-f3 at its own code over outputs equal to m3's): each pad at a Volume of its own, read where the stems hold its sound. Plan levels 4.09 → 1.27 dB from a perfect kit (3.70 → 1.31), balance 3.03 → 0.56 dB (2.84 → 0.54).
 - **The 808 one-shot** (fit-808 and plan; glide/808, tag g8-f1, against m3a, whose 808 is m3's): the fitted voice on its template's periods, laid out as the template is. Plan 808 note F1@50 0.921 → 0.934 (0.910 → 0.934), median pitch error 8.3 → 4.5 cents (13.6 → 9.6).
 - **Merged** (m4): every 808 number is g8-f1's. The levels moved to 1.25 dB (1.23) and 0.55 dB (0.50): a kick is read under the plan's own 808, which the new one-shot changes ([01](01-pipeline.md#plan)).
+- **After the first live check** (m5, a4f2358): each pad on one voice and the 808's release and restart in the render and the estimates, notes that Live starts late placed 1 ms early, and the plan's meter. Plan levels 1.247 → 1.198 dB from a perfect kit (1.231 → 1.152), balance 0.552 → 0.512 dB (0.497 → 0.476), the plan's meter right 0.909 → 0.955; every F1 the same.
 
 At m3 these were still worse than m2g-vel: the plan's levels; the plan's 808 on bass_low-1; the plan's snare p90, 3.04 → 3.45 ms (2.91 → 3.60) over the 20 scenarios m2g-vel times a plan snare in (producer-1's snare, now played by a pad, carries the analysis' 41.8 ms p90; 3.18 and 3.31 ms over m3's 22); the analysis' hat p90, 3.329 → 3.337 ms (melodic-1 finds more hats); htdemucs_ft's extra sounds at analysis level, 1.955 → 1.977 a beat (tempo160-2's snare-band template now counts as one). False hits rose on single beats: v1-2 6 → 9 and drum_pitch-2 4 → 5 (producer-2 4 → 9 and rare-1 2 → 3 on htdemucs_ft). m4 resolves the first two: plan levels 1.25 dB from a perfect kit against m2g-vel's 3.67 (balance 0.55 against 2.24 dB), bass_low-1's plan note F1@50 1.0 against 0.949. Worse at m4 than at m3:
 - plan strict F1@20 0.8757 → 0.8756 and 808 onset F1@20 0.9348 → 0.9344 (htdemucs_ft unchanged): one of swing58-1's 808 notes, 19.981 ms after the truth's at m3, sits 20.001 ms after it at m4, outside 20 ms;
@@ -356,6 +372,7 @@ m3a: the merged code (e2a5ab4), 48 beats, 2 jobs, every step run, no cache, `--r
 - m3a used 5,234 s of CPU. A job peaked at 1.73 GB, the process tree at 2.9 GB (sampled every 10 s; m2g 1.7 and 3.3 GB). In m1, fit-808 was 56 of 90 s a beat.
 - m3a-ft (htdemucs_ft) ran at 4 jobs: 1,555 s, 128.3 s a beat over scenarios (126.4 s over the 48 beats), the process tree at 4.0 GB. It does not compare with m2g-ft's 2 jobs.
 - m4 and m4-ft ran fit-808, plan and score only, at 4 jobs, no cache: 57.4 s a beat over scenarios (fit-808 56.2 s, plan 0.3 s, render 0.5 s), 695 and 698 s wall for the 48 beats.
+- m5 and m5-ft ran plan and score only, at 4 jobs, no cache: 5.8 and 4.4 s a beat over scenarios (plan 0.5 s, render 4.0 and 2.6 s), 74 and 53 s wall for the 48 beats.
 - **With `--cache`**, on 6 beats (v1, glides and bass_low, both seeds): the run that filled each beat's `cache/` took as long as a fresh one (analyze 35.5 s and fit-808 43.9 s a beat, against 35.6 and 44.7 s). A second run read both back: analyze 8.1 s, fit-808 1.0 s. Every output equals the fresh run's (`analysis.json`, `bass808.json`, `synth808.json`, the templates, the one-shot), the read-back markers and the fit's seconds aside, and the log names each file read back.
 
 ### Running it

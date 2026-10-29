@@ -86,11 +86,18 @@
 
 ## Live
 
-- **Simpler loads at −12 dB.** Set 0 dB, or every level estimate is 12 dB off. "0.0 dB" as text lands on −0.005 dB. A pad's own Volume goes the same way ("-6.5 dB"); none under 0 dB has been read back yet.
+- **Simpler loads at −12 dB.** Set 0 dB, or every level estimate is 12 dB off. "0.0 dB" as text lands on −0.005 dB. A pad's own Volume goes the same way: "−6.6 dB" lands on −6.605, and from −10 dB on a display step lower ("−14.9 dB" on −14.95).
 - **Simpler's root is C3.** Transpose +36 for an 808 whose notes are written at C1 (MIDI 24).
 - **Transpose and Detune keep whole numbers.** 11.99 semitones play as 11; a Detune of 11.5 plays as 11, the text "11.5 ct" as 12 (Live 12.4.6). Write whole semitones and whole cents.
 - **Velocity is not a linear level.** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: velocity 127 plays 7.9 dB (35 %) or 10.2 dB (45 %) over it, and the amount depends on how the Simpler was made. Set "Vol < Vel" on every Simpler and invert the law: taken as v/127, m2g's plans would have played 9.3 dB from a perfect kit, against 3.7 dB (computed from the law).
-- **Snap cuts the end.** On by default, it stops every sample 10–30 ms early.
+- **Snap cuts the end.** On by default, it stops every sample 10–30 ms early: 19–27 ms on three pads of the first live check. The build turns it off.
+- **A pad loaded by name can be another file.** Live's browser finds a sample by its name, and other files of that name can come first: a hat pad played an 808, another an FX hit, and a one-character name was not among the search's first 20 results, so `build_tracks` stopped half way. Copy each file under a name of its content, and read back the file each Simpler holds.
+- **A pad plays one voice.** A hit that comes while its pad's hit before still plays cuts it and starts 1 ms late; a render that summed a pad's hits played kick rolls up to 5.6 dB loud. The 808's Simpler restarts a note of the same pitch the same way.
+- **The 808's Simpler filters by default.** Loaded through the browser it is Classic with a 22 kHz lowpass that follows the note: each note 0.13–0.46 ms late by its pitch, enough to take three notes past a 20 ms window. Turn it off.
+- **Its release is 50 ms, not none.** The voice falls 1.683 dB a ms after a note's end and stops 35.7 ms later. Against Live's recording, the 808 track rendered with a 5 ms fade left −11 to −22 dB of residual, with Live's release −42 to −49 dB.
+- **Live moves a locator off its grid**, in the right meter too: the Arrangement's grid follows its zoom (6 beats at the zoom found), and a cue's time cannot be set. Delete what moved, and say so.
+- **Live serves 8 clients.** With 8 MCP servers of other sessions connected, a new one is refused ("Connection reset by peer").
+- **A plan's score moved by measured lags is not Live's score.** The first live check shifted the plan's estimate by the lags it measured and called that Live's score; a wrong-file pad's hits, dropped as silent, raised a drum F1. Read every Live score off the recording.
 - **The browser keeps an old file.** Loaded by a name Live has loaded before, a pad plays the old content after the file is overwritten; a file loaded by path is read again. Give changed content a new name: the 808 one-shot's carries its digest.
 - **New files reach the browser after a few seconds;** retry, do not fail.
 - **Locators at fractional beats were refused,** so round them.
