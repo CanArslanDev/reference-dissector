@@ -221,7 +221,9 @@ def fader_db(plan: dict, track: str) -> float:
 def _release(x: np.ndarray, length: int) -> np.ndarray:
     """x held `length` samples, then released as Live's 808 Simpler releases
     at Ve Release RELEASE_808_MS: falling RELEASE_DB_MS a ms from there,
-    silent RELEASE_S on (x itself when it ends first)."""
+    silent RELEASE_S on (x itself when it ends first). A length under 0
+    (a note shorter than its restart) holds nothing."""
+    length = max(0, length)
     if length >= len(x):
         return x
     y = x[: length + int(round(RELEASE_S * SR))].copy()
@@ -251,7 +253,9 @@ def late_808(notes: list[dict], bps: float, played_s) -> np.ndarray:
 
 def _cut(x: np.ndarray, length: int, fade: int) -> np.ndarray:
     """x stopped `length` samples in, with a linear release of `fade` samples
-    after that (x itself when it ends first)."""
+    after that (x itself when it ends first). A length under 0 (a hit cut
+    before its own late start) stops it at once."""
+    length = max(0, length)
     if length >= len(x):
         return x
     y = x[: length + fade].copy()

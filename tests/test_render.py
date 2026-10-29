@@ -177,6 +177,23 @@ def test_an_808_note_after_one_of_its_pitch_restarts_its_voice_1_ms_late(tmp_pat
     assert [round(n["t"], 4) for n in est] == [0.0, 0.501, 1.0] and [n["flags"] for n in est] == [[], ["retrigger"], []]
 
 
+def test_a_retrigger_inside_a_retrigger_still_renders(tmp_path):
+    """Plans make_plan never writes, but an edited plan can: a hit 0.5 ms
+    after a late hit of its pad, two hits of a pad at one time after a late
+    one, and an 808 note shorter than its 1 ms restart. Each cut is then
+    shorter than nothing; it plays nothing instead of raising."""
+    pads = {"46": {"path": wav(tmp_path, "oh.wav", noise(1.0)), "transpose": 0, "role": "hat"}}
+    t808 = {"sample_path": wav(tmp_path, "808.wav", noise(1.0, 1)), "root_midi": 24, "transpose": 36,
+            "notes": [note(24, 0.0, duration=0.5), note(24, 0.51, duration=0.001)]}
+    for name, p in (("soon", plan(pads, [note(46, 0.0), note(46, 0.2), note(46, 0.201)])),
+                    ("twice", plan(pads, [note(46, 0.0), note(46, 0.2), note(46, 0.2)])),
+                    ("short", plan({}, [], t808))):
+        m = render_plan(p, tmp_path / name, "flat")
+        for key in m["tracks"]:
+            assert np.isfinite(rendered(tmp_path / name, m, key)).all()
+        assert estimate_from_plan(p)
+
+
 def test_levels_from_the_render(kit, tmp_path):
     """The truth stem plays the snare at full level; the rebuild plays it at
     velocity 64, which Live 12.4.6 plays 0.94 dB under the pad's Volume at
