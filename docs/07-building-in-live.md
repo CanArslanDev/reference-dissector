@@ -184,7 +184,7 @@ Each recording was read the way the suite reads a rebuild, and `render.py`'s ren
 - the 808: note by note against `render.py`'s, and by the pipeline's 808 reader;
 - the levels: `evaluate.level_scores` on the recordings.
 
-**Every Simpler holds its plan's file.** All 30 (5 one-shots and 25 pads) hold a file whose SHA-1 is the plan's file's, the three pads that had played other files or none among them. PIRAMIT built whole: the 808 (101 notes), 10 pads (630 notes), 3 muted Drift tracks (1,150 notes), 5 stems and 8 locators. Live held all 2,963 notes at their starts, pitches and velocities; it shortened 2 notes at the 0.05-beat floor.
+**Every Simpler holds its plan's file.** All 30 (5 one-shots and 25 pads) hold a file whose SHA-1 is the plan's file's, the three pads that had played other files or none among them. PIRAMIT built whole: the 808 (101 notes), 10 pads (630 notes), 3 muted Drift tracks (1,150 notes), 5 stems and 8 locators. Live held all 3,173 notes of the five builds (PIRAMIT's 1,881 and 1,292 on the suite's four) at their starts, pitches and velocities; it shortened 2 notes at the 0.05-beat floor.
 
 **Settings read back as sent** (5 one-shots and 12 pads read). Snap and F On off, Ve Release 50.0 ms, "Vol < Vel" 0.35, Transpose and Detune; the 808's Simpler Classic with 6 voices, the pads One-Shot with 3; pad Volumes a display step under the text, as before.
 
