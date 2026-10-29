@@ -7,7 +7,7 @@ from conftest import burst
 
 from refdissect import layers
 from refdissect.audio import PRE, SR, fit, samples, transpose
-from refdissect.detect import MAX_MS, Template, detect
+from refdissect.detect import DETECT_MS, MAX_MS, THRESHOLD, Template, detect
 from refdissect.hits import Group, template
 
 BPM = 136.0
@@ -292,7 +292,7 @@ def test_merges_until_a_round_merges_none(sounds, monkeypatch):
                                                     ("clap", "snare"))]
     rounds = []
 
-    def three_rounds(cands, pairs, first, kind):
+    def three_rounds(cands, pairs, first, kind, clean=None, band=None):
         rounds.append(1)
         cols = np.unique(cands.col)
         if len(rounds) > 3 or len(cols) < 2:
@@ -463,3 +463,136 @@ def test_a_held_sound_sits_where_it_plays_with_its_holder(case):
         want = 2.4
     held = layers._held([snare, hat], [samples(60), hat.shape[1]], 0, [1], [1, 2], [16, 100])
     assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(samples(want), abs=samples(0.5))
+
+
+def test_a_view_its_main_explains_is_left_out(sounds):
+    """A kick template and a view of it that discover() found in the snare
+    band from more hits (same_sound_as: the kick), its window 3 ms later
+    on the sound. Taken by hits, the view came first, the kick was left
+    out as a composite of it and every kick was the view's, 3 ms late. The
+    main comes first now and explains the view (relations() looks within
+    +-10 ms), so the view is left out: the kicks are the main's, timed by
+    its window (here the oracle's, on the attack; melodic-1's starts on
+    the body), and the view adds none."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    kick, late = templates[1], samples(3)
+    view = Template("view", "kick", "snare", np.r_[kick.audio[late:], np.zeros(late, np.float32)], kick.hits + 3,
+                    {}, None, same_sound_as="kick", found="residual")
+    events = explain(x, templates + [view])
+    kicks = [t for n, t, _ in hits if n == "kick"]
+    assert found(events, "kick", kicks, tol=0.001).all() and extra(events, "kick", kicks) == 0
+    assert events["view"] == []
+
+
+@pytest.mark.xfail(strict=True, reason="B9: a view and its main merge by hits, not by where the sound starts")
+@pytest.mark.parametrize("late_ms", [12, 20])
+def test_a_view_later_on_the_sound_leaves_the_kicks_on_their_attack(sounds, late_ms):
+    """A known limitation (B9), pinned. A view 12-20 ms later on the kick
+    than its main is not explained by it (relations() looks within +-10
+    ms) and stays; the two keep taking each other's hits, and duplicates()
+    merges the main into the view, averaged from more hits: every kick
+    comes out late (0 of 24 within 1 ms). Merging into the template
+    relations() takes first fixes this beat but not the suite: on
+    htdemucs_ft producer-2's snare F1@20 0.587 -> 0.569 (plan 0.401 ->
+    0.262), kick808-2's snare median error 0.31 -> 0.70 ms, and PIRAMIT's
+    kick pad 93 -> 78 notes (no truth). The merge should keep the one whose
+    window starts where their shared hits start."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    kick, late = templates[1], samples(late_ms)
+    view = Template("view", "kick", "snare", np.r_[kick.audio[late:], np.zeros(late, np.float32)], kick.hits + 3,
+                    {}, None, same_sound_as="kick", found="residual")
+    events = explain(x, templates + [view])
+    kicks = [t for n, t, _ in hits if n == "kick"]
+    assert found(events, "kick", kicks, tol=0.001).all() and events["view"] == []
+
+
+def test_a_merge_keeps_the_cleaner_template(sounds):
+    """Two snare-band templates of the snare that keep taking each other's
+    hits: its own, and one that also holds a sound the snare never plays,
+    averaged from more hits. Merged into the one from more hits, every
+    snare came out under NCC 0.8 (make_plan gives no pad under 0.5 clean).
+    Read in one band, the one with more clean hits keeps them."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    snare = templates[2].audio
+    other = fit(np.r_[np.zeros(PRE, np.float32), burst(11, 150, 300, 8000, 40)], len(snare))
+    held = Template("held", "snare", "snare", (snare + 0.9 * np.max(np.abs(snare)) * other).astype(np.float32),
+                    templates[2].hits + 8, {}, None)
+    from refdissect.detect import explain as detect_explain
+    got = detect_explain(x, templates + [held])
+    snares = [t for n, t, _ in hits if n == "snare"]
+    assert got.info["merged"] == {"held": {"into": "snare", "offset_ms": 0.0}}
+    assert found(got.events, "snare", snares).all() and all(e["ncc"] >= 0.8 for e in got.events["snare"])
+
+
+def test_clean_hits_choose_a_merge_only_within_one_band():
+    """One sound found twice both ways (14 shared moments of 18 and 16
+    hits) in two bands: a snare-band template with 7 clean hits and a
+    low-band one with 16 (layers-2's snare). The low band reads high
+    whatever the template: the snare-band one read 16 of 18 there, and the
+    low-band one 1 of 16 in the snare band. Across bands the merge goes by
+    first (the template averaged from more hits); in one band, into the
+    one with more clean hits."""
+    col = np.r_[np.zeros(18, int), np.ones(16, int)]
+    p = np.r_[np.arange(18) * 4000, np.arange(16) * 4000 + 10]
+    cands = layers.Candidates(col, p, np.ones(34), ["matched"] * 34)
+    pairs = [(18 + k, k) if k % 2 else (k, 18 + k) for k in range(14)]  # (lost, kept), each keeps half
+    clean, kind = np.array([7, 16]), [False, False]
+    assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "low"]) == {1: (0, -10)}
+    assert layers.duplicates(cands, pairs, [0, 1], kind, clean, ["snare", "snare"]) == {0: (1, 10)}
+
+
+def test_a_left_out_view_gives_its_hits_to_its_main_not_to_a_hat_before_it(sounds):
+    """A view of the kick (same_sound_as) holding a little of the hat too:
+    the kick's template explains it and leaves it out. The hat, averaged
+    from more hits (48) than the kick's template (24), is taken before both
+    and explains the view at 0.07 of its level. A left-out template's hits
+    went to every template that explained it: on melodic-1 with its hat
+    averaged from 16 hits to the kick's 15, the hat got the kick view's
+    hits at 0.08 and lost 32 of its 92 hits. Only one at HAND of its level
+    or more gets them: here the kick."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    hat, kick = templates[0], templates[1]
+    audio = kick.audio + 0.05 * np.max(np.abs(kick.audio)) / np.max(np.abs(hat.audio)) * hat.audio
+    view = Template("view", "kick", "snare", audio.astype(np.float32), kick.hits + 3, {}, None,
+                    same_sound_as="kick", found="residual")
+    from refdissect.detect import explain as detect_explain
+    got = detect_explain(x, templates + [view])
+    kicks, hats = ([t for n, t, _ in hits if n == name] for name in ("kick", "hat"))
+    assert hat.hits > kick.hits + 3 and list(got.info["composite"]["view"]["by"]) == ["kick"]
+    assert found(got.events, "kick", kicks, tol=0.001).all() and extra(got.events, "kick", kicks) == 0
+    assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0
+
+
+def test_a_merge_survivor_that_is_an_echo_is_never_probed(sounds):
+    """The kick and the snare hold the hat. When the hat's hits went into
+    another column (here a hat template whose window starts 12 ms on), the
+    holders' probes went to that column, even where relations() had found
+    it an echo, whose matched filter repeats an earlier template's and is
+    never probed for: on PIRAMIT 7 kick notes came in that way. Probes
+    follow the column the hits went to, unless it is an echo."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    late = samples(12)
+    templates.append(Template("later", "hat", "hat", np.r_[templates[0].audio[late:], np.zeros(late, np.float32)],
+                              templates[0].hits - 10, {}, None))
+    xp = np.r_[np.zeros(layers.LEAD, np.float32), x, np.zeros(max(len(tp.audio) for tp in templates), np.float32)]
+    sc, _ = layers._scene(xp, templates, DETECT_MS, THRESHOLD, True)
+    cands, weak = layers._matched(sc, xp, THRESHOLD, layers.CLOSEST_MS)
+    cands, _ = layers._one_each(sc, cands)
+    cands, gains = layers._significant(sc, cands, layers.MATCHED_GAIN)
+    assert {h for held in sc.rel["holds"].values() for h, *_ in held} == {0} and 3 not in sc.rel["echo"]
+    merged = {sc.col_of[0]: (sc.col_of[3], late)}  # the hat's hits into the later template
+    got, _ = layers._probes(sc, cands, gains, merged, weak, xp, layers.MATCHED_GAIN, True)
+    assert np.sum(got.col == sc.col_of[3]) > 0
+    sc.rel["echo"][3] = 0.9
+    got, _ = layers._probes(sc, cands, gains, merged, weak, xp, layers.MATCHED_GAIN, True)
+    assert not np.any(got.col == sc.col_of[3])
