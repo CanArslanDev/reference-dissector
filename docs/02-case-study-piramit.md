@@ -112,7 +112,7 @@ What the table says about the beat:
   Before replica mode there were also 12 at C#1 and one each at D#1 and G0.
   - 13 notes first read as C#2: 60–90 ms each, each followed at once by a C1 note. The 10 that start on a kick are its attack split off that C1 note, which now starts there (flag `split`). 3 C#2 notes remain.
   - No note slides: legato notes are off by default. Before replica mode 3 notes slid by more than 1.5 semitones (not played).
-- **Fixed: notes held over silence.** On 2026-10-22 the reader held one B0 note for 15.3 s, through sections D and E. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −27 dB where the 808 plays) for 1.0 s. Then the 808 plays alone, with no kick, to the end of D; then the stem stays under −82 dB for 7.2 s, the breakdown (E). The reader found C1 notes in D, but their onsets sat 27 ms before the feet of their envelope rises, past the 20 ms that `bass808.legato` allows, and their template fit was 0.887–0.893, under its 0.9: each read as the note before going on. Two rules of the reader changed ([01](01-pipeline.md#808-notes-bass808transcribe)):
+- **Fixed: notes held over silence.** On 2026-10-22 the reader held one note through sections D and E. Over that span the bass stem under 150 Hz first falls to −84 to −90 dB (RMS over 250 ms, against −7 to −27 dB where the 808 plays) for 1.0 s. Then the 808 plays alone, with no kick, to the end of D; then the stem stays under −82 dB for 7.2 s, the breakdown (E). The reader found C1 notes in D, but their onsets sat 27 ms before the feet of their envelope rises, past the 20 ms that `bass808.legato` allows, and their template fit was 0.887–0.893, under its 0.9: each read as the note before going on. Two rules of the reader changed ([01](01-pipeline.md#808-notes-bass808transcribe)):
   - a note ends where the 808 falls silent (its 25 ms RMS 40 dB or more under the note's peak for 50 ms), and a note found after that is a note of its own;
   - a rise of 9 dB or more attacks a note, and such a note starts on its rise.
 
@@ -121,10 +121,9 @@ What the table says about the beat:
   | | 2026-10-22 | now |
   |---|---|---|
   | notes held over silence | 4 (0.27, 0.65, 1.57 and 8.63 s of it; the last in two rests, 1.22 and 7.41 s) | 0 |
-  | longest note | 15.33 s | 1.75 s |
   | C1 notes in section D, where the 808 plays alone | 0 | 4 |
 
-  - 93 of the 94 notes of 2026-10-22 are found again within 50 ms. None moved in onset, attack or written pitch. 6 end earlier, by 0.3 to 15.3 s.
+  - 93 of the 94 notes of 2026-10-22 are found again within 50 ms. None moved in onset, attack or written pitch. 6 end earlier, the held note among them.
   - 8 notes are new, all C1: five start on a rise of 11–21 dB inside what 2026-10-22 read as one longer note (one of them on a kick), three after a rest. Each attacks 5.2–5.45 ms after its onset, as the others do (median 5.44 ms).
   - 1 is gone: the E1 note, found in a rest, whose peak sat 49 dB under the other notes'.
 - **Still wrong in section D: a fifth note.** The stem shows one more attack there: its pitch (80 ms windows) falls about 4 semitones within 120 ms, as it does at the attacks the reader finds there. But no kick plays there, and the 808 band rises only 6.5 dB over the note still ringing, where a rise needs 9. The reader keeps it in the note before; the reader before replica mode wrote a note there. Not checked by ear.
@@ -205,7 +204,7 @@ None of this is checked against the song (no truth). On the suite's melodic and 
 | A | 57–71 | |
 | D | 72–73 | outro: the 808 alone, as in D |
 
-These are the sections read before replica mode, but for the outro's name: it plays what D plays, so it is D again (F before replica mode). On 2026-10-22 the held 808 note started in bar 48, and a bar's 808 is a note that starts in it, so D (49–56) took in the 808's bars and the breakdown, and A ran to bar 48 (see 808 above). The stem's 808 band agrees with this reading: it plays through bar 51 and rests from bar 52.
+These are the sections read before replica mode, but for the outro's name: it plays what D plays, so it is D again (F before replica mode). On 2026-10-22 one 808 note was held from the start of D through E, and a bar's 808 is a note that starts in it, so D's later bars and E read as one section, D 49–56, and A took in D's first bar (see 808 above). The stem's 808 band agrees with this reading: it plays through D and rests in E.
 
 The prototype's per-stem activity map (at 68 BPM bars) had the breakdown at bars 25–28 of its grid, which is 49–56 here. It also had the "other" stem dropping out earlier, and the vocals thinning at the end.
 
@@ -222,7 +221,7 @@ The build took 4.6 s. `plan.json` from the finished pipeline differed:
 - it used the identified hat and snare;
 - it put the click and the kick on Drum Rack pads too: six pads, 549 notes.
 
-`refdissect live-build` then built that plan into an empty set in 9.7 s, with the pads, notes, stems and 8 section locators checked in Live afterwards. That run found one more Live behaviour: a new audio clip's start sits at its first transient (3.6 s into the `other` stem), and the build now puts it back at 0.
+`refdissect live-build` then built that plan into an empty set in 9.7 s, with the pads, notes, stems and 8 section locators checked in Live afterwards. That run found one more Live behaviour: a new audio clip's start sits at its first transient (a few seconds into the `other` stem), and the build now puts it back at 0.
 
 Measured on the way (Live 12.4):
 - Simpler loads samples at −12 dB.

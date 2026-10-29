@@ -1073,8 +1073,8 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     the note before has fallen silent starts again, and every note ends
     where it falls silent. On PIRAMIT one note took in four notes of an
     808 playing alone after a 1.2 s rest, then a 7.4 s rest, and held
-    15.3 s (rests of 0.2 s or more, 40 dB under the median note peak):
-    those notes start 27 ms before their envelope rises, and their
+    through both (rests of 0.2 s or more, 40 dB under the median note
+    peak): those notes start 27 ms before their envelope rises, and their
     template fit is 0.887-0.893 (the fit trades time for pitch: at the
     foot, at the template's own pitch, 0.848-0.861).
 

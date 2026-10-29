@@ -23,7 +23,7 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
   - note F1 (50 ms, 50 cents): 0.278 → 0.936 at analysis, 0.229 → 0.934 in the plan;
   - median pitch error: 55 → 6 cents at analysis, 70 → 4.5 cents in the plan;
   - the written note is right for 0.970 of the notes (0.947 at m2g-vel). Where a template's own notes never settle, its settled pitch is read on the notes that reach past it: bass_low 0.487 → 0.987.
-  - A note ends where the 808 falls silent, and a 9 dB rise attacks one. On PIRAMIT no note is held over 0.2 s or more of silence (4 before, the longest held 15.3 s), and the 808 alone and the breakdown are two sections again.
+  - A note ends where the 808 falls silent, and a 9 dB rise attacks one. On PIRAMIT no note is held over 0.2 s or more of silence (4 before), and the 808 alone and the breakdown are two sections again.
 - **Sounds at any pitch.** The snare and hat bands are matched to a quarter cent (the speckle index), and pads play their match's Transpose and Detune. No pad that plays its sound's file is off pitch now; before Detune per pad, drum_pitch's snare played 30 cents off.
 - **Files a pad can play.** A library file that peaks under −60 dBFS is never a match, and a band whose five best sounds tie within 0.002 NCC names none of them. No pad plays a near-silent file (1 of 227 at m3a), and full-1's and melodic-1's kick pads play the truth's kick file, not a synth-bass or a tied file.
 - **Drum pads on evidence** (the 12-hit pad gate before): 3 hits or one per 16 bars, a clean template, a close match or a place in the backbone; a sound of the residual pass must recur bar to bar. The backbone is planned first, and each strike is played once. m2g-vel → m3:
