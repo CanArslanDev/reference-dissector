@@ -66,6 +66,12 @@ STEMS_MUTED = {"drums", "bass", "vocals"}  # replaced by ours, or not part of th
 DEFAULT_USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
 GENERATED = Path("Samples") / "AbletonMCP Generated"
 CLIENTS = 8  # the most MCP clients Live's Remote Script serves at once (AbletonMCP 2.1.0's MAX_CLIENTS)
+# Simpler's Snap, on by default, stops a sample 10-30 ms before its file ends (ableton-live-mcp's battery,
+# 2026-10-19: a kick 28.8 ms of its 163.5, a hat 9.9 of 71.4; with Snap off it plays to the last frame); in the
+# live check (2026-10-29) a kick left its file 21.8 ms before the end (-51.9 dB under its peak) and played on
+# with Snap off, and three pads of v1orig-3 and PIRAMIT ended 19.1 to 26.9 ms early. render.py plays every file
+# to its last frame: the build sets Snap off on every Simpler
+LIVE_OFF = {"Snap": "Off"}
 # a placeholder for the melodic tracks until a sound is chosen per stem; they
 # are built muted, so the reference stems still play as before
 MELODIC_INSTRUMENT = "Drift"
@@ -928,9 +934,18 @@ def simpler_808(t808: dict) -> dict:
     amount, a raw 0..1), and with Glide on (voices 1) Glide Mode "Glide"
     and the Glide Time. These are what render_plan and estimate_from_plan
     assume; voices is a property of the device, not a parameter (build
-    sets it)."""
+    sets it). Snap and the filter go off (LIVE_OFF): loaded through the
+    browser, the 808's Simpler had its filter on, a 22.0 kHz lowpass whose
+    cutoff follows the note ("Filt < Key" 100 %), and in the live check
+    (Live 12.4.6, 2026-10-29) it delayed the 808's notes by 0.13 to 0.46 ms,
+    the lower the note the more (0.46 ms at MIDI 12, 0.13 ms at 36), and
+    took 0.14 dB off the 8th harmonic, 0.55 dB off the 16th and 2.2 dB off
+    the 32nd, re the fundamental: swing66-1's three notes at MIDI 12, 19.6
+    to 19.9 ms from the truth in the plan, crossed 20 ms in Live (808 F1@20
+    0.944 -> 0.889 with Live's lags). render.py plays the one-shot
+    unfiltered."""
     out = {"Volume": "0.0 dB", "Transpose": float(t808["transpose"]), "Detune": float(t808.get("detune_cents", 0)),
-           "Vol < Vel": float(t808.get("vol_vel", VOL_VEL))}
+           "Vol < Vel": float(t808.get("vol_vel", VOL_VEL)), **LIVE_OFF, "F On": "Off"}
     if glide_s(t808):
         out |= {"Glide Mode": "Glide", "Glide Time": f"{float(t808['glide_time_ms']):.1f} ms"}
     return out
@@ -945,8 +960,8 @@ def build_spec(plan: dict) -> list[dict]:
     warping off, the 808's at 0 dB and each pad's at its volume_db
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
     transposition (a pad's Transpose and Detune), "Vol < Vel" at the plan's
-    vol_vel (VOL_VEL), so velocities play the levels the plan assumes, and
-    faders from the plan's levels."""
+    vol_vel (VOL_VEL), so velocities play the levels the plan assumes, Snap
+    off (LIVE_OFF), and faders from the plan's levels."""
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -964,7 +979,7 @@ def build_spec(plan: dict) -> list[dict]:
                                  "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
                                               "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
-                                              "Vol < Vel": float(pad.get("vol_vel", VOL_VEL))}}
+                                              "Vol < Vel": float(pad.get("vol_vel", VOL_VEL)), **LIVE_OFF}}
                      for note, pad in drums["pads"].items()}},
                  "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
                  "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",
