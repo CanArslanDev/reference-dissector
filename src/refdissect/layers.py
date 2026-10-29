@@ -340,8 +340,9 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
         share, coef, lags = explained(full[k][:, :n[k]], [full[j] for j in kept], near)
         if kept and share >= COMPOSITE:
             by = {kept[j]: (round(float(c), 3), lag) for j, (c, lag) in enumerate(zip(coef, lags)) if c > 0}
+            # a template of digital silence is explained whole with no coefficient: left out, its hits to no one
             composite[k] = {"share": round(share, 3), "by": {j: v for j, v in by.items() if v[0] >= HAND}
-                            or dict([max(by.items(), key=lambda kv: kv[1][0])])}
+                            or (dict([max(by.items(), key=lambda kv: kv[1][0])]) if by else {})}
             continue
         mine, _, _ = explained(own[k][k][:, :n[k]], [own[k][j] for j in kept], near)
         if kept and mine >= ECHO:
