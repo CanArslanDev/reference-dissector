@@ -37,6 +37,7 @@ This project analyses commercial recordings and uses sample libraries. What it p
 
   A transcription of a song's drum pattern and bassline is a derivative of the composition.
 - **What the analysis decided per sound:** `analysis.json`'s `layers` (the joint fit's merges, held sounds, usual gains) and `matches.json` (library paths, transpositions, layers, per-hit votes, null tests). They name your files. The export keeps the scores and verdicts, with names replaced as below.
+- **Kept results** (`cache/` in a work folder, and in each suite beat run with `--cache`): the 808 reader's results with their log lines, which hold the 808's notes as `bass808.json` does, and the 808 fits (the voice's parameters). Their file names are hashes.
 - **Your library:**
   - the inventory, the index (`library.npz` holds audio) and its speckle index (`library_speckle.npz`);
   - file and kit names. `scripts/export_results.py` replaces names from a personal library with the role and a keyed hash: the first 8 hex digits of an HMAC-SHA256 of the file's path, under a random key that the first export writes to `work/export-key` and that stays there. A plain hash hides nothing: SHA-1 of the path, cut to 6 digits, gave back every file the PIRAMIT summary named, from a list of the library's files. Ableton's Core Library keeps its names.
@@ -61,6 +62,7 @@ They are made from your own library and stay local.
 - **v2** (`refdissect suite`, 48 beats). A beat keeps everything that makes it a test:
   - its mixes and truth stems, and `events.json`, every hit and note with its time;
   - its Demucs stems per model;
-  - each run's outputs (`runs/<tag>/`), which name files and hold note times. Its scores (`runs/<tag>/scores.json`, and the suite's `scores-<tag>.json`) hold scores, timings and run settings, no note time and no library file name (checked on m2g's 49 score files).
+  - each run's outputs (`runs/<tag>/`), which name files and hold note times. Its scores (`runs/<tag>/scores.json`, and the suite's `scores-<tag>.json`) hold scores, timings and run settings, no note time and no library file name (checked on m2g's 49 score files);
+  - with `--cache`, its `cache/`: the 808 reader's results and the fits, read back by later runs.
 
-  `scripts/export_results.py --suite DIR TAG` publishes `results/calibration/suite-<tag>.json`. It holds the means per scenario and overall, and the run's model, seed, versions, options and steps. The export refuses a run description that is not numbers or short identifiers. It also refuses an output that looks like a local path or an audio, MIDI, array or Live file name.
+  `scripts/export_results.py --suite DIR TAG` publishes `results/calibration/suite-<tag>.json`. It holds the means per scenario and overall, and the run's model, seed, versions, options and steps, and whether it kept results and how many beats read each back (`cache`, `cached`). The export refuses a run description that is not numbers or short identifiers. It also refuses an output that looks like a local path or an audio, MIDI, array or Live file name.
