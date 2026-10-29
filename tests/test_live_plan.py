@@ -7,7 +7,7 @@ import pytest
 import soundfile as sf
 
 from refdissect.audio import PRE, SR
-from refdissect.live import make_plan, no_overlaps, velocities, write_midi
+from refdissect.live import make_plan, no_overlaps, recurring, velocities, write_midi
 
 
 def test_no_overlaps_and_velocities():
@@ -72,6 +72,178 @@ def test_drum_notes_go_where_their_hits_attack(tmp_path):
     analysis["events"]["sound_1"][0]["t_attack"] = 0.09
     first = min(n["start_time"] for n in make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"])
     assert first == pytest.approx(0.18, abs=1e-4)
+
+
+def test_a_pads_sample_attacks_where_its_hit_did(tmp_path):
+    """A note starts as long before its hit's t_attack as the pad's sample
+    takes to attack as Simpler plays it (pad_lead), so the plan, timed as
+    Live plays it (evaluate.estimate_from_plan), attacks where the analysis
+    heard each hit; a sample with 6 ms in front of its attack played every
+    hit that much late."""
+    from refdissect import evaluate
+    analysis, matches, synth = _fixture(tmp_path)
+    late = tmp_path / "late.wav"
+    sf.write(late, np.r_[np.zeros(int(0.006 * SR)), np.random.default_rng(2).standard_normal(SR // 4) * 0.5], SR)
+    matches["sound_1"]["top"] = [{"path": str(late), "ncc": 0.97, "semitones": -1.0}]
+    del matches["sound_2"]
+    hits = [0.1 + 0.5 * k for k in range(8)]
+    analysis["events"]["sound_1"] = [{"t": t, "t_attack": t, "gain": 1.0} for t in hits]
+    est = evaluate.estimate_from_plan(make_plan(analysis, matches, synth, tmp_path), root=tmp_path)
+    played = sorted(e["t_attack"] for e in est["drums"])
+    assert np.max(np.abs(np.array(played) - hits)) < 1e-4
+
+
+@pytest.mark.parametrize("named", ["sound_1", "sound_3"])
+def test_a_sound_is_as_clean_as_the_templates_merged_into_it(tmp_path, named):
+    """layers.explain merged a clean template into a less clean one of the
+    same sound (layers-2: the low-band snare, 16 matched-filter peaks at NCC
+    0.9 or more, into the snare-band one, clean 0.44): the sound gets its
+    pad whichever of the two carries the hits."""
+    analysis, matches, synth = _fixture(tmp_path)
+    other = "sound_3" if named == "sound_1" else "sound_1"
+    analysis["templates"] = {named: {"detected_hits": 16, "clean": 0.44},
+                             other: {"detected_hits": 0, "clean": 0.0,
+                                     "peak_ncc_histogram_0.3_to_1.0": [5, 1, 0, 0, 0, 0, 16]}}
+    analysis["events"] = {named: [{"t": 0.5 * k, "gain": 1.0} for k in range(8)], other: []}
+    analysis["layers"] = {"merged": {other: {"into": named, "offset_ms": -0.25}}}
+    matches = {named: matches["sound_1"], other: {**matches["sound_1"], "verdict": f"same sound as {named}",
+                                                  "same_as": named}}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == [named]
+    assert len(plan["tracks"]["drums"]["notes"]) == 8
+
+
+def _bars(tmp_path, times, info, match):
+    """A 16-bar beat (120 BPM, a bar is 2 s) with one template, its hits
+    at `times`, and its match."""
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["source"]["duration_s"] = 32.0
+    analysis["grid"].update(phase=0.0, beats_per_bar=4, beat_unit=4)
+    analysis["templates"] = {"sound_1": {"detected_hits": len(times), "clean": 1.0, **info}}
+    analysis["events"] = {"sound_1": [{"t": t, "t_attack": t, "gain": 1.0} for t in times]}
+    top = [{**matches["sound_1"]["top"][0], "ncc": match.get("ncc", 0.97)}]
+    return analysis, {"sound_1": {**matches["sound_1"], "top": top, **match}}, synth
+
+
+def test_a_sound_heard_once_every_other_bar_gets_a_pad(tmp_path):
+    """An open hat on beat 4 of every other bar: 8 hits in 16 bars, under
+    the 12 a pad needed (the suite's open hats: plan F1@20 0.043, against
+    0.979 in the analysis), but as many as discover() asks of its rarest
+    sounds, and every one of them recurs."""
+    hits = [4.0 * k + 1.75 for k in range(8)]
+    plan = make_plan(*_bars(tmp_path, hits, {"found": "grid"}, {"role": "hat", "verdict": "same sample"}), tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == ["sound_1"]
+    assert len(plan["tracks"]["drums"]["notes"]) == 8
+
+
+def test_hits_that_never_recur_are_no_drum_sound(tmp_path):
+    """A melodic loop at its own tempo leaves transients in the drum stem
+    that discover()'s residual pass groups into a clean template, close to
+    a library kick. Its hits sit at a new place of the bar every time; the
+    same hits on one place of the bar keep it."""
+    loop = [1.37 * k + 0.11 for k in range(16)]
+    info, match = {"found": "residual"}, {"role": "kick", "verdict": "same family", "ncc": 0.9}
+    assert recurring(loop, 2.0) < 0.2
+    assert not make_plan(*_bars(tmp_path, loop, info, match), tmp_path)["tracks"]["drums"]["pads"]
+    steady = [2.0 * k + 0.5 for k in range(16)]
+    assert recurring(steady, 2.0) == 1.0
+    assert make_plan(*_bars(tmp_path, steady, info, match), tmp_path)["tracks"]["drums"]["pads"]
+
+
+def _ramp(tmp_path, times, info, match, bars: int = 32, rise: float = 0.03):
+    """A beat whose tempo rises `rise` over its `bars` bars from 120 BPM (its
+    last bar 59 ms shorter than its first) on the constant grid through its
+    beats, as fit_grid keeps it, with one template whose hits are the
+    quarter-note lines at `times` (indices); and those lines."""
+    lines = np.r_[0.0, np.cumsum(0.5 * (1 - rise * np.arange(4 * bars) / (4 * bars)))]
+    analysis, matches, synth = _bars(tmp_path, lines[times].tolist(), info, match)
+    analysis["source"]["duration_s"] = float(lines[-1])
+    analysis["grid"]["bpm"] = 60 / float(np.polyfit(np.arange(len(lines)), lines, 1)[0])
+    return (analysis, matches, synth), lines
+
+
+def test_a_sound_found_on_the_beat_needs_no_recurrence(tmp_path):
+    """Recurrence is measured on the grid's constant tempo, so it tests the
+    tempo too: on a tempo rising 3 % the kick on every bar line stops
+    recurring (lag-1 bars up to 30 ms off), and with every template held
+    to it the suite's drums fell 0.866 -> 0.507 (plan F1@20). A sound
+    discover() found on the places of the beat needs none."""
+    (analysis, matches, synth), lines = _ramp(tmp_path, slice(0, -1, 4), {"found": "grid"},
+                                              {"role": "kick", "verdict": "same sample", "ncc": 0.97})
+    assert recurring(lines[:-1:4], 240 / analysis["grid"]["bpm"]) < 0.3
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == ["sound_1"]
+    assert len(plan["tracks"]["drums"]["notes"]) == 32
+
+
+def test_a_residual_sound_recurs_on_the_grids_tempo_map(tmp_path):
+    """Where the beats drift from the constant grid, fit_grid keeps them as
+    tempo_map; a residual template's hits recur on it (bar_clock): on the
+    suite with every time warped by a 3 % rise, plan drums F1@20 0.855
+    without the map, 0.867 with it (0.866 unwarped)."""
+    (analysis, matches, synth), lines = _ramp(tmp_path, slice(3, -1, 8), {"found": "residual"},  # beat 4, odd bars
+                                              {"role": "hat", "verdict": "same sample", "ncc": 0.97})
+    assert not make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["pads"]
+    analysis["grid"]["tempo_map"] = lines.tolist()
+    assert len(make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]) == 16
+
+
+def test_a_residual_sound_recurs_at_its_own_tempo_after_a_tempo_change(tmp_path):
+    """Two tempi: the grid follows the longer part (grid.tempo_change), and
+    a sound of the other part recurs at that part's tempo. Two suite beats
+    joined (v1-2 then tempo95-2, B's templates all residual): B's sounds
+    plan F1@20 0 -> 0.982 (mean)."""
+    hits = [16.0 + 0.4 + 240 / 142 * k for k in range(8)]  # 8 bars at 142 BPM after 8 at 120
+    analysis, matches, synth = _bars(tmp_path, hits, {"found": "residual"},
+                                     {"role": "snare", "verdict": "same sample", "ncc": 0.97})
+    analysis["source"]["duration_s"] = 16.0 + 8 * 240 / 142
+    assert recurring(hits, 2.0) == 0.0
+    assert not make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["pads"]
+    analysis["grid"]["tempo_change"] = {"until": 16.0, "from": 16.0, "ratio": round(142 / 120, 3),
+                                        "grid_follows": "first", "span_s": [0.0, 16.0]}
+    assert len(make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]) == 8
+
+
+def test_a_residual_template_is_no_backbone(tmp_path):
+    """A kick or snare far from anything in the library plays as the
+    backbone only when discover() found it on the places of the beat; one
+    of its residual pass (found where no template of its band plays) needs
+    a close match, as any other sound does."""
+    hits = [2.0 * k + 0.5 for k in range(16)]
+    match = {"role": "kick", "verdict": "no close match", "ncc": 0.7}
+    assert make_plan(*_bars(tmp_path, hits, {"found": "grid"}, match), tmp_path)["tracks"]["drums"]["pads"]
+    assert not make_plan(*_bars(tmp_path, hits, {"found": "residual"}, match), tmp_path)["tracks"]["drums"]["pads"]
+    close = {**match, "ncc": 0.9, "verdict": "same family"}
+    assert make_plan(*_bars(tmp_path, hits, {"found": "residual"}, close), tmp_path)["tracks"]["drums"]["pads"]
+
+
+def test_a_pad_plays_each_moment_once(tmp_path):
+    """Two templates of one sound (same_as: the same file, found in two
+    bands) share a pad; where both found the same strike, the pad plays it
+    once. On 5 of the suite's seed-2 beats a snare-band template of the
+    kick-and-hat moments played the hat's file a second time on 6-15 of
+    them."""
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["events"]["sound_2"] += [{"t": 0.5 * k + 0.002, "gain": 0.5} for k in (0, 2, 4, 6)]
+    notes = make_plan(analysis, matches, synth, tmp_path)["tracks"]["drums"]["notes"]
+    assert len(notes) == 16 and {n["pitch"] for n in notes} == {38}
+
+
+def test_the_backbone_plays_its_kicks_once(tmp_path):
+    """swing66-2: a snare-band template of 10 of the kick's moments, closer
+    to a library kick (NCC 0.895) than the kick itself (0.713, played as
+    the backbone), took pad 36 and played those kicks a second time. The
+    backbone is planned first and plays each kick once; a template of only
+    its kicks gets no pad."""
+    analysis, matches, synth = _bars(tmp_path, [1.0 * k + 0.25 for k in range(32)], {"found": "grid"},
+                                     {"role": "kick", "verdict": "no close match", "ncc": 0.713})
+    analysis["templates"]["sound_2"] = {"detected_hits": 10, "clean": 0.8, "found": "grid"}
+    analysis["events"]["sound_2"] = [{"t": t + 0.001, "t_attack": t + 0.001, "gain": 1.0}
+                                     for t in [2.0 * k + 0.25 for k in range(10)]]
+    matches["sound_2"] = {**matches["sound_1"], "top": [{**matches["sound_1"]["top"][0], "ncc": 0.895}]}
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert [p["template"] for p in plan["tracks"]["drums"]["pads"].values()] == ["sound_1"]
+    assert len(plan["tracks"]["drums"]["notes"]) == 32
 
 
 def test_pitched_copies_get_transposed_pads(tmp_path):
