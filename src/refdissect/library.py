@@ -140,6 +140,11 @@ SPECKLE_SMOOTH = 150  # cents: coarser structure (the sound's colour, the band f
 SPECKLE_WIDE = 1200  # cents searched either way
 NOT_SPECKLED = {"kick", "808", "melodic/loop"}  # tonal library roles: no noise to compare
 TRANSPOSE_MARGIN = 4096  # samples resampled past what a transposed candidate's window holds (Library.candidate)
+# a file whose start peaks under this (dBFS) plays nothing a pad could use: Library.build leaves it out, and
+# an index built before it lists none (Library.audible). NCC is scale-free and every entry is normalized to
+# full scale, so a float WAV holding a recording 430 dB down (an fx file of the user's library) matched
+# v1orig-3's hat template at NCC 0.961, and the plan put it on the hat pad: 144 hats played silence
+SILENT_DB = -60.0
 
 
 def speckle(x: np.ndarray, band_name: str) -> np.ndarray:
@@ -242,14 +247,17 @@ class _Ncc:
 
 
 class Library:
-    """The first `seconds` of each file, onset-trimmed and peak-normalized,
+    """The first `seconds` of each file, onset-trimmed and peak-normalized
+    (a file that peaks under SILENT_DB is left out, or never listed: audible),
     plus each file's semitone-band spectrum for the pitch-invariant shortlist,
     and (once built or loaded) the speckle index: per SPECKLE band, the
     entries of noisy roles and their speckles (float16)."""
 
     def __init__(self, paths: list[str], roles: list[str], audio: np.ndarray, seconds: float,
-                 spectra: np.ndarray | None = None):
+                 spectra: np.ndarray | None = None, floor_db: float | None = None):
         self.paths, self.roles, self.audio, self.seconds = paths, roles, audio, seconds
+        self.floor_db = floor_db  # the level floor build() kept entries over (None: an index built before it)
+        self._audible: dict[int, bool] = {}
         self.index = {p: i for i, p in enumerate(paths)}
         self.spectrum_ms = 400 if seconds >= 1.0 else 100  # 808s: long enough to resolve a 30 Hz tone
         if spectra is None or len(spectra) != len(paths):
@@ -274,17 +282,19 @@ class Library:
                 x = trim_onset(read(r["path"], seconds=seconds + 0.5))
             except Exception:
                 continue
-            if not len(x) or not np.any(x):
+            if not len(x) or np.max(np.abs(x)) < 10 ** (SILENT_DB / 20):  # silent: nothing a pad could play
                 continue
             x = fit(x, n) / (np.max(np.abs(x)) or 1.0)
             paths.append(r["path"])
             kinds.append(r["role"])
             audio.append(x.astype(np.float16))
-        return cls(paths, kinds, np.stack(audio) if audio else np.zeros((0, n), np.float16), seconds)
+        return cls(paths, kinds, np.stack(audio) if audio else np.zeros((0, n), np.float16), seconds,
+                   floor_db=SILENT_DB)
 
     def save(self, path: str | Path) -> None:
         np.savez(str(path), paths=np.array(self.paths), roles=np.array(self.roles), audio=self.audio,
-                 seconds=np.array(self.seconds), spectra=self.spectra)
+                 seconds=np.array(self.seconds), spectra=self.spectra,
+                 floor_db=np.array(np.nan if self.floor_db is None else self.floor_db))
 
     @classmethod
     def load(cls, path: str | Path) -> Library:
@@ -292,8 +302,9 @@ class Library:
         (speckle_path) and was built from these entries by this version."""
         with np.load(str(path), allow_pickle=False) as data:  # each array read once: not copied again (0.5 GB)
             spectra = data["spectra"] if "spectra" in data.files else None
+            floor = float(data["floor_db"]) if "floor_db" in data.files else np.nan
             lib = cls([str(p) for p in data["paths"]], [str(r) for r in data["roles"]],
-                      data["audio"], float(data["seconds"]), spectra)
+                      data["audio"], float(data["seconds"]), spectra, None if np.isnan(floor) else floor)
         if speckle_path(path).is_file():
             lib.load_speckle(speckle_path(path))
         return lib
@@ -473,8 +484,32 @@ class Library:
         results.sort(key=lambda r: -r["ncc"])
         return results
 
+    def audible(self, i: int) -> bool:
+        """Whether entry i's file peaks at SILENT_DB or more over what build()
+        read of it (its first seconds + 0.5): so for every entry of an index
+        built with that floor; read once per entry listed from one built
+        before it (9 ms a file: one of the 8,854 entries of the suite's
+        library peaks under the floor, at -432 dBFS). A file that cannot be
+        read is kept (an index searched without its files)."""
+        if self.floor_db is not None and self.floor_db >= SILENT_DB:
+            return True
+        if i not in self._audible:
+            try:
+                x = read(self.paths[i], seconds=self.seconds + 0.5)
+                self._audible[i] = bool(len(x)) and float(np.max(np.abs(x))) >= 10 ** (SILENT_DB / 20)
+            except Exception:
+                self._audible[i] = True
+        return self._audible[i]
+
     def _listed(self, ranked: list[dict], top: int) -> list[dict]:
-        out = ranked[:top] if top else ranked
+        """The ranking's first `top` audible entries (all of them with top 0),
+        with path, role, NCC to 4 places and lag in ms."""
+        out: list[dict] = []
+        for r in ranked:
+            if top and len(out) == top:
+                break
+            if self.audible(r["i"]):
+                out.append(r)
         for r in out:
             r["path"], r["role"] = self.paths[r["i"]], self.roles[r["i"]]
             r["ncc"] = round(r["ncc"], 4)
