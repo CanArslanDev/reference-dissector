@@ -16,7 +16,9 @@ their settled pitch until 150-200 ms, where the fitted drop (bass_low-1:
 25.9 semitones, 19 ms) has long settled. tracked_shot() makes the one-shot
 with the template's own periods instead: the fitted voice's envelope, drive
 and attack, its pitch crossing zero where the template's does
-(periods(), from bass808's pitch curve) until the drop has settled.
+(periods(), from bass808's pitch curve) until the drop has settled, laid
+out as the template is (it attacks where the template does after its
+onset, so the periods play where the template's do).
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import differential_evolution, least_squares
 
-from .audio import PRE, SR, band, samples
+from .audio import PRE, SR, attack_time, band, samples
 from .cache import keep, kept, key
 from .describe import envelope_db, harmonics, mel_distance
 from .xcorr import ncc
@@ -52,8 +54,16 @@ SETTLED_CENTS, SETTLED_S, EASE_S, ROUNDS, STEADY_S, WORST_S = 5.0, 0.1, 0.05, 3,
 # take out (that run's plan |cents| 1.9 -> 15.1). On the 12 (the plan's rendered 808 against the truth's
 # 808 stem, notes of two periods or more: mean frequency over their read window), followed as they rise
 # the one-shots read a median 5.3 cents from the truth, with the fitted drop played up to the rise 6.1,
-# pooled 1.9; their waveform NCC against the template 0.9020, 0.8560, 0.9025 (median)
+# pooled 2.1; their waveform NCC against the template 0.9020, 0.8465, 0.9025 (median)
 RISE_CENTS = 100.0
+# the one-shot is laid out as the template is: it starts at the template's onset and attacks
+# (audio.attack_time, 808 band) where the template attacks after it (bass808.json attack_ms less PRE: -4.5 to
+# +47 ms on the suite's runs, where the fitted voices attack 0-13 ms after their own start). A voice that
+# attacks late starts up to EARLIEST_S before the one-shot (its head left out, the one-shot faded in over
+# FADE_IN_S); one that attacks early plays at QUIET of its level until a rise of RISE_S puts the attack there
+# (the stems' 808 sits at 13-35 % of its peak before a late attack); either within ATTACK_TOL of the closest
+# attack the search finds
+FADE_IN_S, EARLIEST_S, QUIET, RISE_S, ATTACK_TOL = 5e-4, 0.05, 0.2, 0.002, 2.5e-4
 
 
 @dataclass
@@ -306,8 +316,8 @@ def _pooled(z: np.ndarray, upto: int) -> np.ndarray:
     violators: their least-squares non-decreasing fit), so z[0], z[upto] and
     the cycles between stay the template's. The pitch through them (a PCHIP
     of the crossings, as the voice and the reader take it) still dips where
-    a pooled period follows a much shorter one: on 4 of the suite's 12
-    rises it reads 162-172 cents back up from that dip (the 12 templates
+    a pooled period follows a much shorter one: on 3 of the suite's 12
+    rises it reads 166-172 cents back up from that dip (the 12 templates
     rise 104-448 cents there, median 260; the truth's own 808 22-30)."""
     blocks: list[list[float]] = []  # [sum, count] of each run pooled
     for d in np.diff(z[:upto + 1]):
@@ -322,24 +332,34 @@ def _pooled(z: np.ndarray, upto: int) -> np.ndarray:
     return np.r_[z[0] + np.r_[0.0, np.cumsum(steps)], z[upto + 1:]]
 
 
+def _drop_cycles(p: Params, seconds: float, ratio: float) -> float:
+    """The cycles the fitted drop, moved by ratio, turns through over its
+    first `seconds` (0 for none)."""
+    if seconds <= 0:
+        return 0.0
+    g = p.glide_ms / 1000
+    return ratio * (p.f_end_hz * seconds + (p.f_start_hz - p.f_end_hz) * g * (1 - np.exp(-seconds / g)))
+
+
 def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int | None,
-            blend: float = 0.5) -> tuple[np.ndarray, int, float] | None:
-    """(cycles at times t, m, scale): the fitted drop at pitch_hz up to
-    z[0], blended into the first period's slope over its last `blend`
-    period and scaled so that it starts at the fit's phase and m cycles end
-    there (by default the whole number nearest the drop's own), then a
-    PCHIP through z[:last + 1] (a cycle each), then the slope there eased
-    to pitch_hz over EASE_S. The scale moves the drop's pitch with it, so
-    the pitch steps by 1200 * log2(1 / scale) cents at z[0]. None where no
-    cycle reaches z[0]."""
+            start: float = 0.0, blend: float = 0.5) -> tuple[np.ndarray, int, float] | None:
+    """(cycles at times t, m, scale): the fitted drop at pitch_hz from the
+    voice's start (`start` s, at or before the one-shot's) up to z[0],
+    blended into the first period's slope over its last `blend` period and
+    scaled so that it starts at the fit's phase and m cycles end there (by
+    default the whole number nearest the drop's own), then a PCHIP through
+    z[:last + 1] (a cycle each), then the slope there eased to pitch_hz over
+    EASE_S. The scale moves the drop's pitch with it, so the pitch steps by
+    1200 * log2(1 / scale) cents at z[0]. None where no cycle reaches z[0]."""
     pchip = PchipInterpolator(z, np.arange(len(z), dtype=float))
     slope = pchip.derivative()
     d0, i0 = float(slope(z[0])), int(np.ceil(z[0] * SR))
     w = np.clip((t[:i0] - z[0]) * d0 / blend + 1, 0.0, 1.0)
     w = w * w * (3 - 2 * w)
-    f = (1 - w) * _drop_hz(p, t[:i0], pitch_hz / p.f_end_hz) + w * d0
-    so_far = np.r_[0.0, np.cumsum(f[:-1])] / SR
-    reach = so_far[-1] + f[-1] * (z[0] - t[i0 - 1])  # cycles from 0 to z[0]
+    ratio = pitch_hz / p.f_end_hz
+    f = (1 - w) * _drop_hz(p, t[:i0] - start, ratio) + w * d0
+    so_far = _drop_cycles(p, -start, ratio) + np.r_[0.0, np.cumsum(f[:-1])] / SR
+    reach = so_far[-1] + f[-1] * (z[0] - t[i0 - 1])  # cycles from the voice's start to z[0]
     if not reach > 0:
         return None
     a = p.phase / (2 * np.pi)
@@ -357,7 +377,35 @@ def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int,
     return u, m, scale
 
 
-def _along(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int) -> dict | None:
+def _voiced(p: Params, t: np.ndarray, u: np.ndarray, start: float = 0.0, quiet: float = 0.0) -> np.ndarray:
+    """The voice at cycles u, its envelope from its start (_cycles'; before
+    the one-shot's, which then fades in over FADE_IN_S), at QUIET of its
+    level until RISE_S before `quiet` (s; 0: from the start)."""
+    y = _sound(p, np.maximum(t - start, 0.0), 2 * np.pi * u)
+    if start < 0:
+        n = int(round(FADE_IN_S * SR))
+        y[:n] *= np.sin(np.linspace(0.0, np.pi / 2, n)) ** 2
+    if quiet > 0:
+        w = np.clip((t - quiet) / RISE_S + 1, 0.0, 1.0)
+        y *= (QUIET + (1 - QUIET) * w * w * (3 - 2 * w)).astype(np.float32)
+    return y
+
+
+def _read_off(y: np.ndarray, z: np.ndarray, pitch_hz: float) -> tuple[np.ndarray, np.ndarray] | None:
+    """(how far the reader's crossings of y nearest z land off them, s; the
+    index of the one nearest z[0]: how many the reader takes before it),
+    as scenarios.tuning takes them; None where it finds under two."""
+    from .scenarios import crossings, native_f0
+    read = crossings(y, native_f0(y) or pitch_hz)
+    if len(read) < 2:
+        return None
+    i = np.clip(np.searchsorted(read, z), 1, len(read) - 1)
+    i -= np.abs(read[i - 1] - z) < np.abs(read[i] - z)
+    return read[i] - z, i
+
+
+def _along(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, m: int,
+           onset: tuple[float, float] = (0.0, 0.0)) -> dict | None:
     """The voice whose crossings, as scenarios.tuning reads them, land on
     z[:last + 1]: in each round the crossings it is made through move by
     how far the reader's nearest ones land off them (the low-pass, and the
@@ -365,23 +413,19 @@ def _along(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, 
     with the last (the ease then starts from the slope the reader reads
     there), the closest kept. j: how many crossings the reader takes before
     z[0] (on the template, one: the attack's, which it leaves out)."""
-    from .scenarios import crossings, native_f0
     made, best = z.copy(), None
     for _ in range(ROUNDS + 1):
-        got = _cycles(p, t, pitch_hz, made, last, m)
+        got = _cycles(p, t, pitch_hz, made, last, m, onset[0])
         if got is None:
             break
         u, m, scale = got
-        y = _sound(p, t, 2 * np.pi * u)
-        read = crossings(y, native_f0(y) or pitch_hz)
-        if len(read) < 2:
+        y = _voiced(p, t, u, *onset)
+        if (read := _read_off(y, z[:last + 1], pitch_hz)) is None:
             break
-        i = np.clip(np.searchsorted(read, z[:last + 1]), 1, len(read) - 1)
-        i -= np.abs(read[i - 1] - z[:last + 1]) < np.abs(read[i] - z[:last + 1])
-        off = read[i] - z[:last + 1]
+        off, i = read
         worst = float(np.max(np.abs(off)))
         if best is None or worst < best["worst_s"]:
-            best = {"y": y, "j": int(i[0]), "worst_s": worst, "scale": scale}
+            best = {"y": y, "j": int(i[0]), "worst_s": worst, "scale": scale, "made": made.copy(), "m": m}
         made[:last + 1] -= off
         made[last + 1:] -= off[-1]
         if worst <= STEADY_S or np.any(np.diff(made) < 0.002):
@@ -389,8 +433,40 @@ def _along(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, 
     return best
 
 
-def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: float = 3.0,
-                 fade_ms: float = 10) -> tuple[np.ndarray, dict] | None:
+def _onset(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, attack_s: float,
+           m: int | None = None) -> tuple[float, float]:
+    """(start, quiet) for _voiced so that the one-shot attacks attack_s in:
+    a voice that attacks later starts before the one-shot, every
+    millisecond up to EARLIEST_S before it, then every 0.1 ms around the
+    closest (the attack moves 0.7-1 ms a millisecond, in steps where it
+    passes a half cycle); one that attacks earlier stays quiet until there.
+    Of the starts (quiets) within ATTACK_TOL of the closest attack, the one
+    nearest 0."""
+    n = min(len(t), samples(300))
+
+    def attack_at(start: float, quiet: float) -> float:
+        got = _cycles(p, t[:n], pitch_hz, z, last, m, start)
+        return np.inf if got is None else attack_time(_voiced(p, t[:n], got[0], start, quiet), "808")
+    own = attack_at(0.0, 0.0)
+    if abs(own - attack_s) <= ATTACK_TOL:
+        return 0.0, 0.0
+    late = own > attack_s
+    best = 0.0
+    for step, span in ((1e-3, None), (1e-4, 1e-3)):
+        if span is None:
+            grid = -np.arange(0.0, EARLIEST_S + 1e-9, step) if late else np.arange(0.0, attack_s + 2 * RISE_S, step)
+        else:
+            grid = best + np.arange(-span, span + 1e-9, step)
+            grid = grid[(grid >= -EARLIEST_S) & (grid <= 0)] if late else grid[grid >= 0]
+        grid = np.r_[grid, best]
+        off = np.abs(np.array([attack_at(g, 0.0) if late else attack_at(0.0, g) for g in grid]) - attack_s)
+        near = grid[off <= off.min() + ATTACK_TOL]
+        best = float(near[np.argmin(np.abs(near))])
+    return (best, 0.0) if late else (0.0, best)
+
+
+def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, attack_s: float | None = None,
+                 seconds: float = 3.0, fade_ms: float = 10) -> tuple[np.ndarray, dict] | None:
     """A sample for Simpler (one_shot's level and fade) whose pitch follows
     the template's own periods, and what synth808.json records of it: the
     fitted voice's envelope, drive and attack, crossing zero where the
@@ -400,19 +476,31 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: fl
     Before the first crossing, the fitted drop, started at the fit's phase
     and scaled to end a whole cycle there: of the two counts nearest its
     own, one whose crossings the rounds put in place (_along), the one
-    scaled least (0.58-2.1 on the suite's runs, median 1.04-1.06); its
-    pitch steps by that scale at the first crossing (_cycles). None where
-    the curve holds under three crossings or has settled by its second, or
+    scaled least (0.58-2.1 on the suite's runs, median 1.04); its pitch
+    steps by that scale at the first crossing (_cycles). None where the
+    curve holds under three crossings or has settled by its second, or
     where the rounds leave a crossing more than WORST_S off (one_shot's
-    voice then; on the suite's runs the worst is 0.049 ms).
+    voice then; on the suite's runs the worst is 0.31 ms).
+
+    With attack_s (the template's attack after its onset), the one-shot is
+    laid out as the template is: it starts at the onset and attacks there
+    (_onset; on the suite's runs within 0.27 ms, median). plan_808 puts a
+    note's attack on the analysis' t_attack: the one-shot's own attack
+    (0-13 ms in) had placed its copied periods up to 37 ms late or 15 ms
+    early (bass_low-1: 7 ms late, its notes under 120 ms 38 cents over the
+    analysis' as estimate_from_plan reads them, a median 0.6 now). The
+    plan's notes now start a median 0.27 ms from the analysis' onsets (1.7
+    and 2.5 ms before, htdemucs and htdemucs_ft), more than 2 ms only where
+    the template attacks before its onset (6 of 96 runs, up to 4.9 ms).
 
     scenarios.tuning reads the result as the analysis reads the template:
     from 50 ms to the end of the periods followed (0.15-0.62 s; past the
-    pooled ones), within 0.2 cents (median per one-shot; 1.05 at most)
-    where it takes one crossing before the first period, as on the template
-    (39 one-shots on htdemucs, 29 on htdemucs_ft); where it takes none or
-    two (the attack's low-passed start), up to 122 cents apart before 70 ms
-    (a fast note is read later). About 0.2 s a one-shot (0.4 at most)."""
+    pooled ones), within 0.13-0.18 cents (median per one-shot; 1.05 at
+    most) where it takes one crossing before the first period, as on the
+    template (32 one-shots on htdemucs, 26 on htdemucs_ft); where it takes
+    none or two (the attack's low-passed start), up to 132 cents apart
+    before 70 ms (a fast note is read later). About 0.3 s a one-shot (0.6
+    at most)."""
     found = periods(curve, curve_hz)
     if found is None or found[0][0] < 0.005:
         return None
@@ -426,21 +514,37 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, seconds: fl
     first = _falls_from(z, curve, last)
     z = _pooled(z, min(first + 1, last)) if first else z
     t = _times(int(seconds * SR))
-    got = _cycles(p, t, pitch_hz, z, last, None)
+
+    def onset(m: int | None, at: np.ndarray = z) -> tuple[float, float]:
+        return (0.0, 0.0) if attack_s is None else _onset(p, t, pitch_hz, at, last, attack_s, m)
+    got = _cycles(p, t, pitch_hz, z, last, None, onset(None)[0])
     if got is None:
         return None
     a = p.phase / (2 * np.pi)
     natural = a + (got[1] - a) / got[2]
-    tries = [r for m in (int(np.floor(natural)), int(np.floor(natural)) + 1)
-             if m > a and (r := _along(p, t, pitch_hz, z, last, m))]
+    tries = []
+    for m in (int(np.floor(natural)), int(np.floor(natural)) + 1):
+        if m > a and (r := _along(p, t, pitch_hz, z, last, m, at := onset(m))):
+            apart = 0.0 if attack_s is None else abs(attack_time(r["y"], "808") - attack_s)
+            tries.append(dict(r, onset=at, apart=apart))
     if not tries:
         return None
     pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
     if pick["worst_s"] > WORST_S:
         return None
+    if pick["apart"] > 4 * ATTACK_TOL:
+        # the rounds moved the crossings the attack ends on: its start found again on them, and the rounds
+        # run again from there; kept where the crossings stay in place and the attack lands closer
+        at = onset(pick["m"], pick["made"])
+        again = _along(p, t, pitch_hz, z, last, pick["m"], at)
+        if again and again["worst_s"] <= max(STEADY_S, pick["worst_s"]):
+            apart = abs(attack_time(again["y"], "808") - attack_s)
+            if apart < pick["apart"]:
+                pick = dict(again, onset=at, apart=apart)
     y = _finished(pick["y"], fade_ms)
     info = {"periods": len(z), "pooled": min(first + 1, last) if first else 0, "followed": last + 1,
             "until_s": round(float(z[last]), 4), "settled": last + 1 < len(z), "curve_rms_cents": round(rms, 3),
             "attack_scale": round(float(pick["scale"]), 3), "read_as_template": pick["j"] == 1,
-            "worst_ms": round(1000 * pick["worst_s"], 3)}
+            "worst_ms": round(1000 * pick["worst_s"], 3), "start_ms": round(1000 * pick["onset"][0], 2),
+            "quiet_ms": round(1000 * pick["onset"][1], 2), "attack_ms": round(1000 * attack_time(y, "808"), 2)}
     return y, info
