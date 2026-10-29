@@ -41,7 +41,7 @@ This project analyses commercial recordings and uses sample libraries. What it p
 - **Your library:**
   - the inventory, the index (`library.npz` holds audio) and its speckle index (`library_speckle.npz`);
   - file and kit names. `scripts/export_results.py` replaces names from a personal library with the role and a keyed hash: the first 8 hex digits of an HMAC-SHA256 of the file's path, under a random key that the first export writes to `work/export-key` and that stays there. A plain hash hides nothing: SHA-1 of the path, cut to 6 digits, gave back every file the PIRAMIT summary named, from a list of the library's files. Ableton's Core Library keeps its names.
-- **The synthesized 808 one-shot** (`808 (synth).wav`, and the copy `live-build` puts in your User Library). It is ours, but fitted to a recording; the parameters are published, and the sound can be re-rendered from them.
+- **The synthesized 808 one-shot** (`808 (synth).wav`, and the copy `live-build` puts in your User Library). It is ours, but fitted to a recording, and its pitch follows the recording's own 808 over its drop: the template's periods, from its pitch curve in `bass808.json`, which stays local. The voice's parameters are published, and the fitted voice can be re-rendered from them; the one-shot the plan plays cannot.
 - **Rendered plans** (`render.render_plan`): the song's pattern played with your samples. The suite renders each plan for its level scores and deletes the render.
 
 ## Using the results

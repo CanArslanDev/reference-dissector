@@ -158,7 +158,7 @@ A clap that moves from hit to hit is smeared in the average: the pair search tak
 | fit-808's 808 template | 12 |
 | the true 808 file at the true notes (an oracle) | 17 |
 
-The rule is only as good as the 808 it takes out, and it is off by default. match runs before fit-808, so a full run has no one-shot to take out. A run that reused fit-808's one-shot switched 2 of its 26 kick templates, and neither switch found the right file.
+The rule is only as good as the 808 it takes out, and it is off by default. match runs before fit-808, so a full run has no one-shot to take out. A run that reused fit-808's one-shot switched 2 of its 26 kick templates, and neither switch found the right file. These runs took out the fitted voice; since m4 fit-808's one-shot follows the template's own periods ([05](05-808-synthesis.md#in-live)), and the rule has not been measured with it.
 
 ## Things that broke identification here, in order
 

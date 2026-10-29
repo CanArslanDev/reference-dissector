@@ -46,7 +46,7 @@ So use both.
 
 A score is only meaningful with a threshold checked on cases with a known answer. `calibrate` builds those cases from your own library ([03](03-calibration.md)), and the verdict rules come from them ([04](04-identifying-samples.md)). They tell a model whether "0.95" means "the same file" (noisy sounds, clear margin) or merely "an 808" (every 808 scores that).
 
-`refdissect suite` goes further: 48 beats in 22 scenarios with every hit, 808 note, melodic note and chord known. It scores what the pipeline heard and what Live will play (the plan, rendered offline) on the same strict terms, so a model can see which step loses a sound or a few milliseconds. With replica mode's fixes of 2026-10-29: drum hits and 808 onsets F1@20 0.888 heard, 0.876 played (m3; 0.886 and 0.667 at m2g, before the plan gave pads on evidence; [03](03-calibration.md)).
+`refdissect suite` goes further: 48 beats in 22 scenarios with every hit, 808 note, melodic note and chord known. It scores what the pipeline heard and what Live will play (the plan, rendered offline) on the same strict terms, so a model can see which step loses a sound or a few milliseconds. With replica mode's fixes of 2026-10-29: drum hits and 808 onsets F1@20 0.888 heard, 0.876 played (m3 and m4; 0.886 and 0.667 at m2g, before the plan gave pads on evidence; [03](03-calibration.md)).
 
 ## Rules for comparing fairly
 
