@@ -47,7 +47,9 @@ import mido
 import numpy as np
 
 from .audio import PRE, SR, attack_time, read, rms_db, transpose, trim_onset
-from .render import VOL_VEL, glide_s, pad_settings, render_808, velocity_gain
+from .detect import RESIDUAL_BARS, SAME_MS, min_hits_for
+from .grid import Grid
+from .render import VOL_VEL, as_played, glide_s, pad_settings, render_808, velocity_gain
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -61,6 +63,9 @@ GENERATED = Path("Samples") / "AbletonMCP Generated"
 MELODIC_INSTRUMENT = "Drift"
 LEGATO_S = 0.01  # a legato 808 note's predecessor is held this long past its start (overlapping notes glide)
 GLIDE_LEAST = 3  # legato notes a plan needs to put its 808 on one voice with Glide (fewer play as notes of their own)
+# a hit recurs where another hit of its sound sits at its place of the bar, within RECUR_MS, 1 to
+# RECUR_BARS bars away (recurring)
+RECUR_MS, RECUR_BARS = 6.0, 8
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -275,44 +280,108 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
-              headroom_db: float = 4.0, min_hits: int = 12, min_clean: float = 0.5,
-              min_ncc: float = 0.75, melodic: dict | None = None) -> dict:
+              headroom_db: float = 4.0, min_hits: int | None = None, min_clean: float = 0.5,
+              min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
-    A detected sound gets a Drum Rack pad when it was detected often and
-    cleanly and the library has something close (NCC >= min_ncc), or when
-    it is a kick or snare (the backbone, played with the closest sound even
-    if far). A sound found twice (same_as) shares the first one's pad; the
-    same file at another pitch plays on a pad of its own, transposed so far
+    A detected sound gets a Drum Rack pad on evidence that it is one:
+    - it was detected min_hits times, by default as often as discover()
+      asks of the rarest sound it keeps (min_hits_for at RESIDUAL_BARS: 3,
+      or one per 16 bars);
+    - one of discover()'s residual pass (found where no template of its band
+      plays) recurs: at least min_recur of its hits have another at their
+      place of the bar 1 to RECUR_BARS bars away (recurring, on the grid's
+      bars as bar_clock reads them: its tempo map, its tempo change);
+    - it is clean (sound_clean, over the templates merged into it: at least
+      min_clean of its own matched-filter hits at NCC 0.8 or more);
+    - the library has something close (NCC >= min_ncc), or it is the
+      backbone: a kick or snare discover() found on the places of the beat
+      (not in its residual pass), clean (0.7) and played throughout (one hit
+      per 4 bars, min_hits_for), played with the closest sound even if far.
+    Measured on the 48 suite beats (plan level, mean over scenarios,
+    htdemucs; htdemucs_ft in brackets), against 12 hits and the backbone
+    rule for any template: open hats F1@20 0.043 -> 0.980 [0.022 -> 0.993]
+    (4-8 hits a beat), snares 0.836 -> 0.936 [0.816 -> 0.918] (tempo72's and
+    tempo95's 8 hits: 0 -> 1.0), crash, tom and rim 0 -> 0.5 [0.5, 0.45, 0];
+    sounds with a pad that play no truth sound (drums.extra) 0.71 -> 0.05
+    [0.32 -> 0.02], false hits 22.0 -> 11.7 [10.1 -> 4.6] a beat. Those
+    sounds are mostly residual templates on the transients of the suite's
+    melodic loop, which plays at its own tempo (scenarios._bleed): 3 of the
+    86 such templates recur (m2g), against 209 of the 214 whose moments are
+    90 % or more a truth sound's. That is a suite figure: a loop on the
+    beat's tempo recurs by construction, and with recurrence waived they
+    are 0.37 [0.23] with 16.3 [7.1] false hits a beat (an estimate for such
+    songs; by count alone 0.83 and 25.2). Held to recurrence, a grid-found
+    sound depended on the tempo being exact and constant: plan drums F1@20
+    0.866 -> 0.507 [0.897 -> 0.568] on a tempo rising 3 % over each beat,
+    0.637 [0.662] with the bpm 0.2 % off (a forced --bpm), and every sound
+    of a second tempo lost its pad; residual templates alone: 0.855
+    [0.882], 0.853 [0.883], and with the drift kept as tempo map 0.867
+    [0.897], the suite's own 0.866 [0.897] unchanged.
+    A sound found twice (same_as) shares the first one's pad; the same file
+    at another pitch plays on a pad of its own, transposed so far
     (_pitched_pads: discover() finds a pitched copy as a template too, and
     producer-2's hat 3 semitones down had played at the hat's pitch, its
-    own pitched copies 300 cents off). The pad plays the top match at its
-    pitch: Transpose in whole semitones and Detune in whole cents
-    (pad_pitch), as Live keeps them. Velocities play each hit's gain under
-    Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A match's
-    layers (matches.json) are not played yet. With melodic (melodic.json),
-    each tonal stem's notes get a MIDI track."""
+    own pitched copies 300 cents off). A pad plays a strike once: a hit
+    within SAME_MS of one that another template put on the pad is that
+    strike found again (on 5 seed-2 suite beats a snare-band template of
+    the kick-and-hat moments played the hat's file a second time on 6-15
+    of them; false hits 11.7 -> 10.7 a beat, htdemucs). So does the
+    backbone: it is planned first, most hits first, and another kick or
+    snare template's hit within SAME_MS of one of its hits is that kick or
+    snare seen again (a template left with none gets no pad). Ordered by
+    NCC alone, swing66-2's snare-band template of 10 kick moments (NCC
+    0.895, under the kick's 0.713) took pad 36 and played them a second
+    time: kick F1@20 0.903 -> 0.846, swing66's 0.942 -> 0.914. With it,
+    plan drums F1@20 0.866 -> 0.866 [0.897 -> 0.898], kick 0.859 -> 0.862
+    [0.921 -> 0.925], false hits 10.7 -> 10.3 [4.3 -> 3.7] a beat, and no
+    role of any scenario more than 0.005 under the base code's (the
+    layers scenario's second kick, on every other kick, had no pad before
+    either). The pad plays the
+    top match at its pitch: Transpose in whole semitones and Detune in
+    whole cents (pad_pitch), as Live keeps them. Velocities play each hit's
+    gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
+    match's layers (matches.json) are not played yet. With melodic
+    (melodic.json), each tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
     length_beats = 4 * math.ceil(duration * beats_per_second / 4)
     pads, drum_notes, used = {}, [], {k: 0 for k in PADS}
     pad_of: dict[str, int] = {}
-    # strongest identifications first; a template found twice shares its pad
-    order = sorted(analysis["templates"], key=lambda k: (matches.get(k, {}).get("same_as") is not None,
-                                                         -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
+    leads: dict[tuple, float] = {}
+    played: dict[int, list[float]] = {}  # where each pad's hits attack (s)
+    g = analysis["grid"]
+    grid = Grid(bpm, g.get("phase", 0.0), g.get("beats_per_bar", 4), g.get("beat_unit", 4))
+    n = int(round(duration * SR))
+    least = min_hits if min_hits is not None else min_hits_for(n, grid, RESIDUAL_BARS)
+    backbone = min_hits_for(n, grid)  # one hit per 4 bars
+    clean, clock = sound_clean(analysis), bar_clock(g)
+    spine = {k: _backbone(v, matches.get(k), clean[k], backbone) for k, v in analysis["templates"].items()}
+    # the backbone first, most hits first, then the strongest identifications; a template found twice shares
+    # its pad
+    order = sorted(analysis["templates"], key=lambda k: (
+        matches.get(k, {}).get("same_as") is not None, not spine[k],
+        -analysis["templates"][k]["detected_hits"] if spine[k]
+        else -(matches.get(k, {}).get("top") or [{"ncc": 0}])[0]["ncc"]))
+    struck: dict[str, list[float]] = {}  # where the backbone's kicks and snares attack (s)
     for name in order:
         info, m = analysis["templates"][name], matches.get(name)
-        if not m or info["detected_hits"] < min_hits or info.get("clean", 1.0) < min_clean:
+        hits = analysis["events"][name]
+        if (not m or info["detected_hits"] < least or clean[name] < min_clean
+                or (info.get("found", "grid") != "grid"
+                    and recurring([e.get("t_attack", e["t"]) for e in hits], clock) < min_recur)):
             continue
         role = m["role"] if m["role"] in PADS else "perc"
-        structural = role in ("kick", "snare") and info.get("clean", 1.0) >= 0.7 and info["detected_hits"] >= 16
+        seen = np.array(struck.get(role, []))
+        if len(seen) and all(np.min(np.abs(seen - _attack_at(e, info))) <= SAME_MS / 1000 for e in hits):
+            continue  # every hit is a kick (snare) the backbone plays: that sound seen again
         shift = 0  # semitones from the pad's pitch to the template's
         if m.get("same_as") in pad_of:
             note = pad_of[m["same_as"]]
             if m["top"][0]["path"] == pads[str(note)]["path"]:
                 shift = pad_pitch(m["top"][0])["transpose"] - pads[str(note)]["transpose"]
-        elif m["top"][0]["ncc"] >= min_ncc or structural:
+        elif m["top"][0]["ncc"] >= min_ncc or spine[name]:
             if used[role] >= len(PADS[role]):
                 continue
             note = PADS[role][used[role]]
@@ -323,15 +392,24 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         else:
             continue  # nothing in the library is close: left out rather than played wrong
         pad_of[name] = note
-        hits = analysis["events"][name]
         notes = {0: note, **_pitched_pads(pads, note, {h.get("semitones", 0) + shift for h in hits} - {0})}
+        before = {k: np.array(v) for k, v in played.items()}  # the other templates' hits on each pad
         for e, v in zip(hits, velocities([h["gain"] for h in hits], vol_vel=VOL_VEL)):
             st = e.get("semitones", 0)
             if st + shift not in notes:  # a copy without a free pad is left out, not played unpitched
                 continue
-            # a note goes where its hit attacks: t_attack, or the template's attack_s after its window starts
-            t = e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-st / 12))
-            drum_notes.append({"pitch": notes[st + shift], "start_time": round(t * beats_per_second, 4),
+            # the note starts that much before the hit's attack that the pad's sample attacks there (pad_lead)
+            t = _attack_at(e, info)
+            pad = notes[st + shift]
+            if len(before.get(pad, [])) and np.min(np.abs(before[pad] - t)) <= SAME_MS / 1000:
+                continue  # one moment of one sample: the pad plays it already, for a template of that sound
+            if len(seen) and np.min(np.abs(seen - t)) <= SAME_MS / 1000:
+                continue  # a kick (snare) the backbone plays already
+            played.setdefault(pad, []).append(t)
+            if spine[name]:
+                struck.setdefault(role, []).append(t)
+            drum_notes.append({"pitch": pad, "start_time": round(max(0.0, t - pad_lead(pads[str(pad)], leads))
+                                                                   * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
@@ -355,6 +433,136 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     return plan
+
+
+def _backbone(info: dict, m: dict | None, clean: float, least: int) -> bool:
+    """A kick or snare discover() found on the places of the beat (not in
+    its residual pass), clean (0.7) and played throughout (least hits)."""
+    return (bool(m) and m["role"] in ("kick", "snare") and info.get("found", "grid") == "grid" and clean >= 0.7
+            and info["detected_hits"] >= least)
+
+
+def _attack_at(e: dict, info: dict) -> float:
+    """Where a hit attacks: t_attack, or its template's attack_s after its
+    window starts (at the hit's semitones)."""
+    return e.get("t_attack", e["t"] - PRE / SR + info.get("attack_s", PRE / SR) * 2 ** (-e.get("semitones", 0) / 12))
+
+
+def recurring(t, bar, ms: float = RECUR_MS, bars: int = RECUR_BARS) -> float:
+    """The share of hits (times in s) with another hit at the same place of
+    the bar (within ms) 1 to `bars` bars away: drums are programmed in
+    patterns. bar is a bar's length (s), or the song's bars as bar_clock
+    gives them, where its tempo drifts or changes. Lags of 1 to 8 bars hold
+    patterns of 3 bars (3/4 read in 4/4) and sounds that play every 8 bars
+    (rare-1's rim), and a song's length does not raise the chance of a
+    stray hit recurring. Only 1 to 4 bars away lost the rim, and the suite's
+    snares 0.936 -> 0.918. A drum sound recurs within 4 ms where it does
+    within 12: 209 of m2g's 214 templates whose moments are 90 % or more a
+    truth sound's, and every PIRAMIT template that recurs. A loop at a
+    nearby tempo drifts 8-12 ms a bar (producer-1 tiled six times: 72 hits
+    of one recur within 10 ms, none within 8); within 12 ms, 7 of m2g's 86
+    templates that play no truth sound recurred, against 3 within 6.
+
+    That makes it a test of the tempo too: on a constant grid 0.2 % off the
+    song's tempo (3.5 ms a bar at 136 BPM), the suite's drum sounds stopped
+    recurring (plan drums F1@20 0.866 -> 0.637 with every template held to
+    it), and on a tempo rising 3 % over the beat, 0.866 -> 0.507."""
+    t = np.sort(np.asarray(t, dtype=float))
+    if len(t) < 2:
+        return 0.0
+    s, b = bar if isinstance(bar, tuple) else (np.array([0.0, bar]), np.array([0.0, 1.0]))
+    at = _continued(t, s, b)  # in bars
+    tol = ms / 1000 * (_continued(t + 1e-3, s, b) - _continued(t - 1e-3, s, b)) / 2e-3
+    near = np.zeros(len(t), bool)
+    for lag in range(1, bars + 1):
+        for target in (at + lag, at - lag):
+            i = np.clip(np.searchsorted(at, target), 1, len(at) - 1)
+            near |= np.minimum(np.abs(at[i] - target), np.abs(at[i - 1] - target)) <= tol
+    return float(near.mean())
+
+
+def bar_clock(grid: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Where an analysis grid's bars fall, as (seconds, bars), piecewise
+    linear and continued past both ends: the grid's constant tempo, or the
+    beats of its tempo_map where they drift from it (grid.drift), and
+    outside the part the grid follows (tempo_change: span_s), the other
+    tempo (ratio, the second's over the first's)."""
+    g = Grid(grid["bpm"], grid.get("phase", 0.0), grid.get("beats_per_bar", 4), grid.get("beat_unit", 4))
+    lines = np.asarray(grid.get("tempo_map") or [], dtype=float)
+    if len(lines) >= 2:  # quarter-note lines
+        s, b = lines, np.arange(len(lines)) * g.beat / g.bar
+    else:
+        s, b = np.array([g.phase, g.phase + g.bar]), np.array([0.0, 1.0])
+    change = grid.get("tempo_change") or {}
+    if change.get("span_s"):
+        lo, hi = change["span_s"]
+        other = change["ratio"] if change.get("grid_follows") == "first" else 1 / change["ratio"]
+        edge = _continued(np.array([lo, hi]), s, b)
+        inside = (s > lo) & (s < hi)
+        s = np.r_[lo - g.bar, lo, s[inside], hi, hi + g.bar]
+        b = np.r_[edge[0] - other, edge[0], b[inside], edge[1], edge[1] + other]
+    return s, b
+
+
+def _continued(x, xp: np.ndarray, fp: np.ndarray) -> np.ndarray:
+    """np.interp, continued past both ends along the first and the last piece."""
+    x = np.asarray(x, dtype=float)
+    y = np.interp(x, xp, fp)
+    lo, hi = x < xp[0], x > xp[-1]
+    y[lo] = fp[0] + (x[lo] - xp[0]) * (fp[1] - fp[0]) / (xp[1] - xp[0])
+    y[hi] = fp[-1] + (x[hi] - xp[-1]) * (fp[-1] - fp[-2]) / (xp[-1] - xp[-2])
+    return y
+
+
+def sound_clean(analysis: dict) -> dict[str, float]:
+    """Each template's clean share over its sound: itself and the templates
+    layers.explain merged into it (their hits are its hits), the largest.
+    A merged template keeps no hits, so its own share is read off its
+    matched-filter peaks over the whole stem (peak_ncc_histogram: those at
+    NCC 0.8 or more of those at 0.6 or more). On layers-2 the snare-band
+    snare (clean 0.44, under min_clean) holds the low-band one merged into
+    it (16 peaks at 0.9 or more, none between 0.4 and 0.9): taken by the
+    name alone, no pad played the snare (plan snare F1@20 1.0 -> 0)."""
+    merged = (analysis.get("layers") or {}).get("merged") or {}
+    own = {}
+    for name, info in analysis["templates"].items():
+        peaks = info.get("peak_ncc_histogram_0.3_to_1.0")
+        if info.get("detected_hits") or not peaks:
+            own[name] = info.get("clean", 1.0)
+        else:
+            own[name] = sum(peaks[5:]) / sum(peaks[3:]) if sum(peaks[3:]) else 0.0
+    out = dict(own)
+    for name in merged:
+        root, seen = name, {name}
+        while root in merged and merged[root]["into"] not in seen:  # merged into one merged in turn
+            root = merged[root]["into"]
+            seen.add(root)
+        if root in out:
+            out[root] = max(out[root], own[name])
+    return out
+
+
+def pad_lead(pad: dict, cache: dict) -> float:
+    """Seconds from a pad's note to its sample's attack as Simpler plays it
+    (from start_s, at Transpose plus Detune; audio.attack_time in the pad
+    role's band, as evaluate.estimate_from_plan times a pad), 0 for a
+    sample that cannot be read. cache keeps one per sample and setting.
+
+    Notes placed at the hits' t_attack played each hit that much late: on
+    the 48 suite beats (htdemucs) the plan's timing medians were kick +2.06
+    ms, snare +1.13, hat +0.56 (mean over scenarios), and 0.0-0.6 ms more
+    than the analysis' on every sound. A note this much earlier attacks
+    where the analysis heard the hit: 162 of the 164 sounds with a pad are
+    timed within 0.3 ms of the analysis (the other two play fewer of its
+    templates)."""
+    s = pad_settings(pad)
+    key = (pad["path"], s["start_s"], s["transpose"] + s["detune_cents"] / 100, s["role"])
+    if key not in cache:
+        try:
+            cache[key] = attack_time(as_played(read(pad["path"]), s["start_s"], key[2]), s["role"])
+        except (OSError, RuntimeError):
+            cache[key] = 0.0
+    return cache[key]
 
 
 def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
