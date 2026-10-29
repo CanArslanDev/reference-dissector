@@ -327,11 +327,25 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     plan = make_plan(analysis, matches, synth, tmp_path)
     plan["tracks"]["808"]["detune_cents"] = -12
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
-    assert t808["settings"] == {"Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0, "Vol < Vel": 0.35}
-    assert t808["voices"] is None
+    assert {k: t808["settings"][k] for k in ("Volume", "Transpose", "Detune", "Vol < Vel")} == {
+        "Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0, "Vol < Vel": 0.35}
+    assert "Glide Mode" not in t808["settings"] and t808["voices"] is None
     plan["tracks"]["808"].update(voices=1, glide_mode="Glide", glide_time_ms=60.7)
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
+
+
+def test_live_defaults_that_change_the_sound_are_turned_off(tmp_path):
+    """Simpler's Snap, on by default, ends a sample 10-30 ms before its file
+    does, and the 808 Simpler's filter, on at 22 kHz and following the key,
+    delayed its low notes by up to 0.46 ms and cut their upper harmonics in
+    the live check: Snap goes off on every pad and on the 808, and the
+    808's filter off, so Live plays the files as render.py does."""
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    spec = {t["name"]: t for t in build_spec(make_plan(analysis, matches, synth, tmp_path))}
+    assert (spec["808 (synth)"]["settings"]["Snap"], spec["808 (synth)"]["settings"]["F On"]) == ("Off", "Off")
+    assert [p["settings"]["Snap"] for p in spec["Drums (library)"]["instrument"]["drum_rack"].values()] == ["Off"]
 
 
 def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
