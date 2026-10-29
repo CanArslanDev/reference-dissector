@@ -520,6 +520,22 @@ def test_each_pad_plays_where_the_stems_hold_its_sound(tmp_path):
     assert _volume(rack["42"]) == pads["42"]["volume_db"] and max(_volume(p) for p in rack.values()) <= 0.0
 
 
+def test_no_pad_plays_over_0_db(tmp_path):
+    """A pad's volume_db over 0 dB (a plan edited by hand) is built and
+    played at 0 dB: the build keeps every Simpler at or under 0 dB, and the
+    renders and estimates of the plan play what it builds."""
+    from refdissect.live import build_spec
+    from refdissect.render import render_plan
+    plan = _kit(tmp_path, kick_in_bass=0.0)
+    m = render_plan(plan, tmp_path / "a", n_samples=4 * SR)
+    plan["tracks"]["drums"]["pads"]["36"]["volume_db"] = 3.0
+    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert rack["36"]["settings"]["Volume"] == "0.0 dB"
+    m3 = render_plan(plan, tmp_path / "b", n_samples=4 * SR)
+    kick, kick3 = (sf.read(tmp_path / d / x["tracks"]["36"], dtype="float32")[0] for d, x in (("a", m), ("b", m3)))
+    assert np.array_equal(kick, kick3)
+
+
 def test_a_perfect_kit_plays_at_the_stems_level(tmp_path):
     """Stems made of the pads' own files at their own balance: the render
     holds each pad's hits and the whole drum track the headroom under the

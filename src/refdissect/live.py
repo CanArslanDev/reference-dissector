@@ -864,7 +864,7 @@ def build_spec(plan: dict) -> list[dict]:
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
                      str(note): {"sample": Path(pad["path"]).name, "warping": False,
-                                 "settings": {"Volume": f"{min(0.0, float(pad.get('volume_db', 0.0))) + 0.0:.1f} dB",
+                                 "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
                                               "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
                                               "Vol < Vel": float(pad.get("vol_vel", VOL_VEL))}}
