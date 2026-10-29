@@ -286,8 +286,8 @@ Measured on the way (Live 12.4):
 **In Live 12.4.6** (2026-10-29; [07](07-building-in-live.md#live-behaviour-measured-here)):
 - **The first live check** built the plan of 74931ce. Its build stopped at the snare-like sound's pad: its file's name is one character long, Live's browser search did not return it within 40 s, and `build_tracks` raised after the 808 track. The other hat's pad loaded an FX hit of the same name. The drums were built again without the stopped pad and recorded (9 pads, all 630 notes); the melodic tracks and stems were not built. Snap ended the snare file 25.4 and 26.9 ms early on its two pads, and the unmatched snare 4.7 ms; 81 of the kick's 93 hits started 1 ms late, as each cut the one before.
 - **The second live check** built the plan of a4f2358 whole and recorded it. It went as 5 `build_tracks` calls: one message from that session could not carry its 1,881 notes. Its 11 Simplers held the plan's files (SHA-1), the two pads above among them, and Live held the 1,881 notes at their starts, pitches and velocities (it shortened 1 note at the 0.05-beat floor).
-  - The 630 drum hits played where `render.py` plays them, within 0.04 ms; the snare file's hits played to the end of the file, within 0.02 ms of `render.py`.
-  - The 101 808 notes started within 0.11 ms of `render.py`'s, at a median −48.8 dB of residual (−46.8 on the 62 restarts). The 20 notes that end in a rest fell to −40 dB 25 ms after their end, in Live and in `render.py`.
+  - The 630 drum hits played where `render.py` plays them, within 0.04 ms; the snare file's hits played to the end of the file, within a sample (0.023 ms) of `render.py`.
+  - The 101 808 notes started within 0.11 ms of `render.py`'s, at a median −47.5 dB of residual (−48.8 on the 39 others, −46.8 on the 62 restarts). The 20 notes that end in a rest fell to −40 dB 25 ms after their end, in Live and in `render.py`.
   - The 8 locators sat where planned, in 4/4; the 3 muted Drift tracks and the 5 stems were built too.
 - Not checked by ear, and against `render.py`, not the song: PIRAMIT has no truth.
 
