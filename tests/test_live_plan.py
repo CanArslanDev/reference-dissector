@@ -441,7 +441,8 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
-         extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0):
+         extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0,
+         stem_gain: float = 1.0):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
     stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
@@ -451,7 +452,8 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     last hat is 3 semitones up (a pitched copy), held at that gain. extra:
     more sounds, {name: (role, file, events)}; hat_only: the analysis found
     the hat alone (the stems still hold the kick); click: a click of noise
-    over the kick's body, at that gain (a bright kick)."""
+    over the kick's body, at that gain (a bright kick); stem_gain: the
+    stems that much louder."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
     t = np.arange(int(0.3 * SR)) / SR
@@ -495,8 +497,8 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
             duck[k * SR:k * SR + SR // 10] = 10 ** (-duck_db / 20)
         bass = bass + under * duck * render_808(t808, sf.read(shot, dtype="float32")[0], 4 * SR, 2.0, 0, True, 1.0,
                                                 "live")
-    sf.write(tmp_path / "drums.wav", drums, SR, subtype="FLOAT")
-    sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
+    sf.write(tmp_path / "drums.wav", stem_gain * drums, SR, subtype="FLOAT")
+    sf.write(tmp_path / "bass.wav", stem_gain * bass, SR, subtype="FLOAT")
     return make_plan(analysis, matches, synth, tmp_path, min_hits=1)
 
 
@@ -534,6 +536,18 @@ def test_no_pad_plays_over_0_db(tmp_path):
     m3 = render_plan(plan, tmp_path / "b", n_samples=4 * SR)
     kick, kick3 = (sf.read(tmp_path / d / x["tracks"]["36"], dtype="float32")[0] for d, x in (("a", m), ("b", m3)))
     assert np.array_equal(kick, kick3)
+
+
+def test_the_pads_make_up_what_the_drum_fader_cannot(tmp_path):
+    """Stems 28 dB louder: the drum fader would need +10.1 dB (-17.9 dB
+    for the same kit at the stems' level), and Live's stops at +6 dB,
+    where every pad played 4.1 dB under its level. The pads under 0 dB
+    make it up: the hat plays where it should (+6 - 15.9 = +10.1 - 20 dB),
+    the kick, at 0 dB already, 4.1 dB under."""
+    plan = _kit(tmp_path, kick_in_bass=0.0, stem_gain=25.0)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert plan["levels"]["drums_track_db"] == 6.0
+    assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-15.9, abs=0.2)
 
 
 def test_a_perfect_kit_plays_at_the_stems_level(tmp_path):
