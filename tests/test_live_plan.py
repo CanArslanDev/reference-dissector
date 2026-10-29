@@ -53,7 +53,8 @@ def test_plan(tmp_path):
     assert list(pads) == ["38"] and pads["38"]["transpose"] == -1
     notes = plan["tracks"]["drums"]["notes"]
     assert len(notes) == 16 and {n["pitch"] for n in notes} == {38}  # same_as shares the pad
-    assert notes[1]["start_time"] == 0.5  # 0.25 s at 120 BPM
+    # 0.25 s at 120 BPM, 1 ms early: the snare a semitone down (0.265 s) still plays then, and Live starts it 1 ms late
+    assert notes[0]["start_time"] == 0.0 and notes[1]["start_time"] == 0.498
     assert plan["tracks"]["808"]["transpose"] == 36  # MIDI 24 plays the sample's own pitch
     assert plan["stems"]["drums"]["mute"] and not plan["stems"]["other"]["mute"]
     assert plan["locators"] == [["A (1)", 0.0]]
@@ -91,6 +92,44 @@ def test_a_pads_sample_attacks_where_its_hit_did(tmp_path):
     est = evaluate.estimate_from_plan(make_plan(analysis, matches, synth, tmp_path), root=tmp_path)
     played = sorted(e["t_attack"] for e in est["drums"])
     assert np.max(np.abs(np.array(played) - hits)) < 1e-4
+
+
+def test_a_hit_live_starts_late_is_planned_1_ms_early(tmp_path):
+    """Live starts a hit that comes while its pad's hit before still plays
+    1 ms late (render.pad_hits): its note goes 1 ms earlier, so that the
+    plan, played as Live plays it, attacks where the analysis heard every
+    hit; one that comes after the file before has ended keeps its place."""
+    from refdissect import evaluate
+    analysis, matches, synth = _fixture(tmp_path)
+    del matches["sound_2"]
+    hits = [0.1, 0.3, 0.5, 1.2, 1.4]  # the snare a semitone down lasts 0.265 s
+    analysis["events"]["sound_1"] = [{"t": t, "t_attack": t, "gain": 1.0} for t in hits]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    starts = np.array([n["start_time"] for n in plan["tracks"]["drums"]["notes"]]) / 2  # s at 120 BPM
+    assert np.diff(starts) == pytest.approx([0.199, 0.2, 0.701, 0.199], abs=1e-4)
+    est = evaluate.estimate_from_plan(plan, root=tmp_path)["drums"]
+    assert [e["flags"] for e in est] == [[], ["retrigger"], ["retrigger"], [], ["retrigger"]]
+    assert np.max(np.abs(np.array([e["t_attack"] for e in est]) - hits)) < 1e-4
+
+
+def test_the_drum_fader_hears_the_pads_as_live_plays_them(tmp_path):
+    """The drum track whose RMS sets the drum fader (_unity_drums) plays a
+    pad's hits on one voice, as Live does and render_plan renders it: the
+    snare a semitone down (0.265 s) hit every 0.2 s, each hit cutting the
+    one before, plays 1.05 dB under its hits summed."""
+    from refdissect.audio import rms_db
+    from refdissect.live import _unity_drums
+    from refdissect.render import render_plan
+    analysis, matches, synth = _fixture(tmp_path)
+    del matches["sound_2"]
+    analysis["events"]["sound_1"] = [{"t": 0.2 * k, "t_attack": 0.2 * k, "gain": 1.0} for k in range(15)]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    m = render_plan(plan, tmp_path / "live", faders=False, n_samples=4 * SR)
+    live = sf.read(tmp_path / "live" / m["drums"], dtype="float32")[0]
+    assert np.allclose(_unity_drums(plan, 4 * SR), live, atol=1e-6)
+    m = render_plan(plan, tmp_path / "sum", faders=False, n_samples=4 * SR, mono=False)
+    summed = sf.read(tmp_path / "sum" / m["drums"], dtype="float32")[0]
+    assert rms_db(summed) - rms_db(live) == pytest.approx(1.05, abs=0.02)
 
 
 @pytest.mark.parametrize("named", ["sound_1", "sound_3"])
