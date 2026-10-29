@@ -71,8 +71,9 @@ GLIDE_LEAST = 3  # legato notes a plan needs to put its 808 on one voice with Gl
 RECUR_MS, RECUR_BARS = 6.0, 8
 # a pad's level is read over LEVEL_MS from each hit's attack, as evaluate.level_scores reads a sound (pad_levels);
 # a file with LOW_SHARE of its energy under 200 Hz is a kick's (the suite's kick files 0.91-0.99, its tom 0.79, its
-# snares 0.53 at most)
-LEVEL_MS, LOW_SHARE = 50.0, 0.85
+# snares 0.53 at most), and on a kick's pad from KICK_SHARE on: a kick with a bright click (69 of the library's 683
+# kick files hold under LOW_SHARE, 32 under 0.80 and 8 under KICK_SHARE)
+LEVEL_MS, LOW_SHARE, KICK_SHARE = 50.0, 0.85, 0.6
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -706,19 +707,19 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     Per hit, the energy over `ms` from where the hit attacks, in the pad
     role's band (evaluate.level_scores reads a sound so), the stem's over
     the track's; the median over the sound's hits. A kick (a sound whose
-    first pad's file has LOW_SHARE of its energy under 200 Hz) is read in
-    the kick band on `low`, the drum and bass stems together, less
-    `under` (the 808 track where the bass stem holds it) at each hit: a
-    separation hands part of a kick to the bass stem, by a different amount
-    in every song, and the 808 plays under most kicks. It is never read
-    under the drum stem's own reading of it, the least the stems hold of
-    it: where the bass stem holds the 808 quieter under a kick than `under`
-    plays it (a sidechain ducks it, or the 808's fader is a dB high), taking
-    `under` off leaves too little of the kick or none, and a kick left
-    without a hit had no level. Every other sound is read on the drum stem.
-    The pads of one sound (a template's pad and its pitched copies) share
-    one level, their hits pooled. A file that peaks under SILENT_DB gets
-    none.
+    first pad's file has LOW_SHARE of its energy under 200 Hz, or
+    KICK_SHARE on a kick's pad: a kick with a bright click) is read in the
+    kick band on `low`, the drum and bass stems together, less `under`
+    (the 808 track where the bass stem holds it) at each hit: a separation
+    hands part of a kick to the bass stem, by a different amount in every
+    song, and the 808 plays under most kicks. It is never read under the
+    drum stem's own reading of it, the least the stems hold of it: where
+    the bass stem holds the 808 quieter under a kick than `under` plays it
+    (a sidechain ducks it, or the 808's fader is a dB high), taking `under`
+    off leaves too little of the kick or none, and a kick left without a
+    hit had no level. Every other sound is read on the drum stem. The pads
+    of one sound (a template's pad and its pitched copies) share one level,
+    their hits pooled. A file that peaks under SILENT_DB gets none.
 
     Measured per pad on the 48 suite beats against where the truth holds
     the sound it plays (median over pads; htdemucs, htdemucs_ft in
@@ -756,7 +757,8 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     first: dict[str, str] = {}  # a sound is a kick by its first pad's file (its pitched copies come after it)
     for key in shots:
         first.setdefault(sound[key], key)
-    kicks = {snd for snd, key in first.items() if low is not None and low_share(shots[key][0]) >= LOW_SHARE}
+    kicks = {snd for snd, key in first.items() if low is not None
+             and low_share(shots[key][0]) >= (KICK_SHARE if shots[key][1]["role"] == "kick" else LOW_SHARE)}
     w, banded = samples(ms), {}
     heard: dict[str, list[float]] = {}
     alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
