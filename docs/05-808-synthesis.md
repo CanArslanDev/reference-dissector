@@ -102,8 +102,8 @@ It goes into Simpler:
 - **Levels.** Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, which the build sets: 115 at the line's median peak, 0.14 dB a step from there, within 70–127. On the suite the plan's 808 sits 1.87 dB under a perfect kit (m4 and m5; htdemucs_ft 2.01; 1.98 and 2.24 at m3, +0.09 dB in m1): faders matched to the bass stem's whole-track RMS see the notes' real lengths. The 808's fader follows the new one-shot's level: against m3 it moved on 9 beats (htdemucs_ft 20), by at most 0.1 dB (0.3).
 
 The build sends Transpose and Detune, Snap and the filter off, Live's own 50 ms release, and with Glide on also Glide Mode, Glide Time and one voice. In Live (two checks, 2026-10-29, [07](07-building-in-live.md#live-behaviour-measured-here)):
-- the one-shot on its template's periods played at `render.py`'s pitch within 0.11 cents, at Detune −8, −1 and +1;
+- the one-shot on its template's periods played at `render.py`'s pitch within 0.11 cents, at Detune −8, −1 and +1 (the first check, on m4 plans);
 - with its filter on, Simpler delayed each note 0.13–0.46 ms by its pitch and took 2.2 dB off its 32nd harmonic, so the build turns the filter off;
 - a note ends in Live's release (1.683 dB a ms, silent 35.7 ms on), and one that comes while the voice of its pitch still sounds restarts it 1 ms late: both are in `render.py` now;
-- on four m5 plans and PIRAMIT's, 408 notes then started within 0.11 ms of `render.py`'s, at −42.7 to −55 dB of residual;
+- on four m5 plans and PIRAMIT's, 408 notes then started within 0.11 ms of `render.py`'s, at −43.1 to −50.8 dB of residual (medians per beat);
 - Glide was measured on a probe only (within 1.04 cents, p90, of `render.py`): no plan turns it on.

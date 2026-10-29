@@ -190,17 +190,17 @@ Each recording was read the way the suite reads a rebuild, and `render.py`'s ren
 
 **Drum hits play where `render.py` plays them.**
 - All 1,320 planned hits were found (at NCC 0.93 or more), within 0.04 ms of `render.py`'s.
-- The 253 that cut their pad's sounding hit started 0.004–0.019 ms after `render.py`'s (medians per pad), which starts them 1 ms late. Against the render before one voice per pad they had been about 1 ms late.
-- With Snap off a hit plays its whole file: its end lies within 0.02 ms of `render.py`'s on kicks and snares, where Snap had cut 4.7 to 27 ms.
+- The 254 that cut their pad's sounding hit started 0.004–0.019 ms after `render.py`'s (medians per pad), which starts them 1 ms late: 253 on 10 pads, and one on PIRAMIT's perc, read among the repeats of its attack within its file. Against the render before one voice per pad they had been about 1 ms late.
+- With Snap off a hit plays its whole file, where Snap had cut 4.7 to 27 ms. Read 60 dB under its peak, a kick's or snare's end lies within 0.04 ms of `render.py`'s (medians per pad), a hat's up to 0.8 ms earlier, likely as Simpler's top-end loss lowers its tail.
 - Drum F1@20 per role, read off Live's audio, equals `render.py`'s and the suite's on all four beats (v1orig-3 0.654, meter34-1 0.944, bass_low-1 0.721, dynamics-1 0.966). Per-role timing medians lie within 0.03 ms of `render.py`'s.
 
-**The 808 matches `render.py` note by note.** Over 408 notes, Live less `render.py` leaves a residual of −42.7 to −55 dB (medians per beat; the worst note −34.6 dB), and every note starts within 0.11 ms of `render.py`'s, the 186 that restart a note of their pitch among them. With the filter off no delay by pitch is left. Notes that end in a rest fall as `render.py`'s release does: −40 dB 25 ms after the end on PIRAMIT (20 notes) in both, 23–27 ms on the suite's beats.
+**The 808 matches `render.py` note by note.** Over 408 notes, Live less `render.py` leaves a residual of −43.1 to −50.8 dB (medians per beat; −42.7 to −55.2 dB with restarts and other notes apart; the worst note −34.6 dB), and every note starts within 0.11 ms of `render.py`'s, the 186 that restart a note of their pitch among them. With the filter off no delay by pitch is left. Notes that end in a rest fall as `render.py`'s release does: −40 dB 25 ms after the end on PIRAMIT (20 notes) in both, 23–27 ms on the suite's beats.
 
 **Levels differ only by Simpler's top-end loss.** Scored as the suite scores them, on the recordings and on `render.py`'s render:
 
 | | v1orig-3 | meter34-1 | bass_low-1 | dynamics-1 |
 |---|---|---|---|---|
-| distance from a perfect kit, Live / `render.py` | 0.57 / 0.54 dB | 0.76 / 0.88 dB | 0.63 / 0.51 dB | 2.04 / 2.29 dB |
+| distance from a perfect kit, Live / `render.py` | 0.57 / 0.51 dB | 0.76 / 0.88 dB | 0.63 / 0.51 dB | 2.04 / 2.29 dB |
 | balance, Live / `render.py` | 0.57 / 0.17 dB | 0.19 / 0.31 dB | 0.54 / 0.51 dB | 0.48 / 0.29 dB |
 
 Kicks played within 0.004 dB of `render.py` and the 808 within 0.022 dB; snares 0.03–0.16 dB and hats 0.06–0.97 dB under it. v1orig-3's bright 48 kHz hat, 0.97 dB under, sets its balance.
