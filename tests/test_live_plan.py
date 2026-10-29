@@ -441,7 +441,7 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
-         extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0):
+         extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
     stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
@@ -450,11 +450,15 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     quieter over the kick's first 100 ms (a sidechain); with copy_gain, the
     last hat is 3 semitones up (a pitched copy), held at that gain. extra:
     more sounds, {name: (role, file, events)}; hat_only: the analysis found
-    the hat alone (the stems still hold the kick)."""
+    the hat alone (the stems still hold the kick); click: a click of noise
+    over the kick's body, at that gain (a bright kick)."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
     t = np.arange(int(0.3 * SR)) / SR
     kick = 0.9 * np.sin(2 * np.pi * 120 * t) * np.exp(-t / 0.08)
+    if click:
+        kick = kick + click * np.random.default_rng(5).standard_normal(len(t)) * np.exp(-t / 0.004)
+        kick *= 0.9 / np.max(np.abs(kick))
     hat = 0.9 * np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.03)
     sf.write(tmp_path / "kick.wav", kick, SR, subtype="FLOAT")
     sf.write(tmp_path / "hat.wav", hat, SR, subtype="FLOAT")
@@ -579,6 +583,19 @@ def test_a_kick_under_a_ducked_808_is_read_on_the_drum_stem(tmp_path):
     drum stem alone holds the least of a kick there is: the kick is read
     there, and the hat 20 dB under it."""
     plan = _kit(tmp_path, kick_in_bass=0.0, under=0.6, duck_db=6.0)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
+
+
+def test_a_bright_kick_on_a_kick_pad_is_read_as_a_kick(tmp_path):
+    """A kick file with a click over its body holds 77 % of its energy
+    under 200 Hz, under LOW_SHARE (as 69 of the 683 kick files of the
+    library measured do): read as any other sound, on the drum stem alone,
+    which holds 40 % of it here, it played 8 dB short, the hat 12 dB under
+    it. On a kick's pad it is a kick from KICK_SHARE on."""
+    from refdissect.live import KICK_SHARE, LOW_SHARE, low_share
+    plan = _kit(tmp_path, click=1.5)
+    assert KICK_SHARE < low_share(sf.read(tmp_path / "kick.wav", dtype="float32")[0]) < LOW_SHARE
     pads = plan["tracks"]["drums"]["pads"]
     assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
 
