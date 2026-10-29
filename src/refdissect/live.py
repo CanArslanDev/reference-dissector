@@ -8,7 +8,9 @@ Live facts the build relies on (measured on Live 12.4, see
 docs/07-building-in-live.md):
 - Simpler loads samples at Volume -12 dB; the build sets the 808's to 0 dB
   and each pad's to its volume_db (pad_levels), sent the same way ("-6.5
-  dB"); a pad's Volume under 0 dB has not been captured in Live yet.
+  dB"). Live holds it a display step under the text ("-6.6 dB" holds
+  -6.605 dB, "-14.9 dB" -14.95) and plays what it holds within 0.003 dB
+  (the live check, 2026-10-29).
 - Simpler plays a sample at its own pitch on C3 (MIDI 60). The 808 notes
   keep their real MIDI numbers (C1 = 24 here), so Transpose is about +36;
   Live 12.4.6 keeps whole semitones of it (11.99 plays as 11) and whole
@@ -18,8 +20,10 @@ docs/07-building-in-live.md):
   Mode "Glide", overlapping notes slide linearly in semitones over exactly
   the Glide Time without starting the sample again; notes 25 ms apart jump.
   The build sends Detune, Glide Mode and Glide Time as parameters and sets
-  voices after build_tracks (the battery set each of them this way); a
-  built 808 has not been captured in Live yet.
+  voices after build_tracks (the battery set each of them this way); in
+  the live check they read back as sent, and a probe's slide played within
+  1.04 cents (p90) of render.py's. No plan of the suite or PIRAMIT turns
+  Glide on.
 - A new file in the User Library shows up in Live's browser after a few
   seconds; samples load onto Drum Rack pads through the browser, by file
   name. A file loaded through the browser keeps playing what Live loaded
@@ -41,7 +45,8 @@ docs/07-building-in-live.md):
   - 0.096 over its Volume (Live 12.4.6), and "Vol < Vel" starts at 35 % or
   45 % by how the Simpler was made: the build sets it on every Simpler
   (render.VOL_VEL), and the plan's velocities follow the law (velocities,
-  velocity_808). A build with it has not been captured in Live yet.
+  velocity_808). In the live check "Vol < Vel" read back 0.35 and the law
+  held from velocity 35 to 127, on pads and on the 808.
 - Snap, on by default, ends a sample 10-30 ms before its file does, and the
   808's Simpler loaded through the browser filters it (a 22 kHz lowpass
   that follows the note): the build turns both off (LIVE_OFF, simpler_808).
@@ -738,8 +743,9 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     peaks under SILENT_DB, or none of its hits can be read) stays at 0 dB.
     The faders compare our parts, rendered offline at unity (each pad at
     its volume_db, each velocity at its level under Live's law at the pad's
-    vol_vel, as render_plan plays it; the 808 as render_plan plays it,
-    Transpose, Detune and Glide included, cut without a fade), with the
+    vol_vel, as render_plan plays it, each pad one voice; the 808 as
+    render_plan plays it, Transpose, Detune and Glide included, released at
+    each note's end as Live releases it), with the
     stems by RMS over the whole track: a perfect kit, the truth's sounds at
     their own balance, then plays every sound at the kit level
     evaluate.level_scores scores against. The drum fader stops where the
@@ -766,7 +772,11 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     of its size) kicks -0.96 and 1.22 [-0.08 and 0.54] dB from the kit,
     snares -0.17 and 1.33 [-0.80 and 1.45], claps +0.60 and 1.02 [+1.58 and
     1.58], hats -1.10 and 2.39 [-0.69 and 1.47], open hats -0.09 and 1.16
-    [-0.83 and 1.20]. Measured with the levels alone, over m3's outputs
+    [-0.83 and 1.20]. With each pad on one voice and the 808 released as
+    Live plays them (m5), 1.20 [1.15] and 0.51 [0.48] dB; signed per role,
+    kicks -0.84 [-0.04], snares +0.04 [-0.75], claps +0.70 [+1.73], hats
+    -0.90 [-0.57], open hats +0.15 [-0.72]. Measured with the levels alone,
+    over m3's outputs
     and its one-shot under the kicks (lv-f3): pad levels 1.27 [1.31] and
     0.56 [0.54] dB; every pad at the truth's own level for its sound and
     the RMS match alone, 1.37 [0.75] and 0.31 [0.04]: our files' tails and
