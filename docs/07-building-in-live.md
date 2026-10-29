@@ -225,7 +225,7 @@ Kicks played within 0.004 dB of `render.py` and the 808 within 0.022 dB; snares 
 - **One `build_tracks` call of PIRAMIT's size**, which went as 5, and **a build that stops half way**: no build of the second check failed, so the failure message has not been seen.
 - **How long the browser takes** to find a pad's content name: not timed.
 - **htdemucs_ft plans**, **a plan with Glide** (only a probe glided; the restart is not modelled for one voice), and **choke groups**.
-- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in, one probe placed such a locator; that is not in the build. 11 of the 169 locators of the suite's m5 and m5-ft plans lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
+- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in, one probe placed such a locator; that is not in the build. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it.
 - **Simpler's top-end loss** per sample rate and transposition, as a curve. `render.py` does not model it: hats played up to 0.97 dB and snares up to 0.16 dB under `render.py`.
 - **PIRAMIT against the song.** It has no truth: Live was measured against `render.py`, and nothing was checked by ear.
