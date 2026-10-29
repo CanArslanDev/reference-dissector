@@ -74,6 +74,7 @@ RECUR_MS, RECUR_BARS = 6.0, 8
 # snares 0.53 at most), and on a kick's pad from KICK_SHARE on: a kick with a bright click (69 of the library's 683
 # kick files hold under LOW_SHARE, 32 under 0.80 and 8 under KICK_SHARE)
 LEVEL_MS, LOW_SHARE, KICK_SHARE = 50.0, 0.85, 0.6
+FADER_DB = 6.0  # a Live track fader's top: build_spec and render.fader_db cap the plan's faders there
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -608,21 +609,25 @@ def _render(notes: list[dict], sample_for, gain_for, n: int, bps: float, cut: bo
 
 def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     """Track faders (dB) that put our parts at the level of the stems they
-    replace, and each drum pad's volume_db. Each pad plays where the stems
-    hold its sound (pad_levels), the loudest at 0 dB and the others under
-    it; a pad without a level (its file cannot be read or peaks under
-    SILENT_DB, or none of its hits can be read) stays at 0 dB. The faders
-    compare our parts, rendered offline at unity (each pad at its
-    volume_db, each velocity at its level under Live's law at the pad's
+    replace; it sets each drum pad's volume_db in the plan. Each pad plays
+    where the stems hold its sound (pad_levels), the loudest at 0 dB and
+    the others under it; a pad without a level (its file cannot be read or
+    peaks under SILENT_DB, or none of its hits can be read) stays at 0 dB.
+    The faders compare our parts, rendered offline at unity (each pad at
+    its volume_db, each velocity at its level under Live's law at the pad's
     vol_vel, as render_plan plays it; the 808 as render_plan plays it,
     Transpose, Detune and Glide included, cut without a fade), with the
     stems by RMS over the whole track: a perfect kit, the truth's sounds at
     their own balance, then plays every sound at the kit level
     evaluate.level_scores scores against. The drum fader stops where the
-    loudest pad plays as loud as the stem holds its sound: the RMS match
-    goes over that only where the stem holds what no pad plays (on 3
-    [7] suite beats; tempo160-1, with no kick pad, sat 13.4 dB from a
-    perfect kit under it and 5.1 dB under the stop).
+    loudest pad plays as loud as the stem holds its sound. The RMS match
+    goes over that on 3 [5] suite beats: where the stem holds a kick no pad
+    plays (layers-1, tempo160-1 [bass_low-2]; tempo160-1 sat 13.4 dB from
+    a perfect kit under it and 5.1 dB under the stop), and on v1orig-3
+    [kick808-2, leadin-2, rolls-1, v1orig-3], whose stems hold no kick the
+    plan misses. Where the fader would go over FADER_DB, the top of Live's,
+    the pads under 0 dB make up the rest, as far as 0 dB (no suite beat:
+    its drum faders reach +5.6 [-12.3] dB).
 
     Without pad levels every pad played its file at 0 dB under one RMS
     fader. On the 48 suite beats (plan level, mean over scenarios,
@@ -660,7 +665,12 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
         for note, pad in plan["tracks"]["drums"]["pads"].items():
             pad["volume_db"] = round(at[note] - top, 1) + 0.0 if note in at else 0.0
         fader = round(rms_db(stem) - rms_db(_unity_drums(plan, n, bps)) - headroom_db, 1)
-        out["drums_track_db"] = min(fader, round(top - headroom_db, 1)) if at else fader
+        fader = min(fader, round(top - headroom_db, 1)) if at else fader
+        if fader > FADER_DB:  # what the fader cannot give, the pads under 0 dB make up as far as they can
+            for pad in plan["tracks"]["drums"]["pads"].values():
+                pad["volume_db"] = round(min(0.0, pad["volume_db"] + fader - FADER_DB), 1) + 0.0
+            fader = FADER_DB
+        out["drums_track_db"] = fader
     if fader808 is not None:
         out["808_track_db"] = fader808
     out["stems_track_db"] = -headroom_db
