@@ -39,6 +39,17 @@ docs/07-building-in-live.md):
   45 % by how the Simpler was made: the build sets it on every Simpler
   (render.VOL_VEL), and the plan's velocities follow the law (velocities,
   velocity_808). A build with it has not been captured in Live yet.
+- Snap, on by default, ends a sample 10-30 ms before its file does, and the
+  808's Simpler loaded through the browser filters it (a 22 kHz lowpass
+  that follows the note): the build turns both off (LIVE_OFF, simpler_808).
+- A pad plays one voice: a hit that comes while its hit before still plays
+  fades that one out over 1 ms and starts 1 ms late, and so does an 808
+  note that comes while the voice of its pitch is still in its release
+  (Live 12.4.6, the live check; render.RETRIGGER_S): such notes start 1 ms
+  early in the plan (on_time, plan_808).
+- The 808's Simpler ends a note in a release that falls 1.683 dB a ms and
+  stops at -60 dB, 35.7 ms on (Ve Release 50 ms, Live's default, which the
+  build sends; render.RELEASE_S).
 """
 
 from __future__ import annotations
@@ -57,10 +68,12 @@ from .detect import RESIDUAL_BARS, SAME_MS, min_hits_for
 from .grid import Grid
 from .library import SILENT_DB
 from .render import (
+    RELEASE_808_MS,
     RETRIGGER_S,
     VOL_VEL,
     as_played,
     glide_s,
+    late_808,
     pad_hits,
     pad_settings,
     pad_track,
@@ -281,7 +294,11 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     and end glides no note plays yet) is listed under "slides". The
     durations are final here (one voice: a note ends 0.001 beat before the
     next starts, or holds over it to slide), as Glide would turn any other
-    overlap into a slide."""
+    overlap into a slide. Without Glide, a note that Live starts late, as
+    it comes while the voice of the note before at its pitch still sounds
+    in its release (render.late_808), starts that much earlier, its end
+    kept, as a pad's note does (on_time); the note before it then ends
+    0.001 beat before it, as any."""
     notes = analysis["notes_808"]
     peaks = np.array([n["peak"] for n in notes]) if notes else np.array([1.0])
     med = float(np.median(peaks)) or 1.0
@@ -321,7 +338,7 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
                      tuning_cents=round(tuning, 1), heard_cents=None if heard is None else round(heard, 1))
         shift0 = semis + detune / 100 - 60
 
-    out, slid, slides = [], [], []
+    out, slid, glides = [], [], []
     gliding = sum((n.get("glide") or {}).get("kind") == "legato" for n in notes[1:]) >= GLIDE_LEAST
     for n in notes:
         g = n.get("glide") or {}
@@ -332,22 +349,37 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
                     "velocity": velocity_808(n["peak"] / med)})
         slid.append(legato_note)
         if g:
-            slides.append({"start_time": out[-1]["start_time"], "kind": g.get("kind", "legato"),
-                           "from_midi": g.get("from_midi"), "to_midi": g.get("to_midi"), "ms": g.get("ms")})
+            glides.append((len(out) - 1, g))
     order = sorted(range(len(out)), key=lambda i: out[i]["start_time"])
-    for a, b in zip(order, order[1:]):  # one voice: a note ends where the next starts, or holds over it to slide
-        nxt = out[b]["start_time"]
-        gap = nxt - out[a]["start_time"]
-        if slid[b]:
-            out[a]["duration"] = round(gap + LEGATO_S * beats_per_second, 4)
-        else:
-            out[a]["duration"] = round(max(min(0.01, gap / 2), min(out[a]["duration"], gap - 0.001)), 4)
+    _one_voice(out, order, slid, beats_per_second)
+    if shot is not None and not gliding:  # each note that Live starts late, that much earlier (as on_time a pad's)
+        lengths: dict[int, float] = {}
+        ordered = [out[i] for i in order]
+        for nt, late in zip(ordered, late_808(ordered, beats_per_second, lambda p: lengths.setdefault(
+                p, len(transpose(shot, p + shift0)) / SR))):
+            if late:  # its end stays
+                step = min(nt["start_time"], round(RETRIGGER_S * beats_per_second, 4))
+                nt["start_time"], nt["duration"] = round(nt["start_time"] - step, 4), round(nt["duration"] + step, 4)
+        _one_voice(out, order, slid, beats_per_second)
+    slides = [{"start_time": out[i]["start_time"], "kind": g.get("kind", "legato"), "from_midi": g.get("from_midi"),
+               "to_midi": g.get("to_midi"), "ms": g.get("ms")} for i, g in glides]
     legato = [sl["ms"] for sl in slides if sl["kind"] == "legato" and sl["ms"]]
     if gliding and legato:
         track.update(voices=1, glide_mode="Glide", glide_time_ms=round(float(np.median(legato)), 1))
     if slides:
         track["slides"] = slides
     return {"notes": [out[i] for i in order], **track}
+
+
+def _one_voice(out: list[dict], order: list[int], slid: list[bool], bps: float) -> None:
+    """One voice: each note (in `order`) ends 0.001 beat before the next
+    starts, or holds LEGATO_S over it where that one slides on (slid)."""
+    for a, b in zip(order, order[1:]):
+        gap = out[b]["start_time"] - out[a]["start_time"]
+        if slid[b]:
+            out[a]["duration"] = round(gap + LEGATO_S * bps, 4)
+        else:
+            out[a]["duration"] = round(max(min(0.01, gap / 2), min(out[a]["duration"], gap - 0.001)), 4)
 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
@@ -739,7 +771,7 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     stems = plan["stems"]
     track808, held808, fader808 = plan["tracks"]["808"], None, None
     if "sample_path" in track808 and "bass" in stems:
-        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "live")
+        ours = render_808(track808, read(track808["sample_path"]), n, bps, None, True, 1.0, "live")
         fader808 = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
         held808 = ours * np.float32(10 ** ((fader808 + headroom_db) / 20))  # where the bass stem holds it
     if "drums" in stems:
@@ -977,9 +1009,15 @@ def simpler_808(t808: dict) -> dict:
     the 32nd, re the fundamental: swing66-1's three notes at MIDI 12, 19.6
     to 19.9 ms from the truth in the plan, crossed 20 ms in Live (808 F1@20
     0.944 -> 0.889 with Live's lags). render.py plays the one-shot
-    unfiltered."""
+    unfiltered. Ve Release goes at Live's own default, RELEASE_808_MS,
+    whose fall render.py plays (render._release), rather than at a value
+    no capture has measured: on PIRAMIT, over 40 ms after the plan's notes
+    that end in a rest, the bass stem holds a median -7.5 dB re their last
+    20 ms, this release -7.9 dB, the 5 ms linear fade render.py used -10.7
+    and the same law at 5 ms -18.3."""
     out = {"Volume": "0.0 dB", "Transpose": float(t808["transpose"]), "Detune": float(t808.get("detune_cents", 0)),
-           "Vol < Vel": float(t808.get("vol_vel", VOL_VEL)), **LIVE_OFF, "F On": "Off"}
+           "Vol < Vel": float(t808.get("vol_vel", VOL_VEL)), **LIVE_OFF, "F On": "Off",
+           "Ve Release": f"{RELEASE_808_MS:.1f} ms"}
     if glide_s(t808):
         out |= {"Glide Mode": "Glide", "Glide Time": f"{float(t808['glide_time_ms']):.1f} ms"}
     return out

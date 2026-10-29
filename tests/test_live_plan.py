@@ -387,6 +387,25 @@ def test_live_defaults_that_change_the_sound_are_turned_off(tmp_path):
     assert [p["settings"]["Snap"] for p in spec["Drums (library)"]["instrument"]["drum_rack"].values()] == ["Off"]
 
 
+def test_an_808_note_live_restarts_late_is_planned_1_ms_early(tmp_path):
+    """Live starts an 808 note 1 ms late where the voice of the note before
+    at its pitch is still in its release (render.late_808): the plan starts
+    it 1 ms early, so that played as Live plays it each note attacks where
+    the analysis heard it. The build sends the release
+    render.py plays: Live's default Ve Release, 50 ms."""
+    from refdissect import evaluate
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["notes_808"] = [{"t": 0.1, "t_attack": 0.1, "end": 0.5, "pitch": 24, "peak": 1.0},
+                             {"t": 0.5, "t_attack": 0.5, "end": 1.0, "pitch": 24, "peak": 1.0},
+                             {"t": 1.0, "t_attack": 1.0, "end": 1.5, "pitch": 26, "peak": 1.0}]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    est = evaluate.estimate_from_plan(plan, root=tmp_path)["bass808"]
+    assert [n["flags"] for n in est] == [[], ["retrigger"], []]
+    assert np.max(np.abs(np.array([n["t_attack"] for n in est]) - [0.1, 0.5, 1.0])) < 1e-4
+    assert {t["name"]: t for t in build_spec(plan)}["808 (synth)"]["settings"]["Ve Release"] == "50.0 ms"
+
+
 def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
     """ableton-live-mcp faked for build: an empty set, build_tracks building
     every track it is sent, each Simpler holding the User Library copy its
