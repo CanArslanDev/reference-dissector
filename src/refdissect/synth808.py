@@ -62,7 +62,12 @@ RISE_CENTS = 100.0
 # attacks late starts up to EARLIEST_S before the one-shot (its head left out, the one-shot faded in over
 # FADE_IN_S); one that attacks early plays at QUIET of its level until a rise of RISE_S puts the attack there
 # (the stems' 808 sits at 13-35 % of its peak before a late attack); either within ATTACK_TOL of the closest
-# attack the search finds
+# attack the search finds. QUIET holds a late attack only while the quiet head stays under 30 % of the level
+# after the rise, where audio.attack_time puts an attack: a voice that decays fast and is barely driven has
+# fallen so far by then that its head passes that first, and nothing falls back (pitch_track attack_ms records
+# where it landed). Synthetic, a template attacking 45.6 ms in: a voice of decay_s 0.1 and drive 0.1 or 0.5
+# attacks 5.7 or 4.5 ms early, of drive 4.0 0.3 ms; the suite's fitted voices (drive 1.50 or more, decay_s
+# 0.16 or more) put its latest attack, 46.7 ms in, 0.5 ms early
 FADE_IN_S, EARLIEST_S, QUIET, RISE_S, ATTACK_TOL = 5e-4, 0.05, 0.2, 0.002, 2.5e-4
 
 
@@ -350,7 +355,9 @@ def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int,
     default the whole number nearest the drop's own), then a PCHIP through
     z[:last + 1] (a cycle each), then the slope there eased to pitch_hz over
     EASE_S. The scale moves the drop's pitch with it, so the pitch steps by
-    1200 * log2(1 / scale) cents at z[0]. None where no cycle reaches z[0]."""
+    1200 * log2(1 / scale) cents at z[0]. None where the one-shot turns no
+    cycle up to z[0] (the cycles of a head started before it do not count:
+    with them, the phase had stood still up to z[0])."""
     pchip = PchipInterpolator(z, np.arange(len(z), dtype=float))
     slope = pchip.derivative()
     d0, i0 = float(slope(z[0])), int(np.ceil(z[0] * SR))
@@ -360,7 +367,7 @@ def _cycles(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int,
     f = (1 - w) * _drop_hz(p, t[:i0] - start, ratio) + w * d0
     so_far = _drop_cycles(p, -start, ratio) + np.r_[0.0, np.cumsum(f[:-1])] / SR
     reach = so_far[-1] + f[-1] * (z[0] - t[i0 - 1])  # cycles from the voice's start to z[0]
-    if not reach > 0:
+    if not reach > so_far[0]:  # so_far[0]: the head's, before the one-shot's start
         return None
     a = p.phase / (2 * np.pi)
     m = int(round(a + reach)) if m is None else m
@@ -441,8 +448,9 @@ def _onset(p: Params, t: np.ndarray, pitch_hz: float, z: np.ndarray, last: int, 
     closest (the attack moves 0.7-1 ms a millisecond, in steps where it
     passes a half cycle); one that attacks earlier stays quiet until there.
     Of the starts (quiets) within ATTACK_TOL of the closest attack, the one
-    nearest 0."""
-    n = min(len(t), samples(300))
+    nearest 0. The voice is made over its first 300 ms, or up to z[0] where
+    that lies later (_cycles makes the drop up to there)."""
+    n = min(len(t), max(samples(300), int(np.ceil(z[0] * SR)) + 1))
 
     def attack_at(start: float, quiet: float) -> float:
         got = _cycles(p, t[:n], pitch_hz, z, last, m, start)
@@ -475,12 +483,13 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, attack_s: f
     eased to pitch_hz; across a rise the periods are pooled (_pooled).
     Before the first crossing, the fitted drop, started at the fit's phase
     and scaled to end a whole cycle there: of the two counts nearest its
-    own, one whose crossings the rounds put in place (_along), the one
-    scaled least (0.58-2.1 on the suite's runs, median 1.04); its pitch
-    steps by that scale at the first crossing (_cycles). None where the
-    curve holds under three crossings or has settled by its second, or
-    where the rounds leave a crossing more than WORST_S off (one_shot's
-    voice then; on the suite's runs the worst is 0.31 ms).
+    own, those whose crossings the rounds put within WORST_S (_along), one
+    within STEADY_S first, then the one scaled least (0.58-2.1 on the
+    suite's runs, median 1.04); its pitch steps by that scale at the first
+    crossing (_cycles). None where the curve holds under three crossings or
+    has settled by its second, or where the rounds leave a crossing more
+    than WORST_S off at both counts (one_shot's voice then; on the suite's
+    runs the worst is 0.31 ms).
 
     With attack_s (the template's attack after its onset), the one-shot is
     laid out as the template is: it starts at the onset and attacks there
@@ -524,14 +533,14 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, attack_s: f
     natural = a + (got[1] - a) / got[2]
     tries = []
     for m in (int(np.floor(natural)), int(np.floor(natural)) + 1):
-        if m > a and (r := _along(p, t, pitch_hz, z, last, m, at := onset(m))):
+        # a count whose crossings stay more than WORST_S off is never kept: picked first for its scale, it had
+        # left none where the other count was within it
+        if m > a and (r := _along(p, t, pitch_hz, z, last, m, at := onset(m))) and r["worst_s"] <= WORST_S:
             apart = 0.0 if attack_s is None else abs(attack_time(r["y"], "808") - attack_s)
             tries.append(dict(r, onset=at, apart=apart))
     if not tries:
         return None
     pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
-    if pick["worst_s"] > WORST_S:
-        return None
     if pick["apart"] > 4 * ATTACK_TOL:
         # the rounds moved the crossings the attack ends on: its start found again on them, and the rounds
         # run again from there; kept where the crossings stay in place and the attack lands closer
