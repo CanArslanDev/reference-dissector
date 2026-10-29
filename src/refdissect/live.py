@@ -65,6 +65,7 @@ PITCHED_PADS = list(range(54, 82))
 STEMS_MUTED = {"drums", "bass", "vocals"}  # replaced by ours, or not part of the beat
 DEFAULT_USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
 GENERATED = Path("Samples") / "AbletonMCP Generated"
+CLIENTS = 8  # the most MCP clients Live's Remote Script serves at once (AbletonMCP 2.1.0's MAX_CLIENTS)
 # a placeholder for the melodic tracks until a sound is chosen per stem; they
 # are built muted, so the reference stems still play as before
 MELODIC_INSTRUMENT = "Drift"
@@ -980,6 +981,70 @@ def build_spec(plan: dict) -> list[dict]:
     return spec
 
 
+def refused(error: Exception) -> str:
+    """What a first call to Live that failed means. Live's Remote Script
+    (AbletonMCP 2.1.0, MAX_CLIENTS) serves at most CLIENTS clients and
+    closes the connection of one more: in the live check (2026-10-29) the
+    MCP servers of other sessions held all 8, and live-build failed with
+    "Connection reset by peer". Nothing answers when Live is closed or
+    AbletonMCP is not one of its Control Surfaces."""
+    text = str(error)
+    if any(s in text for s in ("reset by peer", "closed the connection", "Errno 54", "Broken pipe")):
+        return (f"Live refused the connection: its Remote Script serves at most {CLIENTS} clients, and other "
+                "MCP servers (other sessions with ableton-live-mcp) are connected. Close the sessions you do not "
+                f"need, or restart Live, and build again. ({text})")
+    if any(s in text for s in ("Nothing answers", "Connection refused", "Could not connect")):
+        return f"Live does not answer: is it open, with AbletonMCP as a Control Surface? ({text})"
+    return text
+
+
+def stopped_at(error: Exception, spec: list[dict], plan: dict) -> dict:
+    """The track, pad and file a build_tracks error names: a sample it could
+    not load (by the name the spec sends) or an audio clip's file."""
+    text, pads = str(error), plan["tracks"]["drums"]["pads"]
+    for track in spec:
+        instrument = track.get("instrument")
+        if isinstance(instrument, dict) and instrument.get("drum_rack"):
+            for note, pad in instrument["drum_rack"].items():
+                if pad["sample"] in text:
+                    return {"track": track["name"], "pad": note, "sample": pad["sample"], "file": pads[note]["path"]}
+        elif isinstance(instrument, dict) and instrument.get("sample") and instrument["sample"] in text:
+            return {"track": track["name"], "sample": instrument["sample"],
+                    "file": plan["tracks"]["808"].get("sample_path")}
+        for clip in track.get("audio_clips") or []:
+            if str(clip["file"]) in text or Path(clip["file"]).name in text:
+                return {"track": track["name"], "file": clip["file"]}
+    return {}
+
+
+async def failed_build(call, error: Exception, spec: list[dict], plan: dict, before: int) -> dict:
+    """What a build_tracks call that raised leaves: the error, the track,
+    pad and file it names (stopped_at), and the tracks it had made, those
+    after the set's first `before` (build_tracks adds each at the end). In
+    the live check, PIRAMIT's build stopped at a pad whose file Live's
+    browser did not list and left the 808 track and an unnamed empty Drum
+    Rack, with only the error said."""
+    report = {"failed": "build_tracks", "error": str(error), **stopped_at(error, spec, plan)}
+    try:
+        tracks = json.loads(await call("get_session_overview"))["tracks"][before:]
+        report["tracks_made"] = [{"index": t.get("index"), "name": t.get("name"), "devices": t.get("devices")}
+                                 for t in tracks]
+    except Exception as e:  # Live is gone too
+        report["tracks_made"] = f"unknown: {e}"
+    return report
+
+
+def stopped_message(failed: dict) -> str:
+    """failed_build's report in a sentence: where the build stopped, why,
+    and what it left in the set."""
+    where = " ".join(f"{k} {failed[k]}" for k in ("track", "pad", "file") if k in failed)
+    made = failed["tracks_made"]
+    if isinstance(made, list):
+        made = ", ".join(f"{t['name']!r} ({', '.join(t['devices'] or []) or 'no device'})" for t in made) or "no track"
+    return (f"build_tracks stopped{' at ' + where if where else ''}: {failed['error']}. It left {made} in the set: "
+            "delete them, or open a new set, before building again")
+
+
 def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
     """src in the User Library's GENERATED folder under name, copied unless
     a file there holds its content already (the names carry a digest)."""
@@ -1031,7 +1096,10 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     User Library under the names the spec loads them by (sample_808,
     pad_sample), and after build_tracks the build reads back the file each
     Simpler holds (held_samples): a pad or 808 that holds another file is
-    listed under wrong_samples and logged."""
+    listed under wrong_samples and logged. A connection Live refuses, and a
+    build_tracks call that raises, end in a RuntimeError that says why
+    (refused) or where the build stopped and which tracks it left in the set
+    (failed_build, also logged)."""
     try:
         from MCP_Server import extended_tools as et
         from MCP_Server.server import mcp
@@ -1054,11 +1122,15 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     unread = [f"pad {note}: {pad['path']}" for note, pad in pads.items() if not Path(pad["path"]).is_file()]
     if unread:
         raise RuntimeError(f"Cannot read the files of {'; '.join(unread)}")
-    overview = json.loads(await call("get_session_overview"))
+    try:
+        overview = json.loads(await call("get_session_overview"))
+    except Exception as e:
+        raise RuntimeError(refused(e)) from e
     busy = [t["name"] for t in overview["tracks"]
             if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
     if busy:
         raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
+    before = len(overview["tracks"])
     await call("set_song_properties", tempo=plan["tempo"], loop=False)
     # Live's browser lists a file a few seconds after it lands in the User Library (build_tracks waits for it)
     if "sample_path" in t808:
@@ -1066,7 +1138,12 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     for pad in pads.values():
         library_copy(pad["path"], user_library, pad_sample(pad["path"]))
     spec = build_spec(plan)
-    built = json.loads(await call("build_tracks", tracks=spec))
+    try:
+        built = json.loads(await call("build_tracks", tracks=spec))
+    except Exception as e:
+        failed = await failed_build(call, e, spec, plan, before)
+        log(json.dumps(failed, ensure_ascii=False, default=str))
+        raise RuntimeError(stopped_message(failed)) from e
     report: dict = {"tracks": built["tracks"]}
     problems = {r["track"]: r["problems"] for r in built["tracks"] if r["problems"]}
     if problems:

@@ -334,11 +334,12 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
 
 
-def _fake_live(monkeypatch, library=None, held=None) -> list:
+def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
     """ableton-live-mcp faked for build: an empty set, build_tracks building
     every track it is sent, each Simpler holding the User Library copy its
-    spec names (held: another file, by pad note or "808"); returns the list
-    of (tool, arguments) calls."""
+    spec names (held: another file, by pad note or "808"); answers: a tool's
+    own answer, answers[name](args, calls), which may raise as the server
+    does. Returns the list of (tool, arguments) calls."""
     import json
     import sys
     import types
@@ -356,7 +357,9 @@ def _fake_live(monkeypatch, library=None, held=None) -> list:
 
     async def call_tool(name, args):
         calls.append((name, args))
-        if name == "get_session_overview":
+        if name in (answers or {}):
+            text = answers[name](args, calls)
+        elif name == "get_session_overview":
             built = any(c[0] == "build_tracks" for c in calls)
             tracks = [{"name": "Drums (library)", "index": 0}, {"name": "808 (synth)", "index": 1}] if built else []
             text = json.dumps({"tracks": tracks})
@@ -448,6 +451,48 @@ def test_each_pad_loads_its_own_file_by_its_content(tmp_path, monkeypatch):
     report = asyncio.run(build(plan, user_library=lib, log=logged.append))
     assert list(report["wrong_samples"]) == ["38"] and report["wrong_samples"]["38"]["live"] == str(other)
     assert any(line.startswith(f"pad 38 holds {other}") for line in logged)
+
+
+def test_a_build_that_stops_says_where_and_what_it_left(tmp_path, monkeypatch):
+    """In the live check build_tracks raised at a pad whose file Live's
+    browser did not list, after the 808 track and an empty Drum Rack were
+    made, and only the error was said: the build names the pad, its file
+    and the tracks it left. A connection Live refuses says that its Remote
+    Script serves at most 8 clients."""
+    import asyncio
+    import json
+
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+
+    def stop(args, calls):
+        name = next(t for t in args["tracks"] if t["name"] == "Drums (library)")["instrument"]["drum_rack"]["38"]
+        raise RuntimeError(f"Live's browser does not list {name['sample']!r}")
+
+    def overview(args, calls):
+        made = [{"name": "808 (synth)", "index": 4, "devices": ["Simpler"]},
+                {"name": "5-MIDI", "index": 5, "devices": ["Drum Rack"]}]
+        before = [{"name": f"{k}-MIDI", "index": k - 1, "devices": [], "session_clips": [], "arrangement_clip_count": 0}
+                  for k in range(1, 5)]  # the set's own empty tracks stay
+        return json.dumps({"tracks": before + (made if any(c[0] == "build_tracks" for c in calls) else [])})
+
+    logged = []
+    _fake_live(monkeypatch, tmp_path / "lib", answers={"build_tracks": stop, "get_session_overview": overview})
+    with pytest.raises(RuntimeError) as e:
+        asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
+    said = str(e.value)
+    assert "pad 38" in said and plan["tracks"]["drums"]["pads"]["38"]["path"] in said
+    assert "'808 (synth)' (Simpler), '5-MIDI' (Drum Rack)" in said and "1-MIDI" not in said
+    assert json.loads(logged[0])["tracks_made"][1]["devices"] == ["Drum Rack"]
+
+    def reset(args, calls):  # the 2.2.0 server's words, with 8 other clients connected
+        raise RuntimeError("Could not connect to Ableton Live. Is Live open, with AbletonMCP chosen as a Control "
+                           "Surface? ([Errno 54] Connection reset by peer)")
+
+    _fake_live(monkeypatch, answers={"get_session_overview": reset})
+    with pytest.raises(RuntimeError, match="serves at most 8 clients"):
+        asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
 
 
 def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
