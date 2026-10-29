@@ -313,7 +313,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     are 0.37 [0.23] with 16.3 [7.1] false hits a beat (an estimate for such
     songs; by count alone 0.83 and 25.2). Held to recurrence, a grid-found
     sound depended on the tempo being exact and constant: plan drums F1@20
-    0.866 -> 0.507 [0.897 -> 0.568] on a tempo rising 3 % over each beat,
+    0.866 -> 0.506 [0.897 -> 0.568] on a tempo rising 3 % over each beat,
     0.637 [0.662] with the bpm 0.2 % off (a forced --bpm), and every sound
     of a second tempo lost its pad; residual templates alone: 0.855
     [0.882], 0.853 [0.883], and with the drift kept as tempo map 0.867
@@ -331,7 +331,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     snare template's hit within SAME_MS of one of its hits is that kick or
     snare seen again (a template left with none gets no pad). Ordered by
     NCC alone, swing66-2's snare-band template of 10 kick moments (NCC
-    0.895, under the kick's 0.713) took pad 36 and played them a second
+    0.895, over the kick's 0.713) took pad 36 and played them a second
     time: kick F1@20 0.903 -> 0.846, swing66's 0.942 -> 0.914. With it,
     plan drums F1@20 0.866 -> 0.866 [0.897 -> 0.898], kick 0.859 -> 0.862
     [0.921 -> 0.925], false hits 10.7 -> 10.3 [4.3 -> 3.7] a beat, and no
@@ -466,7 +466,7 @@ def recurring(t, bar, ms: float = RECUR_MS, bars: int = RECUR_BARS) -> float:
     That makes it a test of the tempo too: on a constant grid 0.2 % off the
     song's tempo (3.5 ms a bar at 136 BPM), the suite's drum sounds stopped
     recurring (plan drums F1@20 0.866 -> 0.637 with every template held to
-    it), and on a tempo rising 3 % over the beat, 0.866 -> 0.507."""
+    it), and on a tempo rising 3 % over the beat, 0.866 -> 0.506."""
     t = np.sort(np.asarray(t, dtype=float))
     if len(t) < 2:
         return 0.0
@@ -549,12 +549,13 @@ def pad_lead(pad: dict, cache: dict) -> float:
     sample that cannot be read. cache keeps one per sample and setting.
 
     Notes placed at the hits' t_attack played each hit that much late: on
-    the 48 suite beats (htdemucs) the plan's timing medians were kick +2.06
-    ms, snare +1.13, hat +0.56 (mean over scenarios), and 0.0-0.6 ms more
-    than the analysis' on every sound. A note this much earlier attacks
-    where the analysis heard the hit: 162 of the 164 sounds with a pad are
-    timed within 0.3 ms of the analysis (the other two play fewer of its
-    templates)."""
+    the 48 suite beats (htdemucs, m2g-vel) the plan's timing medians were
+    kick +2.06 ms, snare +1.13, hat +0.56 (mean over scenarios), and per
+    sound with a pad 0.0-5.9 ms more than the analysis' (median 0.5 ms
+    over 164 sounds; kicks 2.5). A note this much earlier attacks where
+    the analysis heard the hit: 162 of those 164 sounds are timed within
+    0.3 ms of the analysis (the other two play fewer of its templates),
+    and 218 of the 219 with a pad at m3 (the other 0.76 ms)."""
     s = pad_settings(pad)
     key = (pad["path"], s["start_s"], s["transpose"] + s["detune_cents"] / 100, s["role"])
     if key not in cache:
