@@ -33,17 +33,18 @@ Before the fit, a template that holds another (a snare template holds the
 hat that plays on every snare) has it subtracted, else it takes that
 sound's place at every hit (purification), and a template the others
 explain (a duplicate, a kick+hat found where they always coincide) is left
-out, its hits handed to the templates that explain it. Two kinds of
-template are never held or probed for, as they only find another
-template's sound a second time: one of discover()'s residual pass (found
-where no template of its band plays: it keeps its matched-filter hits, and
-gets no pitched copies), and one that a bigger template of its fit band
-holds within NEAR_MS (a variant of that sound). Re-fit on discover()'s
-templates of the 48 suite beats (htdemucs), the drums' F1 at 20 ms went
-0.847 -> 0.879 (mean over sounds; 0.801 -> 0.844 over hits) and the false
-hits from 68.6 to 43.1 a beat; open hats 0.901 -> 0.979, snares 0.933 ->
-0.961; claps 0.580 -> 0.500, as the layers scenario's clap had been found
-only by a residual template held under the snare.
+out, its hits handed to the templates that explain it (those at HAND of
+their level or more). Two kinds of template are never held or probed for,
+as they only find another template's sound a second time: one of
+discover()'s residual pass (found where no template of its band plays: it
+keeps its matched-filter hits, and gets no pitched copies), and one that a
+bigger template of its fit band holds within NEAR_MS (a variant of that
+sound). Re-fit on discover()'s templates of the 48 suite beats (htdemucs),
+the drums' F1 at 20 ms went 0.847 -> 0.879 (mean over sounds; 0.801 ->
+0.844 over hits) and the false hits from 68.6 to 43.1 a beat; open hats
+0.901 -> 0.979, snares 0.933 -> 0.961; claps 0.580 -> 0.500, as the layers
+scenario's clap had been found only by a residual template held under the
+snare.
 
 On 22 calibration-suite beats (layers, rolls, flams, dynamics, v1, v1orig,
 producer, full, kick808), against one template per moment and band: hats
@@ -77,6 +78,13 @@ NULL_SHIFTS_MS = (-47, -29, 29, 47)
 NULL_QUANTILE = 0.95
 HOLDS = ((0.3, 2.0), (0.015, 0.3))  # S holds H: LS coefficient c, share of S's energy over H's span
 COMPOSITE = 0.8  # share of a template the earlier ones explain: not a sound of its own
+# A left-out template's hits go to the ones that explain it at HAND of their
+# level or more (else to the one that explains it most). At any level, the
+# hand-off hung on the order: on melodic-1 with the hat averaged from 16
+# hits to the kick main's 15, the hat came first, explained 0.08 of the
+# kick's view the main left out, got its hits, and 32 of its 92 hits went
+# (hat F1@20 0.49 -> 0.30; 15 hits to 15 put the main first by its index)
+HAND = 0.1
 ECHO = 0.5  # share of a template's own band an earlier one explains: its matched filter repeats that one
 SAME_SOUND = 0.6  # placed templates this alike are one sound found twice
 # Share of a template's hits that are another's found twice: one sound. A
@@ -103,6 +111,7 @@ FLAM_MS = 35  # a quieter hit this close before another of the same sound is its
 TONE_MS = 35
 TAIL = (0.25, 0.5)  # a low or tonal template's hit this soon (s) after one this much louder is its ringing (_tails)
 NEAR_MS = 2  # a template held this close by a bigger one of its fit band is a variant of that sound (_held)
+CLEAN_NCC = 0.8  # a matched-filter hit this alike to its template is clean (as discover() and the plan count them)
 
 
 @dataclass
@@ -286,19 +295,43 @@ def explained(t: np.ndarray, others: list[np.ndarray], lags: tuple[int, int]) ->
     return 1.0 - res ** 2 / (float((t.astype(np.float64) ** 2).sum()) or 1e-12), coef, best
 
 
+def _order(hits: list[int], main: list[int | None]) -> list[int]:
+    """The templates in the order relations() takes them: those averaged
+    from more hits first, and each view (main[k]: the template k is a
+    view of, discover()'s same_sound_as) right after its main, whatever
+    its hits. By hits alone, melodic-1's kick in the snare band (18 hits)
+    came before the kick's own low-band template (15), explained it, and
+    the kick's template was left out: the view timed the kicks, 25 of 56
+    within 5 ms and 27 of them 10-40 ms late (htdemucs). With the main
+    first, the view is left out, and the main's window starts on the body
+    too: 23 within 5 ms and 29 at 10-20 ms late (18-20 ms in the plan), so
+    kick F1@20 0.748 -> 0.929 but F1@15 0.748 -> 0.679 (plan 0.748 ->
+    0.411, F1@5 0.435 -> 0), median error 11.8 -> 14.7 ms (plan 13.6 ->
+    18.6 ms), p90 35.5 -> 15.6 ms; htdemucs_ft's low-band template times
+    the same kicks at 0.5 ms. Only a view its main explains (relations():
+    lags within +-10 ms) is left out. One whose window sits later on the
+    sound stays, and its merge with the main (duplicates()) keeps the one
+    averaged from more hits: a view 12-20 ms late on a synthetic kick took
+    all 24 kicks, late (B9; its test is marked as an expected failure).
+    Where a left-out view's hits go no longer hangs on this order (HAND)."""
+    root = [k if m is None else m for k, m in enumerate(main)]
+    return sorted(range(len(hits)), key=lambda k: (-hits[root[k]], root[k], k != root[k], -hits[k]))
+
+
 def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int], hits: list[int],
-              holdable: set[int], rows: list[int]) -> dict:
+              holdable: set[int], rows: list[int], main: list[int | None] | None = None) -> dict:
     """How the templates overlap, from their weighted bands (full; n: column
     lengths; rows: the fit band each is heard in) and their own detection
-    bands (own[k][j]: template j in k's band), taking those averaged from
-    more hits first:
+    bands (own[k][j]: template j in k's band), taking them in _order()'s
+    order (main: each one's main, if it is a view):
     - composite: the earlier ones explain COMPOSITE of it in all bands (a
-      duplicate, or a kick+hat where both have templates): left out;
+      duplicate, or a kick+hat where both have templates): left out, its
+      hits to go to those of them (by) at HAND of their level or more;
     - echo: an earlier one explains ECHO of it in its own band, so its
       matched filter repeats that one's (a kick+hat found in the hat band
       finds every hat): never probed for;
     - holds: s holds h, another sound that may be held (holdable, _held)."""
-    order = sorted(range(len(full)), key=lambda k: -hits[k])
+    order = _order(hits, main or [None] * len(full))
     near = (-samples(10), samples(10))
     composite: dict[int, dict] = {}
     echo: dict[int, float] = {}
@@ -306,9 +339,9 @@ def relations(full: list[np.ndarray], own: list[list[np.ndarray]], n: list[int],
     for k in order:
         share, coef, lags = explained(full[k][:, :n[k]], [full[j] for j in kept], near)
         if kept and share >= COMPOSITE:
-            composite[k] = {"share": round(share, 3),
-                            "by": {kept[j]: (round(float(c), 3), lag) for j, (c, lag) in enumerate(zip(coef, lags))
-                                   if c > 0}}
+            by = {kept[j]: (round(float(c), 3), lag) for j, (c, lag) in enumerate(zip(coef, lags)) if c > 0}
+            composite[k] = {"share": round(share, 3), "by": {j: v for j, v in by.items() if v[0] >= HAND}
+                            or dict([max(by.items(), key=lambda kv: kv[1][0])])}
             continue
         mine, _, _ = explained(own[k][k][:, :n[k]], [own[k][j] for j in kept], near)
         if kept and mine >= ECHO:
@@ -513,19 +546,38 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
     return np.array(sorted(kept), dtype=int), pairs
 
 
-def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int],
-               kind: list[bool]) -> dict[int, tuple[int, int]]:
+def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int], kind: list[bool],
+               clean: np.ndarray | None = None, band: list[str] | None = None) -> dict[int, tuple[int, int]]:
     """Columns of one kind (kind: tonal or not; None, never merged) that
     keep losing their hits to each other (DUPLICATE of the fewer's hits
     found twice; a kick+hat template and a hat template share the hat, not
     the kind): {merged: (into, offset)} with p_into = p_merged + offset,
-    into the one earlier in first. At half, a clap on every other snare at
-    a constant offset (its template and the snare's each holding half the
-    other) lost half its hits to the snare, was merged into it, and its
-    solo hits went too: 0 of 32 claps. Matching as waveforms instead (NCC
-    0.85 in both bands, as discover() asks) kept that clap apart but also
-    one kick found twice 17 ms apart (0.77 in the snare band; v1orig-5 kick
-    F1@20 0.98 -> 0.22)."""
+    into the one earlier in first; where DUPLICATE of the more's hits are
+    found twice too (one sound, twice over) and both were found in one
+    detection band (band, per column), into the one with more clean
+    matched-filter hits (clean, per column): a snare template that also
+    holds a sound the snare does not play, averaged from more hits, took
+    the clean one's hits and every snare came out under NCC 0.8. One band
+    only: a hit's NCC is read in its template's band, and the low band
+    reads high whatever the template. On layers-2 the snare's low-band
+    template read 16 of 16 hits clean and the snare-band one 7 of 18; read
+    in the snare band, 1 of 16 and 7 of 18, in the low band 16 of 16 and 16
+    of 18, and the joint fit kept 12 of their 14 shared moments with the
+    snare-band one (median NCC in the fit's bands 0.75 against 0.52). Taken
+    by the low band's reading, the low-band template carried the snare and
+    its 0.96-0.98 NCCs cleared make_plan's 0.5 clean gate (plan snare 0 ->
+    1.0), which the snare-band template's hits do not (0.44): that is the
+    plan gate's to judge. No two-way pair of one band occurs on the suite
+    (48 beats, both models): the rule is checked on synthetic beats only.
+    Only both ways: a snare template (32 of 32 clean) took a hat's 128 hits
+    where they shared the 32 snares (a hat averaged over every hit holds
+    the snare under some of them, and the snare's the hat). At half, a clap
+    on every other snare at a constant offset (its template and the
+    snare's each holding half the other) lost half its hits to the snare,
+    was merged into it, and its solo hits went too: 0 of 32 claps. Matching
+    as waveforms instead (NCC 0.85 in both bands, as discover() asks) kept
+    that clap apart but also one kick found twice 17 ms apart (0.77 in the
+    snare band; v1orig-5 kick F1@20 0.98 -> 0.22)."""
     count: dict[tuple[int, int], list[int]] = {}
     for i, j in pairs:
         a, b = int(cands.col[i]), int(cands.col[j])
@@ -538,7 +590,9 @@ def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int]
     for (a, b), d in sorted(count.items(), key=lambda kv: -len(kv[1])):
         if len(d) >= DUPLICATE * min(hits[a], hits[b]) and a not in out and b not in out:
             off = int(np.median(d))  # p_b - p_a
-            if first.index(a) < first.index(b):
+            twice = (clean is not None and band is not None and band[a] == band[b]
+                     and len(d) >= DUPLICATE * max(hits[a], hits[b]) and clean[a] != clean[b])
+            if (clean[a] > clean[b]) if twice else first.index(a) < first.index(b):
                 out[b] = (a, -off)
             else:
                 out[a] = (b, off)
@@ -613,8 +667,8 @@ class Scene:
     (n) and how they overlap (relations); the columns (kit.columns: kept
     templates purified, then pitched copies) with the padded stem's bands;
     the column of each kept template; per column its threshold; the decay of
-    the low and tonal columns; and per column its usual gain and null, as
-    the steps set them."""
+    the low and tonal columns; and per column its usual gain, null and clean
+    matched-filter hits, as the steps set them."""
     templates: list
     n: list[int]
     rel: dict
@@ -626,6 +680,7 @@ class Scene:
     rings: dict[int, np.ndarray]
     usual: np.ndarray | None = None
     null: np.ndarray | None = None
+    clean: np.ndarray | None = None
 
 
 def explain(x: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, closest_ms: dict | None = None,
@@ -684,7 +739,10 @@ def _scene(xp: np.ndarray, templates: list, detect_ms: dict, thresholds: dict, p
     # hits
     residual = {k for k, tp in enumerate(templates) if getattr(tp, "found", "grid") == "residual"}
     holdable = {k for k in range(len(templates)) if (k not in tones or k in hatlike) and k not in residual}
-    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows)
+    main = [names.index(tp.same_sound_as) if getattr(tp, "same_sound_as", None) in names else None
+            for tp in templates]
+    rel = relations(full, [inband[tp.band] for tp in templates], n, [tp.hits for tp in templates], holdable, rows,
+                    main)
     tones &= set(rel["kept"])
     noisy = [k for k in rel["kept"] if k not in tones | residual and k not in rel["echo"]]
     columns, purity = [], {}
@@ -715,9 +773,11 @@ def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> t
     """1. Each column's matched-filter hits (its own band and attack, NCC at
     the threshold, closest_ms apart) and its weak peaks (CANDIDATE_NCC up to
     the threshold); a left-out template's hits go to the templates that
-    explain it. Sets the usual gains: the median of a template's hits."""
+    explain it. Sets the usual gains (the median of a template's hits) and
+    the clean hits (those at CLEAN_NCC or more)."""
     templates, n, columns = sc.templates, sc.n, sc.kit.columns
     cands, weak, usual = Candidates(), {}, np.ones(len(columns))
+    sc.clean = np.zeros(len(columns), int)
     for c, col in enumerate(columns):
         tp = templates[col.template]
         audio = tp.audio if not col.semitones else transpose(tp.audio, col.semitones)
@@ -727,6 +787,7 @@ def _matched(sc: Scene, xp: np.ndarray, thresholds: dict, closest_ms: dict) -> t
         sure = props["peak_heights"] >= sc.thr[c]
         cands.add(c, p[sure], props["peak_heights"][sure], "matched")
         weak[c] = p[~sure]
+        sc.clean[c] = int(np.sum(props["peak_heights"][sure] >= CLEAN_NCC))
         if not col.semitones and np.any(sure):
             usual[c] = float(np.median(gain[p[sure]]))
     sc.usual = np.array([usual[sc.col_of[col.template]] for col in columns])
@@ -748,11 +809,12 @@ def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple
     order = [sc.col_of[k] for k in sorted(sc.rel["kept"], key=lambda k: -sc.templates[k].hits)]
     order += [c for c in range(len(columns)) if c not in order]
     kind = [None if c.semitones else c.template in sc.tones for c in columns]  # pitched copies are never merged
+    band = [sc.templates[c.template].band for c in columns]
     merged: dict[int, tuple[int, int]] = {}
     for _ in range(len(columns)):  # each round merges a column away: the last one merges none
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
-        dup = duplicates(cands, pairs, order, kind)
+        dup = duplicates(cands, pairs, order, kind, sc.clean, band)
         if not dup:
             break
         for a, (b, off) in dup.items():
@@ -807,15 +869,20 @@ def _probes(sc: Scene, cands: Candidates, gains: np.ndarray, merged: dict, weak:
     """4. Where the kept hits leave something out: a held template at its
     offset under the hits of the one holding it (the co-detections' offset,
     else the containment lag), and each noisy template at its weak
-    matched-filter peaks and the onsets of its band. Returns the probe hits
-    that pass and the offsets used."""
+    matched-filter peaks and the onsets of its band. A merged template is
+    looked for as the column its hits went to, and an echo is never looked
+    for, merged into or not: holds are found before the merges, and on
+    PIRAMIT a residual kick template held the kick's main, whose hits went
+    into its view, an echo of it; the view was probed under the holder and
+    7 kick notes came in 5-8 ms after its hits (93 -> 100 on the kick pad;
+    no truth). Returns the probe hits that pass and the offsets used."""
     kit, columns, col_of = sc.kit, sc.kit.columns, sc.col_of
     layers, offsets = Candidates(), {}
     for s_tp, held in sc.rel["holds"].items():
         for h_tp, _, held_lag, _ in held:
             (s, s_off), (h, h_off) = _root(merged, col_of[s_tp]), _root(merged, col_of[h_tp])
             sp, hp = cands.p[cands.col == s], cands.p[cands.col == h]
-            if s == h or not len(sp):
+            if s == h or not len(sp) or columns[h].template in sc.rel["echo"]:
                 continue
             lag, agree = pair_offset(sp, hp)
             lag = held_lag + h_off - s_off if lag is None else lag
