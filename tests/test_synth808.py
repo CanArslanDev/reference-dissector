@@ -417,3 +417,41 @@ def test_a_first_crossing_past_300_ms_is_laid_out_too():
     y, info = tracked_shot(HELD, f0, curve, f0, attack_s=0.0067)
     assert info["followed"] > 1 and abs(attack_time(y, "808") - 0.0067) < 0.0005
 
+
+def test_fit_808_lays_its_one_shot_out_where_its_template_attacks(tmp_path, monkeypatch):
+    """bass808.json's attack_ms is where the template attacks from its own
+    start, PRE before its onset: fit_808 hands tracked_shot that less PRE,
+    and the one-shot attacks there after its start (pitch_track attack_ms).
+    Read from the template's start it would attack 5 ms late; not laid out,
+    at the fitted voice's own attack."""
+    import json
+
+    import soundfile as sf
+
+    from refdissect import pipeline
+    from refdissect.audio import PRE, attack_time
+    from refdissect.scenarios import tuning
+    x = _late(_held(0.9)[0], 8.0)
+    f0, curve = tuning(x)
+    kept = [[s, round(c, 1)] for s, c in curve[::2]]
+    onset_attack = attack_time(x, "808")
+    onsets = [0.5, 1.5, 2.5, 3.5]
+    bass = np.zeros(int(4.5 * SR), np.float32)
+    for s in onsets:
+        bass[int(s * SR):int(s * SR) + len(x)] += x
+    stems = tmp_path / "stems"
+    stems.mkdir()
+    sf.write(stems / "bass.wav", bass, SR)
+    sf.write(stems / "drums.wav", np.zeros_like(bass), SR)
+    work = tmp_path / "work"
+    (work / "templates").mkdir(parents=True)
+    (work / "analysis.json").write_text(json.dumps({"source": {"stems": str(stems)}, "tuning": {"808": 0.0},
+                                                    "notes_808": []}))
+    (work / "bass808.json").write_text(json.dumps({"template": {
+        "onsets_s": onsets, "root_midi": 24, "hz": f0, "method": "qifft_300_600ms", "length_s": 0.6, "curve": kept,
+        "attack_ms": 1000 * (onset_attack + PRE / SR)}}))
+    fast = Params(32.70, 32.70 * 2 ** (6 / 12), 20, 1.5, 0.3, 4.0, 0.05, 1.9)  # a fitted voice that attacks at once
+    monkeypatch.setattr(pipeline, "fit", lambda ref, f1, **kw: (fast, {"seconds": 0.0}))
+    out = pipeline.fit_808(work, log=lambda *a: None)
+    assert out["pitch_track"]["attack_ms"] == pytest.approx(1000 * onset_attack, abs=0.5)
+    assert attack_time(sf.read(out["file"], dtype="float32")[0], "808") == pytest.approx(onset_attack, abs=5e-4)
