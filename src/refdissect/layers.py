@@ -529,27 +529,38 @@ def distinct(kit: Kit, cands: Candidates, gains: np.ndarray) -> tuple[np.ndarray
     return np.array(sorted(kept), dtype=int), pairs
 
 
-def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int],
-               kind: list[bool], clean: np.ndarray | None = None) -> dict[int, tuple[int, int]]:
+def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int], kind: list[bool],
+               clean: np.ndarray | None = None, band: list[str] | None = None) -> dict[int, tuple[int, int]]:
     """Columns of one kind (kind: tonal or not; None, never merged) that
     keep losing their hits to each other (DUPLICATE of the fewer's hits
     found twice; a kick+hat template and a hat template share the hat, not
     the kind): {merged: (into, offset)} with p_into = p_merged + offset,
     into the one earlier in first; where DUPLICATE of the more's hits are
-    found twice too (one sound, twice over), into the one with more clean
-    matched-filter hits (clean, per column). By first alone, layers-2's
-    snare template from the low band (16 of its 16 hits clean, 14 shared)
-    went into a snare-band one (7 of 18): the snare's hits came out 0.44
-    clean, under make_plan's 0.5, and no pad played it. Only both ways: a
-    snare template (32 of 32 clean) took a hat's 128 hits where they shared
-    the 32 snares (a hat averaged over every hit holds the snare under some
-    of them, and the snare's the hat). At half, a clap on every other snare at
-    a constant offset (its template and the snare's each holding half the
-    other) lost half its hits to the snare, was merged into it, and its
-    solo hits went too: 0 of 32 claps. Matching as waveforms instead (NCC
-    0.85 in both bands, as discover() asks) kept that clap apart but also
-    one kick found twice 17 ms apart (0.77 in the snare band; v1orig-5 kick
-    F1@20 0.98 -> 0.22)."""
+    found twice too (one sound, twice over) and both were found in one
+    detection band (band, per column), into the one with more clean
+    matched-filter hits (clean, per column): a snare template that also
+    holds a sound the snare does not play, averaged from more hits, took
+    the clean one's hits and every snare came out under NCC 0.8. One band
+    only: a hit's NCC is read in its template's band, and the low band
+    reads high whatever the template. On layers-2 the snare's low-band
+    template read 16 of 16 hits clean and the snare-band one 7 of 18; read
+    in the snare band, 1 of 16 and 7 of 18, in the low band 16 of 16 and 16
+    of 18, and the joint fit kept 12 of their 14 shared moments with the
+    snare-band one (median NCC in the fit's bands 0.75 against 0.52). Taken
+    by the low band's reading, the low-band template carried the snare and
+    its 0.96-0.98 NCCs cleared make_plan's 0.5 clean gate (plan snare 0 ->
+    1.0), which the snare-band template's hits do not (0.44): that is the
+    plan gate's to judge. No two-way pair of one band occurs on the suite
+    (48 beats, both models): the rule is checked on synthetic beats only.
+    Only both ways: a snare template (32 of 32 clean) took a hat's 128 hits
+    where they shared the 32 snares (a hat averaged over every hit holds
+    the snare under some of them, and the snare's the hat). At half, a clap
+    on every other snare at a constant offset (its template and the
+    snare's each holding half the other) lost half its hits to the snare,
+    was merged into it, and its solo hits went too: 0 of 32 claps. Matching
+    as waveforms instead (NCC 0.85 in both bands, as discover() asks) kept
+    that clap apart but also one kick found twice 17 ms apart (0.77 in the
+    snare band; v1orig-5 kick F1@20 0.98 -> 0.22)."""
     count: dict[tuple[int, int], list[int]] = {}
     for i, j in pairs:
         a, b = int(cands.col[i]), int(cands.col[j])
@@ -562,7 +573,8 @@ def duplicates(cands: Candidates, pairs: list[tuple[int, int]], first: list[int]
     for (a, b), d in sorted(count.items(), key=lambda kv: -len(kv[1])):
         if len(d) >= DUPLICATE * min(hits[a], hits[b]) and a not in out and b not in out:
             off = int(np.median(d))  # p_b - p_a
-            twice = clean is not None and len(d) >= DUPLICATE * max(hits[a], hits[b]) and clean[a] != clean[b]
+            twice = (clean is not None and band is not None and band[a] == band[b]
+                     and len(d) >= DUPLICATE * max(hits[a], hits[b]) and clean[a] != clean[b])
             if (clean[a] > clean[b]) if twice else first.index(a) < first.index(b):
                 out[b] = (a, -off)
             else:
@@ -780,11 +792,12 @@ def _one_each(sc: Scene, cands: Candidates) -> tuple[Candidates, dict[int, tuple
     order = [sc.col_of[k] for k in sorted(sc.rel["kept"], key=lambda k: -sc.templates[k].hits)]
     order += [c for c in range(len(columns)) if c not in order]
     kind = [None if c.semitones else c.template in sc.tones for c in columns]  # pitched copies are never merged
+    band = [sc.templates[c.template].band for c in columns]
     merged: dict[int, tuple[int, int]] = {}
     for _ in range(len(columns)):  # each round merges a column away: the last one merges none
         gains, _ = fit(kit, cands)
         kept, pairs = distinct(kit, cands, gains)
-        dup = duplicates(cands, pairs, order, kind, sc.clean)
+        dup = duplicates(cands, pairs, order, kind, sc.clean, band)
         if not dup:
             break
         for a, (b, off) in dup.items():
