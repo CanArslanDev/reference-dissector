@@ -377,6 +377,27 @@ def test_short_notes_read_their_settled_pitch_past_the_template():
     assert B.settle(B.band(bass, "808"), FLAT, [(0.0, 0.3, 700.0)] * 3) is FLAT
 
 
+def test_settle_refuses_notes_that_read_apart():
+    """producer-2's failure: the notes in settle()'s window read 105-186
+    cents apart (some an octave off, some sliding to their cut), and the
+    median of all their periods, under a 30 ms margin or 5 notes, moved its
+    template 64 cents the wrong way. Three notes at the 808's settled pitch
+    and three a semitone under it, the template 30 cents over: the first
+    reading took the lower ones' (the median of 10 periods: 100 cents
+    under); the notes' spread now refuses it. Six at the settled pitch are
+    read within 2 cents."""
+    sharp = B.Template(np.zeros(1), np.zeros(1), [], 32.70 * 2 ** (30 / 1200), "drop_fit", [[0.0, 0.0], [2.0, 0.0]])
+    starts = [0.1 + 0.8 * k for k in range(6)]
+    spans = [(a, a + 0.45, 0.0) for a in starts]
+
+    def lo(under: float) -> np.ndarray:
+        return tone([(a, a + 0.45, 3.0, None) for a in starts[:3]], seconds=5.0) \
+            + tone([(a, a + 0.45, 3.0, None) for a in starts[3:]], hz=32.70 * 2 ** (-under / 1200), seconds=5.0)
+
+    assert B.settle(lo(100.0), sharp, spans) is sharp
+    assert abs(1200 * np.log2(B.settle(lo(0.0), sharp, spans).hz / 32.70)) < 2
+
+
 def test_tune_808_splits_a_fraction_into_transpose_and_detune():
     """Simpler plays a sample at its own pitch on C3 (MIDI 60): a sample
     sounding at MIDI 23.746 (32.228 Hz) needs Transpose +36 and Detune +25
