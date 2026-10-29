@@ -88,6 +88,16 @@ SLIDE_AFTER = 0.1  # _slide: seconds after the note before starts that a slide m
 # models, 50 ms in to 10 ms before the end) it never fell more than 26.8 dB under the note's peak, and PIRAMIT's
 # rests sit 52-81 dB under its notes' median peak, the shortest 62 ms long
 SILENT_DB, SILENT_S = 40.0, 0.05
+# settle(): the notes that must reach its window, its width (seconds of template time), how far apart (cents,
+# interquartile range) the notes in it may read, and how far (cents) under the template's a reading must lie to
+# move it (forced on the 79 templates whose drop settled, the reading's error reached 9.4 cents). Chosen on the
+# suite's 17 templates (48 beats, both models) that learn() left with no settled window, read on settle()'s own
+# inputs against the truth: mean |error| 21.6 cents with none, 15.8 with the first reading (3 notes, 50 ms, a
+# 10 ms margin), 15.1 with these. Every setting one or two steps away (margin 20 or 30 ms or 1.5 periods; least
+# 3, 5, 6; 75 or 150 ms; 25 or 75 cents; 5 or 15 cents) keeps producer-2's readings refused and bass_low-1's taken
+# on both models, where a 30 ms margin, or least 5, made the first reading take producer-2's (htdemucs_ft: -47.6
+# to -111.9 cents) and least 5 refuse bass_low-1's
+SETTLE_LEAST, SETTLE_WIDTH, SETTLE_AGREE, SETTLE_MOVE = 4, 0.1, 50.0, 10.0
 
 
 # ── Attacks ──
@@ -838,37 +848,42 @@ def _lag(ref: Template, tpl: Template, span_ms: float = 150.0, reach_ms: float =
     return (int(np.argmax(corr)) * samples(0.5)) - samples(reach_ms)
 
 
-def settle(lo: np.ndarray, tpl: Template, spans: list[tuple[float, float, float]], least: int = 3,
-           width_s: float = 0.05, steady: float = 50.0) -> Template:
+def settle(lo: np.ndarray, tpl: Template, spans: list[tuple[float, float, float]], least: int = SETTLE_LEAST,
+           width_s: float = SETTLE_WIDTH, steady: float = 50.0, agree: float = SETTLE_AGREE,
+           move: float = SETTLE_MOVE, margin: float = 1.0) -> Template:
     """The template with its settled pitch read on the notes found, where
     learn() had no window in which its notes' drop had settled (a drop fit,
     a still-falling window, or the tail). spans: each note's (start, end,
     transposition in cents). A note c cents up plays the sample 2^(c/1200)
     times as fast, so its period-by-period pitch less c, at that many times
     its own time, is the template's: the notes reach past the template's
-    end. The reading: the median over the latest width_s of template time
-    that `least` notes reach, where its two halves agree within `steady`
-    cents (further apart, the notes slide there) and it lies under the
-    template's (a drop still falling is read sharp: one exponential leaves
-    out its slow tail). The pitch curve is moved with it, so every note's
-    heard pitch stays as it was.
+    end. Each note's periods count up to `margin` periods (at its own
+    pitch) before its cut, which ends the last one. The reading: the median
+    over the latest width_s of template time that `least` notes reach,
+    where its two halves agree within `steady` cents (further apart, the
+    notes slide there), the notes there agree (the interquartile range of
+    their own medians is `agree` cents or less: a note read an octave off,
+    or sliding at its end, is outvoted, not averaged in) and it lies more
+    than `move` cents under the template's (a drop still falling is read
+    sharp: one exponential leaves out its slow tail). The pitch curve is
+    moved with it, so every note's heard pitch stays as it was.
 
-    On the suite's 48 beats, against the truth, learn() had no settled
-    window on 11 (htdemucs) and 6 (htdemucs_ft), and this reading was taken
-    on 3 and 4 of them: bass_low-1's template read 59.7 and 40.9 cents
-    sharp from 110-330 ms notes, its +7 notes (330 ms, 0.45 s of template
-    time) 13.8 and 10.0; swing66-1's 28.0, now 9.5; full-2's moved from +1.4
-    and +1.0 to -2.8 and -6.4, meter34-2's from +1.6 to +1.4 and v1orig-1's
-    from -1.0 to -1.8 (htdemucs_ft). On the others the reading was over the
-    template's, or not steady (producer-2: halves 298 and 442 cents apart,
-    where the notes' ends slide). Replayed on the notes legato() was given."""
+    Taken on 3 of the 11 such templates of the suite's beats on htdemucs
+    and 1 of 6 on htdemucs_ft (cents against the truth): bass_low-1 +59.7
+    -> +14.0 and +40.9 -> +10.1 (its +7 notes reach 0.45 s of template
+    time; the template is 0.33 s), swing66-1 +28.0 -> +5.4, dynamics-1
+    +25.8 -> +14.7. Left: producer-2 (its notes 105 and 186 cents apart,
+    some read an octave off), bass_low-2 on htdemucs_ft (120 cents between
+    the halves), six within 10 cents of the template (they would have
+    moved it 0.2-6.2 cents) and four over it, among them tempo72-2's -32.8
+    (a flat template is left)."""
     if tpl.method.startswith("qifft_") and tpl.method != "qifft_tail" and not tpl.method.endswith("_falling"):
         return tpl
     pts = []
     for j, (t, end, c) in enumerate(spans):
         rate = 2 ** (c / 1200)
         s, midi = _track(lo, t, end, 1.3 * tpl.hz * rate * 2 ** (2 / 12), skip_s=0.0)
-        keep = s < (end - t) - 0.01  # the cut's last period aside
+        keep = s < (end - t) - margin / (tpl.hz * rate)
         pts += [(a * rate, m - c / 100, j) for a, m in zip(s[keep], midi[keep])]
     if not pts:
         return tpl
@@ -877,12 +892,15 @@ def settle(lo: np.ndarray, tpl: Template, spans: list[tuple[float, float, float]
     if len(reach) < least:
         return tpl
     b = float(reach[least - 1])
-    first = pts[(pts[:, 0] >= b - width_s) & (pts[:, 0] < b - width_s / 2), 1]
-    second = pts[(pts[:, 0] >= b - width_s / 2) & (pts[:, 0] <= b), 1]
+    w = (pts[:, 0] >= b - width_s) & (pts[:, 0] <= b)
+    first, second = pts[w & (pts[:, 0] < b - width_s / 2), 1], pts[w & (pts[:, 0] >= b - width_s / 2), 1]
     if not len(first) or not len(second) or 100 * abs(np.median(first) - np.median(second)) > steady:
         return tpl
+    notes = [float(np.median(pts[w & (pts[:, 2] == j), 1])) for j in np.unique(pts[w, 2])]
+    if 100 * float(np.subtract(*np.percentile(notes, [75, 25]))) > agree:
+        return tpl
     midi = float(np.median(np.r_[first, second]))
-    if midi >= tpl.midi:
+    if 100 * (tpl.midi - midi) <= move:
         return tpl
     hz = 440 * 2 ** ((midi - 69) / 12)
     shift = 1200 * np.log2(tpl.hz / hz)
