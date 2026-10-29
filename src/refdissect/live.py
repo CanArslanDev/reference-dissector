@@ -21,10 +21,13 @@ docs/07-building-in-live.md):
   voices after build_tracks (the battery set each of them this way); a
   built 808 has not been captured in Live yet.
 - A new file in the User Library shows up in Live's browser after a few
-  seconds; samples load onto Drum Rack pads through the browser. A file
-  loaded through the browser keeps playing what Live loaded under its name
-  after it is overwritten on disk (Live 12.4.6), so the 808's one-shot is
-  named after its content (sample_808).
+  seconds; samples load onto Drum Rack pads through the browser, by file
+  name. A file loaded through the browser keeps playing what Live loaded
+  under its name after it is overwritten on disk (Live 12.4.6), and the
+  browser holds other files of a pad's name: the 808's one-shot and every
+  pad's file go into the User Library under a name of their content
+  (sample_808, pad_sample), and the build reads back the file each Simpler
+  holds.
 - Reference stems go in as Arrangement audio clips with warping off, so they
   play at their own speed and line up with notes placed at their seconds,
   once their start (moved to the first transient by Live's warp analysis)
@@ -43,6 +46,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 
 import mido
@@ -164,6 +168,25 @@ def sample_808(song: str, synth: dict) -> str:
         return f"{song} {name.stem} {one_shot_digest(synth['file'])}{name.suffix}"
     except OSError:
         return f"{song} {name.name}"
+
+
+def pad_sample(path: str | Path) -> str:
+    """A pad's file name in the User Library: the file's own name (its
+    spaces run together) and its content's digest, as sample_808 names the
+    808's one-shot. build_tracks (ableton-live-mcp 2.2.0) loads a pad
+    through Live's browser by file name, and the browser holds other files
+    of a pad's name: in the live check (Live 12.4.6, 2026-10-29) v1orig-3's
+    open-hat pad played an 808 of the same name and PIRAMIT's closed-hat pad
+    an FX hit, and a one-character name matched so many items that the file
+    was not among the 20 the search keeps: build_tracks raised after 40 s
+    with the set half built. 4 of the 466 pads of the suite's and PIRAMIT's
+    97 plans named a file that other files of other content share. Without
+    a readable file, the file's name."""
+    p = Path(path)
+    try:
+        return f"{' '.join(p.stem.split())} {one_shot_digest(p)}{p.suffix}"
+    except OSError:
+        return p.name
 
 
 def heard_808(notes: list[dict], shot: np.ndarray, shift0: float, starts: list[float] | None = None) -> float | None:
@@ -915,7 +938,8 @@ def simpler_808(t808: dict) -> dict:
 def build_spec(plan: dict) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
     (simpler_808; "voices" for build, which build_tracks does not read),
-    the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
+    the drums on a Drum Rack (one pad per sound, its file by the name build
+    copies it under, pad_sample), the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers with
     warping off, the 808's at 0 dB and each pad's at its volume_db
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
@@ -935,7 +959,7 @@ def build_spec(plan: dict) -> list[dict]:
     drums = plan["tracks"]["drums"]
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
-                     str(note): {"sample": Path(pad["path"]).name, "warping": False,
+                     str(note): {"sample": pad_sample(pad["path"]), "warping": False,
                                  "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
                                               "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
@@ -956,6 +980,44 @@ def build_spec(plan: dict) -> list[dict]:
     return spec
 
 
+def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
+    """src in the User Library's GENERATED folder under name, copied unless
+    a file there holds its content already (the names carry a digest)."""
+    target = Path(user_library).expanduser() / GENERATED / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.is_file() or one_shot_digest(target) != one_shot_digest(src):
+        shutil.copyfile(src, target)
+    return target
+
+
+async def held_samples(call, overview: dict, plan: dict) -> dict:
+    """The file each Simpler of the build holds, read back from Live (its
+    sample's file_path), per pad note and "808", beside the plan's file:
+    same when their contents' digests agree."""
+    index = {t["name"]: t["index"] for t in overview["tracks"]}
+    pads, t808 = plan["tracks"]["drums"]["pads"], plan["tracks"]["808"]
+    where = {}
+    if "808 (synth)" in index and "sample_path" in t808:
+        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"])
+    if "Drums (library)" in index:
+        for note, pad in pads.items():
+            where[str(note)] = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 "
+                                "devices 0 sample", pad["path"])
+    out = {}
+    for key, (path, want) in where.items():
+        try:
+            held = json.loads(await call("lom_get_object", path=path, properties=["file_path"])).get("file_path")
+        except Exception as e:  # no Simpler, or one without a sample
+            out[key] = {"plan": want, "live": None, "same": False, "error": str(e)}
+            continue
+        try:
+            same = bool(held) and one_shot_digest(held) == one_shot_digest(want)
+        except OSError:
+            same = False
+        out[key] = {"plan": want, "live": held, "same": same}
+    return out
+
+
 async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, headroom: bool = True,
                 log=print) -> dict:
     """Build the plan in the open Live set with ableton-live-mcp's build_tracks
@@ -964,9 +1026,12 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     Refuses an 808 one-shot whose content is not the one the plan named
     (sample_808): fit-808 ran again after plan, and Live, having loaded
     that name before, could play the old one-shot; so would the plan's
-    Transpose and Detune, made for the old one."""
-    import shutil
-
+    Transpose and Detune, made for the old one. Refuses a pad whose file
+    cannot be read. The one-shot and every pad's file are copied into the
+    User Library under the names the spec loads them by (sample_808,
+    pad_sample), and after build_tracks the build reads back the file each
+    Simpler holds (held_samples): a pad or 808 that holds another file is
+    listed under wrong_samples and logged."""
     try:
         from MCP_Server import extended_tools as et
         from MCP_Server.server import mcp
@@ -985,16 +1050,21 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     if "sample_path" in t808 and one_shot_digest(t808["sample_path"]) not in t808["sample"]:
         raise RuntimeError(f"{t808['sample_path']} changed after the plan named it {t808['sample']!r}: "
                            "run refdissect plan again")
+    pads = plan["tracks"]["drums"]["pads"]
+    unread = [f"pad {note}: {pad['path']}" for note, pad in pads.items() if not Path(pad["path"]).is_file()]
+    if unread:
+        raise RuntimeError(f"Cannot read the files of {'; '.join(unread)}")
     overview = json.loads(await call("get_session_overview"))
     busy = [t["name"] for t in overview["tracks"]
             if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
     if busy:
         raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
     await call("set_song_properties", tempo=plan["tempo"], loop=False)
-    if "sample_path" in t808:  # Live's browser lists it a few seconds after it lands in the User Library
-        target = Path(user_library).expanduser() / GENERATED / t808["sample"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(t808["sample_path"], target)
+    # Live's browser lists a file a few seconds after it lands in the User Library (build_tracks waits for it)
+    if "sample_path" in t808:
+        library_copy(t808["sample_path"], user_library, t808["sample"])
+    for pad in pads.values():
+        library_copy(pad["path"], user_library, pad_sample(pad["path"]))
     spec = build_spec(plan)
     built = json.loads(await call("build_tracks", tracks=spec))
     report: dict = {"tracks": built["tracks"]}
@@ -1004,6 +1074,14 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     if plan["locators"]:
         report["locators"] = et.place_locators([(n, float(round(b))) for n, b in plan["locators"]])
     overview = json.loads(await call("get_session_overview"))
+    held = await held_samples(call, overview, plan)
+    report["samples_checked"] = len(held)
+    wrong = {key: h for key, h in held.items() if not h["same"]}
+    if wrong:
+        report["wrong_samples"] = wrong
+        for key, h in wrong.items():
+            log(f"{'the 808' if key == '808' else f'pad {key}'} holds {h['live']}, not the plan's {h['plan']}"
+                + (f" ({h['error']})" if "error" in h else ""))
     first = next((t["index"] for t in overview["tracks"] if t["name"] == "808 (synth)"), None)
     voices = next((s.get("voices") for s in spec if s["name"] == "808 (synth)"), None)
     if voices and first is not None:  # one voice, so overlapping notes glide (the battery set it this way)
