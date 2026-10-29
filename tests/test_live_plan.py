@@ -442,7 +442,7 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
          extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0,
-         stem_gain: float = 1.0):
+         stem_gain: float = 1.0, sounding: list | None = None):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
     stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
@@ -453,7 +453,8 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     more sounds, {name: (role, file, events)}; hat_only: the analysis found
     the hat alone (the stems still hold the kick); click: a click of noise
     over the kick's body, at that gain (a bright kick); stem_gain: the
-    stems that much louder."""
+    stems that much louder; sounding: more audio in the drum stem,
+    [(samples, time (s), gain)]."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
     t = np.arange(int(0.3 * SR)) / SR
@@ -470,6 +471,9 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
         bass[k * SR:k * SR + len(t)] += 0.5 * kick_in_bass * kick
         x = 0.05 * hat if copy_gain is None or k < 3 else copy_gain * transpose(hat.astype(np.float32), 3)
         drums[k * SR + SR // 2:k * SR + SR // 2 + len(x)] += x
+    for x, at, gain in sounding or []:
+        a = int(at * SR)
+        drums[a:a + len(x)] += gain * x[:len(drums) - a]
     a_kick, a_hat = attack_time(kick, "kick"), attack_time(hat, "hat")
     events = {"sound_1": [{"t": float(k), "t_attack": k + a_kick, "gain": 1.0} for k in range(4)],
               "sound_2": [{"t": k + 0.5, "t_attack": k + 0.5 + a_hat, "gain": 1.0} for k in range(4)]}
@@ -589,11 +593,11 @@ def test_the_drum_fader_stops_where_the_loudest_pad_meets_its_stem(tmp_path):
 
 
 def test_the_808_under_a_kick_is_not_the_kicks(tmp_path):
-    """The bass stem holds the plan's own 808 under every kick (here 1.6 dB
-    under the kick over the kick's first 50 ms; the suite's 808s sit 1.3
-    dB over its kicks there, median): read on drums + bass, the kick takes
-    its own energy, not the 808's too, which put it 2.3 dB high here (and
-    the hat that much lower)."""
+    """The bass stem holds the plan's own 808 under every kick (here 1.9 dB
+    under the kick over the kick's first 50 ms, in the kick band; the
+    suite's 808s sit 1.3 dB over its kicks there, median): read on drums +
+    bass, the kick takes its own energy, not the 808's too, which put it
+    2.0 dB high here (and the hat that much lower)."""
     from refdissect.live import pad_levels
     from refdissect.render import render_808
     plan = _kit(tmp_path, kick_in_bass=0.0, under=0.15)
@@ -628,6 +632,34 @@ def test_a_bright_kick_on_a_kick_pad_is_read_as_a_kick(tmp_path):
     assert KICK_SHARE < low_share(sf.read(tmp_path / "kick.wav", dtype="float32")[0]) < LOW_SHARE
     pads = plan["tracks"]["drums"]["pads"]
     assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
+
+
+def test_a_sound_heard_mostly_with_a_louder_one_is_read_where_it_is_alone(tmp_path):
+    """An open hat at the hat's level, alone on 3 of its hits and found on
+    4 more where a snare plays 20 dB louder: over all its hits the median
+    is one of the snare's, and the open hat read 18 dB over where the
+    stems hold it, 1.6 dB under the kick (v1orig-2, htdemucs: an extra open
+    hat, 9 of whose 17 hits sat on the snare and the hat, read 22.8 dB over
+    its other 8; it played 23.3 dB over a perfect kit, and as the loudest
+    pad it put the hat's Volume at -36.3 dB and the drum fader at +5.6
+    dB). Its hits clear of every other sound agree and read more than
+    CLEAR_GAP_DB under: it is read on those, with the hat."""
+    from refdissect.audio import attack_time
+    t = np.arange(int(0.3 * SR)) / SR
+    noise = np.random.default_rng(7).standard_normal((2, len(t)))
+    ohat, snare = 0.9 * noise[0] * np.exp(-t / 0.1), 0.9 * noise[1] * np.exp(-t / 0.05)
+    sf.write(tmp_path / "ohat.wav", ohat, SR, subtype="FLOAT")
+    sf.write(tmp_path / "snare.wav", snare, SR, subtype="FLOAT")
+    a_ohat, a_snare = attack_time(ohat, "hat"), attack_time(snare, "snare")
+    alone, shared = [k + 0.25 for k in range(3)], [k + 0.75 for k in range(4)]
+    extra = {"sound_3": ("hat", "ohat.wav", [{"t": t0, "t_attack": t0 + a_ohat, "gain": 1.0} for t0 in alone + shared]),
+             "sound_4": ("snare", "snare.wav", [{"t": t0, "t_attack": t0 + a_snare, "gain": 1.0} for t0 in shared])}
+    held = [(ohat, t0, 0.05) for t0 in alone] + [(snare, t0, 0.5) for t0 in shared]
+    plan = _kit(tmp_path, extra=extra, sounding=held)
+    pads = plan["tracks"]["drums"]["pads"]
+    ohat_pad = next(k for k, p in pads.items() if p["path"].endswith("ohat.wav"))
+    assert pads[ohat_pad]["volume_db"] == pytest.approx(pads["42"]["volume_db"], abs=0.3)
+    assert pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.3)
 
 
 def test_a_sounds_pitched_copy_shares_its_level_and_a_silent_file_has_none(tmp_path):
