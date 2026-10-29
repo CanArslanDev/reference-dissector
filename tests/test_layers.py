@@ -465,14 +465,15 @@ def test_a_held_sound_sits_where_it_plays_with_its_holder(case):
     assert [h for h, *_ in held] == [1] and held[0][2] == pytest.approx(samples(want), abs=samples(0.5))
 
 
-def test_a_view_never_holds_its_main(sounds):
+def test_a_view_its_main_explains_is_left_out(sounds):
     """A kick template and a view of it that discover() found in the snare
     band from more hits (same_sound_as: the kick), its window 3 ms later
     on the sound. Taken by hits, the view came first, the kick was left
-    out as a composite of it and every kick was the view's, 3 ms late
-    (melodic-1: the view's matched filter caught the body, 12-35 ms late
-    on half the kicks). The main comes first: the kicks are its own, on
-    their attack, and the view adds none."""
+    out as a composite of it and every kick was the view's, 3 ms late. The
+    main comes first now and explains the view (relations() looks within
+    +-10 ms), so the view is left out: the kicks are the main's, timed by
+    its window (here the oracle's, on the attack; melodic-1's starts on
+    the body), and the view adds none."""
     hits = backbeat()
     x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
     templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
@@ -483,6 +484,30 @@ def test_a_view_never_holds_its_main(sounds):
     kicks = [t for n, t, _ in hits if n == "kick"]
     assert found(events, "kick", kicks, tol=0.001).all() and extra(events, "kick", kicks) == 0
     assert events["view"] == []
+
+
+@pytest.mark.xfail(strict=True, reason="B9: a view and its main merge by hits, not by where the sound starts")
+@pytest.mark.parametrize("late_ms", [12, 20])
+def test_a_view_later_on_the_sound_leaves_the_kicks_on_their_attack(sounds, late_ms):
+    """A known limitation (B9), pinned. A view 12-20 ms later on the kick
+    than its main is not explained by it (relations() looks within +-10
+    ms) and stays; the two keep taking each other's hits, and duplicates()
+    merges the main into the view, averaged from more hits: every kick
+    comes out late (0 of 24 within 1 ms). Merging into the template
+    relations() takes first fixes this beat but not the suite: on
+    htdemucs_ft producer-2's snare F1@20 0.587 -> 0.569 (plan 0.401 ->
+    0.262), kick808-2's snare median error 0.31 -> 0.70 ms, and PIRAMIT's
+    kick pad 93 -> 78 notes (no truth). The merge should keep the one whose
+    window starts where their shared hits start."""
+    hits = backbeat()
+    x = render(sounds, hits, 0.05 + 12 * 16 * STEP + 1)
+    templates = [oracle(x, hits, "hat", "hat"), oracle(x, hits, "kick", "low"), oracle(x, hits, "snare", "snare")]
+    kick, late = templates[1], samples(late_ms)
+    view = Template("view", "kick", "snare", np.r_[kick.audio[late:], np.zeros(late, np.float32)], kick.hits + 3,
+                    {}, None, same_sound_as="kick", found="residual")
+    events = explain(x, templates + [view])
+    kicks = [t for n, t, _ in hits if n == "kick"]
+    assert found(events, "kick", kicks, tol=0.001).all() and events["view"] == []
 
 
 def test_a_merge_keeps_the_cleaner_template(sounds):
