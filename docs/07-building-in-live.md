@@ -14,7 +14,7 @@ Live must be running with the AbletonMCP Remote Script selected as a control sur
 | track | content |
 |---|---|
 | 808 (synth) | Simpler with the fitted one-shot, Volume 0 dB, "Vol < Vel" 35 %, warping off, at the plan's Transpose and Detune (whole numbers, `live.tune_808`). With Glide on, also Glide Mode "Glide", the Glide Time and one voice. An Arrangement clip holds every 808 note at its written pitch and length. |
-| Drums (library) | Drum Rack: one pad per identified sound, each a Simpler at Volume 0 dB and "Vol < Vel" 35 % with its match's Transpose and Detune (whole cents). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note where its hit attacks. |
+| Drums (library) | Drum Rack: one pad per sound the plan gives one on evidence ([01](01-pipeline.md#plan)), each a Simpler at Volume 0 dB and "Vol < Vel" 35 % with its match's Transpose and Detune (whole cents). The backbone's kick and snare take the first pads of their roles (36, 38). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note as much before its hit's attack as its pad's sample takes to attack, and a pad plays each strike once. |
 | other / piano / guitar / vocals (notes) | a MIDI track per tonal stem with `melodic`'s notes, Drift as a placeholder instrument, muted |
 | REF drums / bass / other / piano / vocals | the stems as Arrangement audio clips from beat 0, warping off; drums, bass and vocals muted |
 
@@ -24,7 +24,7 @@ Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode);
 - locators at section starts, rounded to whole beats;
 - the view, to the Arrangement with the playhead at 0;
-- levels: ours at the RMS of the stems they replace, everything 4 dB down for headroom.
+- levels: the drum and 808 tracks at the RMS of the stems they replace, everything 4 dB down for headroom. No pad has a level of its own: each plays its sample at 0 dB, and the drum fader is one RMS match over all the pads.
 
 **A/B:**
 - mute *808* and *Drums*, unmute *REF drums* and *REF bass* to hear the original;
@@ -107,6 +107,8 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 ### What this means for the build (estimates, not measured on a build)
 
 - **Velocity.** The plan took velocity as a linear level (v/127): 0 dB at velocity 127, −11.2 dB at 35. By the law above, a browser-loaded pad plays +10.2 dB and −6.4 dB over its Volume. Rendered by the law, with the pads at 45 % and the 808 at 35 % (which "Vol < Vel" a track's Simpler loaded through the browser gets was not measured), m2g's 48 plans sit 9.30 dB from a perfect kit, against the 3.67 dB they scored under v/127. The build now sets "Vol < Vel" to 35 % on every Simpler, and the velocities invert the law ([01](01-pipeline.md#plan)): 3.67 dB again (m2g-vel). These numbers come from the law; no build has been captured, and "Vol < Vel" set through `build_tracks` (a raw value, as the battery set it through the LOM) is not checked in Live.
+- **Pads at 0 dB.** With the pad gate, m3's plans sit 4.09 dB from a perfect kit (3.67 at m2g-vel), as the sounds it adds play their samples at 0 dB: the open hats a median 11.4 dB over a perfect kit. A Volume per pad other than 0 dB has not been sent through `build_tracks` or measured in Live.
+- **Early notes.** A drum note starts as much before its hit's attack as the pad's sample takes to attack, read from the file as `render.py` plays it (from its start, at its Transpose and Detune). In Live that holds only as far as Simpler plays the file the same way, which the battery measured for timing (within 0.04 ms) but not for each pad's sample.
 - **Snap.** The build leaves it on, so every pad and the one-shot would end 10–30 ms early.
 - **The one-shot's name.** Named after the song alone, a one-shot fitted again reached the User Library under the name Live had loaded, so a rebuild in that Live could play the old one-shot. Its name now carries its content's digest, so a changed one-shot is a new file to Live (not checked in Live).
 
@@ -115,7 +117,7 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 No plan of replica mode has been built and captured yet. Not verified:
 - Detune on Drum Rack pads as `build_tracks` sets it (the battery read whole cents back on Simplers and set Detune by display text through `build_tracks`, but no pad with a plan's Detune has been recorded);
 - the 808's Detune, Glide Mode and Glide Time sent through `build_tracks`, and its voices set to 1 with `lom_set_property` after it;
-- the plan-level pitch, slide and level numbers of the suite, which assume these settings behave as the battery measured them, velocities included;
+- the plan-level pitch, slide, timing and level numbers of the suite, which assume these settings behave as the battery measured them, velocities and the notes' early starts included;
 - "Vol < Vel" at 35 % on every pad and on the 808, as `build_tracks` sends it;
 - the meter and bar 1: the plan holds no meter, and Live's bar 1 sits at 0 s. A 3/4 beat would be built in 4/4, and full's first bar line, at 0.4 s, lands 400 ms off.
 
@@ -126,3 +128,4 @@ No plan of replica mode has been built and captured yet. Not verified:
   - Checked afterwards: every pad holds its sample, every note is in its clip (`read_clip_notes`), every stem is unwarped and starts at beat 0. That last point needed the start-marker fix above, found on this run.
 - **`live-build` on `build_tracks`, Live 12.4.2** (2026-10-17): the same plan re-run with the corrected tuning, seven tracks with no problem reported. Read back from Live: the 808's Simpler at +36 st and 0 dB with warping off, the pads at their transpositions (−3, −1, 0 st…), faders and stem mutes as planned, tempo 137, 8 locators. 4.9 s once the 808 file was listed (the first run waits for Live's browser to see it).
 - **PIRAMIT with replica mode** (2026-10-22): planned, not built ([02](02-case-study-piramit.md#in-live)).
+- **PIRAMIT with replica mode's fixes** (2026-10-29): planned, not built. 630 drum notes on 10 pads (607 on 7 on 2026-10-22), 101 808 notes at Transpose +36 and Detune +2, 8 locators. Three sounds changed pad number (two because the backbone is planned first, one because the new hat took its pad by NCC), so a set built by hand from the 2026-10-22 plan would not line up with it.
