@@ -345,6 +345,29 @@ def test_the_export_keeps_means_per_scenario_only(tmp_path):
         assert ns["LOCAL"].search(json.dumps({"x": bad})), bad
 
 
+def test_the_export_says_what_a_run_read_back(tmp_path):
+    """A run with --cache records that it kept results and how many beats
+    read each back, and its means leave those steps' seconds out. The
+    export keeps both records (it dropped them: a published file's seconds
+    lacked fit-808 with no word why), and they are numbers and short
+    identifiers like the rest of the run's description."""
+    ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
+    ns["suite_scores"].__globals__["ROOT"] = tmp_path
+    agg = {"schema": "refdissect.suite/1", "tag": "t", "model": "htdemucs", "options": [{}], "render": [True],
+           "refdissect": [{"version": "0.1.0"}], "cache": [True], "cached": {"808_reader": 2, "fit_808": 1},
+           "beats": 2, "last_run": {"beats": 2}, "separation": {"model": "htdemucs"}, "failed": [],
+           "overall": {"scenarios": 1}, "scenarios": {"v1": {"beats": 2, "seeds": [1, 2], "analysis": {}, "plan": {},
+                                                             "seconds": {"analyze": 8.1}}}}
+    (tmp_path / "scores-t.json").write_text(json.dumps(agg))
+    ns["suite_scores"](tmp_path, "t")
+    out = json.loads((tmp_path / "results" / "calibration" / "suite-t.json").read_text())
+    assert out["cache"] == [True] and out["cached"] == {"808_reader": 2, "fit_808": 1}
+    agg["cached"] = {"cache/808-0a1b.json": 1}  # a file name with its folder is no short identifier
+    (tmp_path / "scores-t.json").write_text(json.dumps(agg))
+    with pytest.raises(ValueError, match="short identifier"):
+        ns["suite_scores"](tmp_path, "t")
+
+
 def test_public_names_are_keyed(tmp_path):
     """A personal library's file goes out as its role and an HMAC of its
     path under the export key: the same name on every export with one key,
