@@ -182,13 +182,22 @@ def song(work: Path, name: str) -> dict:
         out["808"]["synth"] = {"params": s["params"], "glide_semitones": s["glide_semitones"],
                                "pitch_hz": s["pitch_hz"], "fit": s["fit"], "vs_reference": s["compare"]["synth"],
                                "best_library_808_vs_reference": lib}
+        if s["compare"].get("tracked"):  # the one-shot the plan plays: the fitted voice on the template's periods
+            out["808"]["synth"]["one_shot"] = {
+                "vs_reference": s["compare"]["tracked"],
+                "pitch_track": {k: v for k, v in (s.get("pitch_track") or {}).items()  # how, never the curve
+                                if v is None or isinstance(v, bool | int | float)}}
     if p:
+        t808 = p["tracks"]["808"]
+        # each pad's Volume with the drum fader: the fader alone is not the drums' level once the pads have theirs
         out["plan"] = {"tempo": p["tempo"], "drum_notes": len(p["tracks"]["drums"]["notes"]),
                        "pads": {k: {"role": v["role"], "sample": public_name(v["path"], v["role"], key),
-                                    "transpose": v["transpose"], "ncc": v["ncc"], "verdict": v["verdict"]}
+                                    "transpose": v["transpose"], "detune_cents": v.get("detune_cents", 0),
+                                    "volume_db": v.get("volume_db", 0.0), "ncc": v["ncc"], "verdict": v["verdict"]}
                                 for k, v in p["tracks"]["drums"]["pads"].items()},
-                       "808_notes": len(p["tracks"]["808"]["notes"]), "levels": p["levels"],
-                       "locators": p["locators"]}
+                       "808_notes": len(t808["notes"]),
+                       "808": {k: t808.get(k) for k in ("transpose", "detune_cents", "tuning_cents", "heard_cents")},
+                       "levels": p["levels"], "locators": p["locators"]}
     (ROOT / "results" / name.lower()).mkdir(parents=True, exist_ok=True)
     (ROOT / "results" / name.lower() / "summary.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     return out

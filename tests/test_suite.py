@@ -392,3 +392,50 @@ def test_public_names_are_keyed(tmp_path):
     assert ns["library_path"](index, "808 low.wav") == "/Users/someone/Samples/808s/808 low.wav"
     assert ns["library_path"](index, "808 c.wav") == "808 c.wav"  # not in the index: the name itself
     assert ns["library_path"](tmp_path / "none.npz", "808 low.wav") == "808 low.wav"
+
+
+def test_the_song_export_says_how_the_plan_plays(tmp_path):
+    """A song's summary carries each pad's Volume and Detune beside the
+    drum fader, the 808 track's Transpose, Detune and heard_cents, and how
+    the one-shot the plan plays compares with the reference and follows
+    the template's periods: scalars only, never its pitch curve. With pad
+    levels the fader alone is not the drums' level: PIRAMIT's went -20.2
+    -> -12.5 dB while its pads went to -12.1 to 0 dB. A plan written
+    before pad levels plays every pad at 0 dB."""
+    ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
+    ns["song"].__globals__["ROOT"] = tmp_path
+    w = tmp_path / "SONG" / "refdissect"
+    w.mkdir(parents=True)
+    kit = "/Volumes/Samples/Some Kit/hat 1.wav"
+    core = "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library/Samples/kick.wav"
+    analysis = {"templates": {"sound_1": {"band": "hat", "template_hits": 4, "detected_hits": 5, "clean": 0.9,
+                                         "slots": {"0": 4}, "peak_ncc_histogram_0.3_to_1.0": [0, 0, 0, 0, 0, 1, 4],
+                                         "describe": {}}},
+                "grid": {"bpm": 140.0, "tempo_map": [[0.0, 0.0]]}, "tuning": {"consensus": 0.0},
+                "source": {"duration_s": 8.0}, "sections": [], "notes_808": [{"pitch": 24, "slide": 0.0}]}
+    matches = {"sound_1": {"role": "hat", "matched_in_band": "hat", "verdict": "same family", "same_as": None,
+                           "margin": 0.02, "top": [{"path": kit, "role": "hat", "ncc": 0.95, "semitones": 0.0}],
+                           "null_test_db": {"own": -15.0}}}
+    synth = {"params": {"f_end_hz": 32.7}, "glide_semitones": 20.0, "pitch_hz": 32.7,
+             "fit": {"loss": 0.1, "seconds": 40.0}, "compare": {"synth": {"ncc": 0.94}, "tracked": {"ncc": 0.88}},
+             "pitch_track": {"periods": 49, "followed": 9, "until_s": 0.27, "settled": True,
+                             "curve": [[0.0, 611.0], [0.01, 498.0]]}}
+    plan = {"tempo": 140.0, "levels": {"headroom_db": 4.0, "drums_track_db": -12.5}, "locators": [["A (1)", 0.0]],
+            "tracks": {"drums": {"notes": [{"pitch": 42}], "pads": {
+                "42": {"role": "hat", "path": kit, "transpose": -2, "detune_cents": -1, "volume_db": -6.8,
+                       "ncc": 0.95, "verdict": "same family"},
+                "36": {"role": "kick", "path": core, "transpose": -3, "ncc": 0.85, "verdict": "no close match"}}},
+                "808": {"notes": [{"pitch": 24}], "sample_path": "/Volumes/Work/SONG/808 (synth).wav",
+                        "transpose": 36, "detune_cents": 1, "tuning_cents": 11.8, "heard_cents": 0.8}}}
+    for name, data in (("analysis", analysis), ("matches", matches), ("synth808", synth), ("plan", plan)):
+        (w / f"{name}.json").write_text(json.dumps(data))
+    out = ns["song"](tmp_path, "SONG")
+    text = (tmp_path / "results" / "song" / "summary.json").read_text()
+    pads = out["plan"]["pads"]
+    assert (pads["42"]["volume_db"], pads["42"]["detune_cents"]) == (-6.8, -1)
+    assert (pads["36"]["volume_db"], pads["36"]["detune_cents"]) == (0.0, 0)  # written before pad levels
+    assert out["plan"]["808"] == {"transpose": 36, "detune_cents": 1, "tuning_cents": 11.8, "heard_cents": 0.8}
+    one_shot = out["808"]["synth"]["one_shot"]
+    assert one_shot["vs_reference"] == {"ncc": 0.88} and out["808"]["synth"]["vs_reference"] == {"ncc": 0.94}
+    assert one_shot["pitch_track"] == {"periods": 49, "followed": 9, "until_s": 0.27, "settled": True}
+    assert "/Volumes/" not in text and "hat 1" not in text and "808 (synth)" not in text and "611" not in text
