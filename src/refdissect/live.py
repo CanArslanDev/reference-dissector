@@ -646,11 +646,11 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     evaluate.level_scores scores against. The drum fader stops where the
     loudest pad plays as loud as the stem holds its sound. The RMS match
     goes over that on 4 [5] suite beats: where the stem holds a kick no pad
-    plays (layers-1, tempo160-1, v1orig-2 [bass_low-2]; tempo160-1 sat
+    plays (layers-1, tempo160-1, v1orig-2 [bass_low-2]; tempo160-1 sits
     13.4 dB from a perfect kit under it and 5.1 dB under the stop), and on
     v1orig-3 [kick808-2, leadin-2, rolls-1, v1orig-3], whose stems hold no
     kick the plan misses (there it takes v1orig-3 0.3 [0.2] dB further from
-    a perfect kit and the others 0.1 to 2.5 dB closer). Where the fader
+    a perfect kit and the others 0.2 to 2.6 dB closer). Where the fader
     would go over FADER_DB, the top of Live's, the pads under 0 dB make up
     the rest, as far as 0 dB (no suite beat: its drum faders reach -13.5
     [-12.3] dB).
@@ -660,18 +660,21 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     htdemucs; htdemucs_ft in brackets) the sounds sat a median 4.09 [3.70]
     dB from a perfect kit (levels.vs_kit_abs_db) and 3.03 [2.84] dB from
     its balance, hats +6.2 [+6.5] and open hats +11.6 [+10.5] dB over the
-    kit: the files are louder than the songs play them. With pad levels,
-    1.27 [1.31] and 0.56 [0.54] dB (1.64 [1.45] without the stop); per
-    role (the median over a beat's sounds, its mean over the suite, signed
-    and of its size) kicks -0.98 and 1.24 [-0.07 and 0.56] dB from the kit,
-    snares -0.24 and 1.37 [-0.89 and 1.47], claps +0.68 and 1.10 [+1.55 and
-    1.55], hats -1.14 and 2.38 [-0.77 and 1.52], open hats -0.14 and 1.16
-    [-0.92 and 1.26]. With every pad at the truth's own level for its sound
-    and the RMS match alone, 1.37 [0.75] and 0.31 [0.04]: our files' tails
-    and the sounds a plan misses or adds move the RMS match. With each pad
-    at the drum stem's level and the fader at the loudest pad's (the
-    stem's own level, no RMS match), 4.05 [1.54]: kicks -5.8 [-1.1] dB
-    from the kit, snares +4.0 [+0.9], where htdemucs' drum stem holds them."""
+    kit: the files are louder than the songs play them (m3). With pad
+    levels and the 808 one-shot on its template's periods (m4), 1.25
+    [1.23] and 0.55 [0.50] dB (1.62 [1.38] without the stop); per role
+    (the median over a beat's sounds, its mean over the suite, signed and
+    of its size) kicks -0.96 and 1.22 [-0.08 and 0.54] dB from the kit,
+    snares -0.17 and 1.33 [-0.80 and 1.45], claps +0.60 and 1.02 [+1.58 and
+    1.58], hats -1.10 and 2.39 [-0.69 and 1.47], open hats -0.09 and 1.16
+    [-0.83 and 1.20]. Measured with the levels alone, over m3's outputs
+    and its one-shot under the kicks (lv-f3): pad levels 1.27 [1.31] and
+    0.56 [0.54] dB; every pad at the truth's own level for its sound and
+    the RMS match alone, 1.37 [0.75] and 0.31 [0.04]: our files' tails and
+    the sounds a plan misses or adds move the RMS match; each pad at the
+    drum stem's level and the fader at the loudest pad's (the stem's own
+    level, no RMS match), 4.05 [1.54]: kicks -5.8 [-1.1] dB from the kit,
+    snares +4.0 [+0.9], where htdemucs' drum stem holds them."""
     bps = plan["tempo"] / 60
     n = int(analysis["source"]["duration_s"] * SR)
     out = {"headroom_db": headroom_db}
@@ -766,36 +769,37 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
 
     Measured per pad on the 48 suite beats against where the truth holds
     the sound it plays (median over pads; htdemucs, htdemucs_ft in
-    brackets): a pad read on the drum stem sits -1.28 [-1.27] dB from it,
-    p10 to p90 -1.95 to -0.15 [-1.94 to -0.08]. A kick read on the drum
-    stem sat -10.01 [-3.59] dB from it (-13.74 to -2.55 [-5.27 to -2.02]):
-    htdemucs moves much of a kick to the bass stem. On drums + bass the
-    808 under it put it at +1.50 [+1.42]; less the plan's 808, -1.30
-    [-0.75] (-2.62 to +0.17 [-2.71 to +0.44]). The floor moves the kicks of
-    1 [4] suite beats, each toward the truth (v1orig-3: -1.79 -> -0.69
-    [-1.93 -> -0.63] dB from a perfect kit); on PIRAMIT, with the plan's
-    808 1 or 2 dB louder than its fader, it holds the kick at -16.4 dB, its
-    drum stem's reading, where without it 32 and 6 of the kick's 93 hits
-    were left and it read -23.2 and -20.3 dB. It does not hold a kick the
-    separation splits under a ducked 808: 60 % of a kick in the bass stem,
-    its 808 ducked 3 to 20 dB under it, read the kick 2.2 to 8.0 dB low
-    (synthetic; no suite beat ducks its 808, and PIRAMIT's bass stem holds
-    the plan's 808 at -0.3 dB over a kick's first 50 ms, -1.8 dB at 808
-    notes with no kick). No kick of the suite had three hits clear of every
-    808 note. Read only on its hits clear of other sounds, a pad sat -1.37
-    [-1.43] dB from the truth, and the kit no closer to a perfect one. Of
-    the suite's 209 sounds with three clear hits or more, 200 read them no
-    more than 3 dB under all their hits (their interquartile range a
-    median 0.15 dB, p95 2.8) and 9 more than 6 dB under, 5 of those within
-    3 dB of each other, now read on them: v1orig-2's extra open hat, 9 of
-    whose 17 hits sat on the snare and the hat (+23.3 -> +4.0 dB from a
-    perfect kit, against the truth's open hat; as the loudest pad it had
-    put the hat's Volume at -36.3 dB and the drum fader at +5.6 dB),
-    producer-2's open hat (+8.75 -> -2.95 [+7.84 -> -3.66]), v1orig-3's
-    open hat, on a pad that also plays 12 of the snare's hits, and
-    [tempo160-1's extra snare, 21 of whose 37 hits play no snare: -13.3 ->
-    -23.8]. The other 4 spread their clear hits 4.9 to 13.8 dB (three play
-    another role's file) and keep all their hits."""
+    brackets; m4, the plan's 808 the one-shot on its template's periods):
+    a pad read on the drum stem sits -1.27 [-1.28] dB from it, p10 to p90
+    -1.95 to -0.15 [-1.94 to -0.08]. A kick read on the drum stem sat
+    -10.01 [-3.59] dB from it (-13.74 to -2.55 [-5.27 to -2.02]): htdemucs
+    moves much of a kick to the bass stem. On drums + bass the 808 under it
+    put it at +1.50 [+1.42]; less the plan's 808, -1.36 [-0.86] (-2.68 to
+    +0.24 [-2.61 to +0.44]). The floor moves the kicks of 1 [4] suite
+    beats, each toward the truth (v1orig-3: -1.99 -> -0.69 [-2.03 -> -0.63]
+    dB from a perfect kit); on PIRAMIT, with the plan's 808 1 or 2 dB
+    louder than its fader, it holds the kick at -16.4 dB, its drum stem's
+    reading, where without it 37 and 6 of the kick's 93 hits were left and
+    it read -23.8 and -20.3 dB. It does not hold a kick the separation
+    splits under a ducked 808: 60 % of a kick in the bass stem, its 808
+    ducked 3 to 20 dB under it, read the kick 2.2 to 8.0 dB low (synthetic;
+    no suite beat ducks its 808, and PIRAMIT's bass stem holds the plan's
+    808 at -0.3 dB over a kick's first 50 ms, -1.7 dB at 808 notes with no
+    kick). No kick of the suite had three hits clear of every 808 note.
+    Read only on its hits clear of other sounds, a pad sat -1.37 [-1.43] dB
+    from the truth, and the kit no closer to a perfect one. Of the suite's
+    209 sounds with three clear hits or more, 200 read them no more than 3
+    dB under all their hits (their interquartile range a median 0.15 dB,
+    p95 2.8) and 9 more than 6 dB under, 5 of those within 3 dB of each
+    other, now read on them: v1orig-2's extra open hat, 9 of whose 17 hits
+    sat on the snare and the hat (+23.3 -> +4.0 dB from a perfect kit,
+    against the truth's open hat; as the loudest pad it had put the hat's
+    Volume at -36.3 dB and the drum fader at +5.6 dB), producer-2's open
+    hat (+8.75 -> -2.95 [+8.24 -> -3.26]), v1orig-3's open hat, on a pad
+    that also plays 12 of the snare's hits, and [tempo160-1's extra snare,
+    21 of whose 37 hits play no snare: -13.0 -> -23.4]. The other 4 spread
+    their clear hits 4.9 to 13.8 dB (three play another role's file) and
+    keep all their hits."""
     bps = plan["tempo"] / 60
     pads, notes = plan["tracks"]["drums"]["pads"], plan["tracks"]["drums"]["notes"]
     shots = {}
