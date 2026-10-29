@@ -6,7 +6,9 @@ cannot save, and a rebuild takes about five seconds.
 
 Live facts the build relies on (measured on Live 12.4, see
 docs/07-building-in-live.md):
-- Simpler loads samples at Volume -12 dB; the build sets 0 dB.
+- Simpler loads samples at Volume -12 dB; the build sets the 808's to 0 dB
+  and each pad's to its volume_db (pad_levels), sent the same way ("-6.5
+  dB"); a pad's Volume under 0 dB has not been captured in Live yet.
 - Simpler plays a sample at its own pitch on C3 (MIDI 60). The 808 notes
   keep their real MIDI numbers (C1 = 24 here), so Transpose is about +36;
   Live 12.4.6 keeps whole semitones of it (11.99 plays as 11) and whole
@@ -46,9 +48,10 @@ from pathlib import Path
 import mido
 import numpy as np
 
-from .audio import PRE, SR, attack_time, read, rms_db, transpose, trim_onset
+from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, samples, transpose, trim_onset
 from .detect import RESIDUAL_BARS, SAME_MS, min_hits_for
 from .grid import Grid
+from .library import SILENT_DB
 from .render import VOL_VEL, as_played, glide_s, pad_settings, render_808, velocity_gain
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
@@ -66,6 +69,15 @@ GLIDE_LEAST = 3  # legato notes a plan needs to put its 808 on one voice with Gl
 # a hit recurs where another hit of its sound sits at its place of the bar, within RECUR_MS, 1 to
 # RECUR_BARS bars away (recurring)
 RECUR_MS, RECUR_BARS = 6.0, 8
+# a pad's level is read over LEVEL_MS from each hit's attack, as evaluate.level_scores reads a sound (pad_levels);
+# a file with LOW_SHARE of its energy under 200 Hz is a kick's (the suite's kick files 0.91-0.99, its tom 0.79, its
+# snares 0.53 at most), and on a kick's pad from KICK_SHARE on: a kick with a bright click (69 of the library's 683
+# kick files hold under LOW_SHARE, 32 under 0.80 and 8 under KICK_SHARE)
+LEVEL_MS, LOW_SHARE, KICK_SHARE = 50.0, 0.85, 0.6
+FADER_DB = 6.0  # a Live track fader's top: build_spec and render.fader_db cap the plan's faders there
+# a sound whose hits clear of every other sound's (by CLEAR_MS) number CLEAR_HITS or more, agree within CLEAR_IQR_DB
+# (their interquartile range) and read more than CLEAR_GAP_DB under all its hits is read on those (pad_levels)
+CLEAR_MS, CLEAR_HITS, CLEAR_IQR_DB, CLEAR_GAP_DB = 50.0, 3, 3.0, 6.0
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -601,34 +613,235 @@ def _render(notes: list[dict], sample_for, gain_for, n: int, bps: float, cut: bo
 
 def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     """Track faders (dB) that put our parts at the level of the stems they
-    replace: our parts rendered offline at unity (Simpler at 0 dB, each
-    velocity at its level under Live's law at the pad's vol_vel, as
-    render_plan plays it; the 808 as render_plan plays it, Transpose,
-    Detune and Glide included, cut without a fade), compared by RMS over
-    the whole track."""
+    replace; it sets each drum pad's volume_db in the plan. Each pad plays
+    where the stems hold its sound (pad_levels), the loudest at 0 dB and
+    the others under it; a pad without a level (its file cannot be read or
+    peaks under SILENT_DB, or none of its hits can be read) stays at 0 dB.
+    The faders compare our parts, rendered offline at unity (each pad at
+    its volume_db, each velocity at its level under Live's law at the pad's
+    vol_vel, as render_plan plays it; the 808 as render_plan plays it,
+    Transpose, Detune and Glide included, cut without a fade), with the
+    stems by RMS over the whole track: a perfect kit, the truth's sounds at
+    their own balance, then plays every sound at the kit level
+    evaluate.level_scores scores against. The drum fader stops where the
+    loudest pad plays as loud as the stem holds its sound. The RMS match
+    goes over that on 4 [5] suite beats: where the stem holds a kick no pad
+    plays (layers-1, tempo160-1, v1orig-2 [bass_low-2]; tempo160-1 sat
+    13.4 dB from a perfect kit under it and 5.1 dB under the stop), and on
+    v1orig-3 [kick808-2, leadin-2, rolls-1, v1orig-3], whose stems hold no
+    kick the plan misses (there it takes v1orig-3 0.3 [0.2] dB further from
+    a perfect kit and the others 0.1 to 2.5 dB closer). Where the fader
+    would go over FADER_DB, the top of Live's, the pads under 0 dB make up
+    the rest, as far as 0 dB (no suite beat: its drum faders reach -13.5
+    [-12.3] dB).
+
+    Without pad levels every pad played its file at 0 dB under one RMS
+    fader. On the 48 suite beats (plan level, mean over scenarios,
+    htdemucs; htdemucs_ft in brackets) the sounds sat a median 4.09 [3.70]
+    dB from a perfect kit (levels.vs_kit_abs_db) and 3.03 [2.84] dB from
+    its balance, hats +6.2 [+6.5] and open hats +11.6 [+10.5] dB over the
+    kit: the files are louder than the songs play them. With pad levels,
+    1.27 [1.31] and 0.56 [0.54] dB (1.64 [1.45] without the stop); per
+    role (the median over a beat's sounds, its mean over the suite, signed
+    and of its size) kicks -0.98 and 1.24 [-0.07 and 0.56] dB from the kit,
+    snares -0.24 and 1.37 [-0.89 and 1.47], claps +0.68 and 1.10 [+1.55 and
+    1.55], hats -1.14 and 2.38 [-0.77 and 1.52], open hats -0.14 and 1.16
+    [-0.92 and 1.26]. With every pad at the truth's own level for its sound
+    and the RMS match alone, 1.37 [0.75] and 0.31 [0.04]: our files' tails
+    and the sounds a plan misses or adds move the RMS match. With each pad
+    at the drum stem's level and the fader at the loudest pad's (the
+    stem's own level, no RMS match), 4.05 [1.54]: kicks -5.8 [-1.1] dB
+    from the kit, snares +4.0 [+0.9], where htdemucs' drum stem holds them."""
     bps = plan["tempo"] / 60
     n = int(analysis["source"]["duration_s"] * SR)
-    samples_by_pad, vol_vel = {}, {}
+    out = {"headroom_db": headroom_db}
+    stems = plan["stems"]
+    track808, held808, fader808 = plan["tracks"]["808"], None, None
+    if "sample_path" in track808 and "bass" in stems:
+        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "live")
+        fader808 = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
+        held808 = ours * np.float32(10 ** ((fader808 + headroom_db) / 20))  # where the bass stem holds it
+    if "drums" in stems:
+        stem = read(stems["drums"]["path"])
+        low = None
+        if "bass" in stems:
+            bass = read(stems["bass"]["path"])
+            m = min(len(stem), len(bass))
+            low = stem[:m] + bass[:m]
+        at = pad_levels(plan, stem, low, held808)
+        top = max(at.values(), default=0.0)
+        for note, pad in plan["tracks"]["drums"]["pads"].items():
+            pad["volume_db"] = round(at[note] - top, 1) + 0.0 if note in at else 0.0
+        fader = round(rms_db(stem) - rms_db(_unity_drums(plan, n, bps)) - headroom_db, 1)
+        fader = min(fader, round(top - headroom_db, 1)) if at else fader
+        if fader > FADER_DB:  # what the fader cannot give, the pads under 0 dB make up as far as they can
+            for pad in plan["tracks"]["drums"]["pads"].values():
+                pad["volume_db"] = round(min(0.0, pad["volume_db"] + fader - FADER_DB), 1) + 0.0
+            fader = FADER_DB
+        out["drums_track_db"] = fader
+    if fader808 is not None:
+        out["808_track_db"] = fader808
+    out["stems_track_db"] = -headroom_db
+    return out
+
+
+def _unity_drums(plan: dict, n: int, bps: float) -> np.ndarray:
+    """The drum track at unity: each pad's file from its onset at its
+    volume_db, each velocity at its level under Live's law at the pad's
+    vol_vel."""
+    samples_by_pad, gain = {}, {}
     for note, pad in plan["tracks"]["drums"]["pads"].items():
-        vol_vel[int(note)] = pad_settings(pad)["vol_vel"]
+        s = pad_settings(pad)
+        gain[int(note)] = (s["vol_vel"], 10 ** (s["volume_db"] / 20))
         try:
             samples_by_pad[int(note)] = transpose(trim_onset(read(pad["path"])),
                                                   pad["transpose"] + pad.get("detune_cents", 0) / 100)
         except Exception:
             samples_by_pad[int(note)] = None
-    drums = _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]),
-                    lambda e: velocity_gain(e["velocity"], "live", vol_vel[e["pitch"]]), n, bps, False)
-    out = {"headroom_db": headroom_db}
-    stems = plan["stems"]
-    if "drums" in stems:
-        ref = rms_db(read(stems["drums"]["path"]))
-        out["drums_track_db"] = round(ref - rms_db(drums) - headroom_db, 1)
-    track808 = plan["tracks"]["808"]
-    if "sample_path" in track808 and "bass" in stems:
-        ours = render_808(track808, read(track808["sample_path"]), n, bps, 0, True, 1.0, "live")
-        out["808_track_db"] = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
-    out["stems_track_db"] = -headroom_db
+    return _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]),
+                   lambda e: velocity_gain(e["velocity"], "live", gain[e["pitch"]][0]) * gain[e["pitch"]][1],
+                   n, bps, False)
+
+
+def _energies(x: np.ndarray, at: np.ndarray, n: int) -> np.ndarray:
+    """x's energy over n samples from each time in at (s)."""
+    out = np.zeros(len(at))
+    for i, t in enumerate(at):
+        a = max(0, int(round(t * SR)))
+        out[i] = np.sum(np.square(x[a:a + n], dtype=np.float64))
     return out
+
+
+def low_share(x: np.ndarray) -> float:
+    """The share of x's energy under 200 Hz (audio.BANDS "low")."""
+    total = float(np.sum(np.square(x, dtype=np.float64)))
+    return float(np.sum(np.square(band(x, "low"), dtype=np.float64))) / total if total > 0 else 0.0
+
+
+def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, under: np.ndarray | None = None,
+               ms: float = LEVEL_MS) -> dict[str, float]:
+    """Each pad's level (dB): how far over its own track at Volume 0 dB
+    (its notes at their velocities, Live's law) the stems hold its sound.
+    Per hit, the energy over `ms` from where the hit attacks, in the pad
+    role's band (evaluate.level_scores reads a sound so), the stem's over
+    the track's; the median over the sound's hits. A kick (a sound whose
+    first pad's file has LOW_SHARE of its energy under 200 Hz, or
+    KICK_SHARE on a kick's pad: a kick with a bright click) is read in the
+    kick band on `low`, the drum and bass stems together, less `under`
+    (the 808 track where the bass stem holds it) at each hit: a separation
+    hands part of a kick to the bass stem, by a different amount in every
+    song, and the 808 plays under most kicks. It is never read under the
+    drum stem's own reading of it, the least the stems hold of it: where
+    the bass stem holds the 808 quieter under a kick than `under` plays it
+    (a sidechain ducks it, or the 808's fader is a dB high), taking `under`
+    off leaves too little of the kick or none, and a kick left without a
+    hit had no level. Every other sound is read on the drum stem; a hit
+    another sound shares (one attacks within CLEAR_MS of it) reads that
+    sound too, and where most of a sound's hits are shared with a louder
+    one, their median is one of those: a sound whose CLEAR_HITS or more
+    clear hits agree within CLEAR_IQR_DB and read more than CLEAR_GAP_DB
+    under all its hits is read on them (_sound_level). The pads of one
+    sound (a template's pad and its pitched copies) share one level, their
+    hits pooled. A file that peaks under SILENT_DB gets none.
+
+    Measured per pad on the 48 suite beats against where the truth holds
+    the sound it plays (median over pads; htdemucs, htdemucs_ft in
+    brackets): a pad read on the drum stem sits -1.28 [-1.27] dB from it,
+    p10 to p90 -1.95 to -0.15 [-1.94 to -0.08]. A kick read on the drum
+    stem sat -10.01 [-3.59] dB from it (-13.74 to -2.55 [-5.27 to -2.02]):
+    htdemucs moves much of a kick to the bass stem. On drums + bass the
+    808 under it put it at +1.50 [+1.42]; less the plan's 808, -1.30
+    [-0.75] (-2.62 to +0.17 [-2.71 to +0.44]). The floor moves the kicks of
+    1 [4] suite beats, each toward the truth (v1orig-3: -1.79 -> -0.69
+    [-1.93 -> -0.63] dB from a perfect kit); on PIRAMIT, with the plan's
+    808 1 or 2 dB louder than its fader, it holds the kick at -16.4 dB, its
+    drum stem's reading, where without it 32 and 6 of the kick's 93 hits
+    were left and it read -23.2 and -20.3 dB. It does not hold a kick the
+    separation splits under a ducked 808: 60 % of a kick in the bass stem,
+    its 808 ducked 3 to 20 dB under it, read the kick 2.2 to 8.0 dB low
+    (synthetic; no suite beat ducks its 808, and PIRAMIT's bass stem holds
+    the plan's 808 at -0.3 dB over a kick's first 50 ms, -1.8 dB at 808
+    notes with no kick). No kick of the suite had three hits clear of every
+    808 note. Read only on its hits clear of other sounds, a pad sat -1.37
+    [-1.43] dB from the truth, and the kit no closer to a perfect one. Of
+    the suite's 209 sounds with three clear hits or more, 200 read them no
+    more than 3 dB under all their hits (their interquartile range a
+    median 0.15 dB, p95 2.8) and 9 more than 6 dB under, 5 of those within
+    3 dB of each other, now read on them: v1orig-2's extra open hat, 9 of
+    whose 17 hits sat on the snare and the hat (+23.3 -> +4.0 dB from a
+    perfect kit, against the truth's open hat; as the loudest pad it had
+    put the hat's Volume at -36.3 dB and the drum fader at +5.6 dB),
+    producer-2's open hat (+8.75 -> -2.95 [+7.84 -> -3.66]), v1orig-3's
+    open hat, on a pad that also plays 12 of the snare's hits, and
+    [tempo160-1's extra snare, 21 of whose 37 hits play no snare: -13.3 ->
+    -23.8]. The other 4 spread their clear hits 4.9 to 13.8 dB (three play
+    another role's file) and keep all their hits."""
+    bps = plan["tempo"] / 60
+    pads, notes = plan["tracks"]["drums"]["pads"], plan["tracks"]["drums"]["notes"]
+    shots = {}
+    for key, pad in pads.items():
+        s = pad_settings(pad)
+        try:
+            x = as_played(read(pad["path"]), s["start_s"], s["transpose"] + s["detune_cents"] / 100)
+        except (OSError, RuntimeError):
+            continue
+        if len(x) and float(np.max(np.abs(x))) >= 10 ** (SILENT_DB / 20):
+            shots[key] = (x, s)
+    sound = {k: p.get("template", k) for k, p in pads.items()}
+    first: dict[str, str] = {}  # a sound is a kick by its first pad's file (its pitched copies come after it)
+    for key in shots:
+        first.setdefault(sound[key], key)
+    kicks = {snd for snd, key in first.items() if low is not None
+             and low_share(shots[key][0]) >= (KICK_SHARE if shots[key][1]["role"] == "kick" else LOW_SHARE)}
+    w, banded = samples(ms), {}
+    at = {key: np.array([e["start_time"] / bps for e in notes if str(e["pitch"]) == key]) + attack_time(x, s["role"])
+          for key, (x, s) in shots.items()}
+    heard: dict[str, list[float]] = {}
+    alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
+    clear: dict[str, list[float]] = {}  # a sound that is no kick, at its hits clear of every other sound's
+    for key, (x, s) in shots.items():
+        kick = sound[key] in kicks
+        b, name = ("kick", "low") if kick else (ATTACK_BAND.get(s["role"], "full"), "drums")
+        for src, y in ((name, low if kick else drums), ("drums", drums)):
+            if (src, b) not in banded:
+                banded[src, b] = band(y, b)
+        mine = [e for e in notes if str(e["pitch"]) == key]
+        own = band(_render(mine, lambda e, x=x: x, lambda e, s=s: velocity_gain(e["velocity"], "live", s["vol_vel"]),
+                           len(drums), bps, False), b)
+        theirs = _energies(banded[name, b], at[key], w)
+        if kick and under is not None:
+            if ("under", b) not in banded:
+                banded["under", b] = band(under, b)
+            theirs = theirs - _energies(banded["under", b], at[key], w)
+        ours = _energies(own, at[key], w)
+        heard.setdefault(sound[key], []).extend(_db(theirs, ours))
+        if kick:
+            alone.setdefault(sound[key], []).extend(_db(_energies(banded["drums", b], at[key], w), ours))
+        else:
+            others = np.concatenate([at[k] for k in shots if sound[k] != sound[key]] + [np.full(1, np.inf)])
+            apart = np.min(np.abs(at[key][:, None] - others[None, :]), axis=1) > CLEAR_MS / 1000
+            clear.setdefault(sound[key], []).extend(_db(theirs[apart], ours[apart]))
+    level = {snd: _sound_level(heard[snd], alone.get(snd, []), clear.get(snd, [])) for snd in heard}
+    return {key: level[sound[key]] for key in shots if level.get(sound[key]) is not None}
+
+
+def _db(theirs: np.ndarray, ours: np.ndarray) -> list[float]:
+    """10 log10(theirs / ours) (dB) at each hit where both hold energy."""
+    ok = (theirs > 0) & (ours > 0)
+    return (10 * np.log10(theirs[ok] / ours[ok])).tolist()
+
+
+def _sound_level(heard: list[float], alone: list[float], clear: list[float]) -> float | None:
+    """A sound's level (pad_levels) from its hits' readings: their median,
+    or where CLEAR_HITS or more of its hits clear of other sounds agree
+    within CLEAR_IQR_DB (interquartile range) and read more than
+    CLEAR_GAP_DB under it, theirs (its other hits read a louder sound
+    too); a kick's at least its median on the drum stem alone."""
+    if (len(clear) >= CLEAR_HITS and heard and np.subtract(*np.percentile(clear, [75, 25])) <= CLEAR_IQR_DB
+            and np.median(heard) - np.median(clear) > CLEAR_GAP_DB):
+        heard = clear
+    got = [float(np.median(v)) for v in (heard, alone) if v]
+    return max(got) if got else None
 
 
 def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
@@ -683,10 +896,12 @@ def build_spec(plan: dict) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
     (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound), the melodic notes on MIDI
-    tracks (muted), the reference stems as audio tracks; Simplers at 0 dB with
-    warping off and each sound's transposition (a pad's Transpose and Detune),
-    "Vol < Vel" at the plan's vol_vel (VOL_VEL), so velocities play the
-    levels the plan assumes, and faders from the plan's levels."""
+    tracks (muted), the reference stems as audio tracks; Simplers with
+    warping off, the 808's at 0 dB and each pad's at its volume_db
+    (estimate_levels; never over 0 dB, 0 dB without one), each sound's
+    transposition (a pad's Transpose and Detune), "Vol < Vel" at the plan's
+    vol_vel (VOL_VEL), so velocities play the levels the plan assumes, and
+    faders from the plan's levels."""
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -701,7 +916,8 @@ def build_spec(plan: dict) -> list[dict]:
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
                      str(note): {"sample": Path(pad["path"]).name, "warping": False,
-                                 "settings": {"Volume": "0.0 dB", "Transpose": float(pad["transpose"]),
+                                 "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
+                                              "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
                                               "Vol < Vel": float(pad.get("vol_vel", VOL_VEL))}}
                      for note, pad in drums["pads"].items()}},
