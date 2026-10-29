@@ -33,7 +33,10 @@ docs/07-building-in-live.md):
   once their start (moved to the first transient by Live's warp analysis)
   is put back at 0.
 - Locators at fractional beats were refused ("Live did not create it");
-  whole beats work.
+  whole beats work, but Live moves one off its grid (beat 9 went to 8 in
+  4/4, to 12 after 3/4, in the live check): the build sets the plan's
+  meter first, and deletes and reports a locator Live moved
+  (moved_locators).
 - Velocity sets a Simpler's level, dB = 0.4 x "Vol < Vel" x (velocity - 70)
   - 0.096 over its Volume (Live 12.4.6), and "Vol < Vel" starts at 35 % or
   45 % by how the Simpler was made: the build sets it on every Simpler
@@ -54,6 +57,7 @@ docs/07-building-in-live.md):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
@@ -447,16 +451,20 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     note that Live starts late, as it comes while its pad's hit before
     still plays, goes that much earlier (on_time). A
     match's layers (matches.json) are not played yet. With melodic
-    (melodic.json), each tonal stem's notes get a MIDI track."""
+    (melodic.json), each tonal stem's notes get a MIDI track. The plan
+    carries the grid's meter (beats_per_bar, beat_unit), which the build
+    sets as Live's time signature, and lasts whole bars of it."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
-    length_beats = 4 * math.ceil(duration * beats_per_second / 4)
+    g = analysis["grid"]
+    meter = {"beats_per_bar": int(g.get("beats_per_bar", 4)), "beat_unit": int(g.get("beat_unit", 4))}
+    bar = meter["beats_per_bar"] * 4 / meter["beat_unit"]  # a bar of the meter in the tempo's (quarter) beats
+    length_beats = bar * math.ceil(duration * beats_per_second / bar)
     pads, drum_notes, used = {}, [], {k: 0 for k in PADS}
     pad_of: dict[str, int] = {}
     leads: dict[tuple, float] = {}
     played: dict[int, list[float]] = {}  # where each pad's hits attack (s)
-    g = analysis["grid"]
     grid = Grid(bpm, g.get("phase", 0.0), g.get("beats_per_bar", 4), g.get("beat_unit", 4))
     n = int(round(duration * SR))
     least = min_hits if min_hits is not None else min_hits_for(n, grid, RESIDUAL_BARS)
@@ -517,7 +525,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                                    * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
     on_time(drum_notes, pads, beats_per_second, {})
-    plan = {"tempo": bpm, "length_beats": float(length_beats),
+    plan = {"tempo": bpm, **meter, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
                        "808": plan_808(analysis, synth, stems_dir, beats_per_second)},
             "stems": {}, "locators": [], "levels": {}}
@@ -527,9 +535,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         if path.is_file():
             plan["stems"][stem] = {"path": str(path), "mute": stem in STEMS_MUTED}
     # sections count bars from the grid's first bar line, in its meter
-    grid = analysis["grid"]
-    first = max(0.0, grid.get("phase", 0.0)) * beats_per_second
-    bar = grid.get("beats_per_bar", 4) * 4 / grid.get("beat_unit", 4)
+    first = max(0.0, g.get("phase", 0.0)) * beats_per_second
     for s in analysis.get("sections", []):
         plan["locators"].append([f"{s['name']} ({s['start_bar']})", round(first + bar * (s["start_bar"] - 1), 3)])
     for stem, info in (melodic or {}).get("stems", {}).items():
@@ -1132,6 +1138,47 @@ def stopped_message(failed: dict) -> str:
             "delete them, or open a new set, before building again")
 
 
+def meter_of(plan: dict) -> str:
+    """The plan's meter as Live's time signature ("3/4"); 4/4 for a plan
+    from before plans carried one."""
+    return f"{int(plan.get('beats_per_bar', 4))}/{int(plan.get('beat_unit', 4))}"
+
+
+async def moved_locators(call, placed: list[dict], before: list[float], log=print) -> list[dict]:
+    """The locators Live did not make where asked (place_locators' "Live
+    did not create it"), each deleted where Live put it instead (a cue that
+    is neither asked for nor one the set held before the build) and
+    reported: name, the beat asked, the beat Live chose (None where it made
+    none of its own) and whether the cue is gone. In the live check a 3/4
+    plan built in 4/4 asked for locators at beats 9, 21 and 33 and got cues
+    at 8, 20 and 32, left in the set; with 3/4 set, 9 went to 12. Live
+    snaps a new cue to the Arrangement's grid, which the LOM does not show,
+    and a cue's time cannot be set, so the build sets the plan's meter
+    first and deletes what still moves: jump to the cue, then toggle it
+    (two calls: a playhead moved in the same call is not in effect yet)."""
+    asked = [p["time"] for p in placed]
+    cues = json.loads(await call("get_session_overview")).get("cue_points") or []
+    stray = [c for c in cues if all(abs(c["time"] - t) > 1e-3 for t in asked + list(before))]
+    failed = [p for p in placed if p.get("error")]
+    out = []
+    for c in stray:
+        p = min(failed, key=lambda p: abs(p["time"] - c["time"]), default=None)
+        if p is not None:
+            failed.remove(p)
+        await call("transport", action="jump_to", time=float(c["time"]))
+        await asyncio.sleep(0.05)
+        await call("transport", action="toggle_cue")
+        out.append({"name": p["name"] if p else c["name"], "asked": p["time"] if p else None, "live": c["time"]})
+    out += [{"name": p["name"], "asked": p["time"], "live": None} for p in failed]
+    left = (json.loads(await call("get_session_overview")).get("cue_points") or []) if stray else cues
+    for o in out:
+        o["deleted"] = o["live"] is not None and all(abs(c["time"] - o["live"]) > 1e-3 for c in left)
+        where = "made none" if o["live"] is None else f"put it at beat {o['live']:g}"
+        log(f"Live {where} for locator {o['name']!r} at beat {o['asked']}"
+            + ("" if o["live"] is None else ": deleted" if o["deleted"] else ": left there"))
+    return out
+
+
 def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
     """src in the User Library's GENERATED folder under name, copied unless
     a file there holds its content already (the names carry a digest)."""
@@ -1186,7 +1233,9 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     listed under wrong_samples and logged. A connection Live refuses, and a
     build_tracks call that raises, end in a RuntimeError that says why
     (refused) or where the build stopped and which tracks it left in the set
-    (failed_build, also logged)."""
+    (failed_build, also logged). Live's time signature goes to the plan's
+    meter (meter_of) before the locators, and a locator Live puts elsewhere
+    is deleted and listed under locators_moved (moved_locators)."""
     try:
         from MCP_Server import extended_tools as et
         from MCP_Server.server import mcp
@@ -1217,8 +1266,9 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
             if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
     if busy:
         raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
-    before = len(overview["tracks"])
-    await call("set_song_properties", tempo=plan["tempo"], loop=False)
+    before, cues = len(overview["tracks"]), [c["time"] for c in overview.get("cue_points") or []]
+    # the meter before any locator: Live moves a locator off its grid (moved_locators)
+    await call("set_song_properties", tempo=plan["tempo"], loop=False, time_signature=meter_of(plan))
     # Live's browser lists a file a few seconds after it lands in the User Library (build_tracks waits for it)
     if "sample_path" in t808:
         library_copy(t808["sample_path"], user_library, t808["sample"])
@@ -1237,6 +1287,9 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
         report["problems"] = problems
     if plan["locators"]:
         report["locators"] = et.place_locators([(n, float(round(b))) for n, b in plan["locators"]])
+        moved = await moved_locators(call, report["locators"], cues, log)
+        if moved:
+            report["locators_moved"] = moved
     overview = json.loads(await call("get_session_overview"))
     held = await held_samples(call, overview, plan)
     report["samples_checked"] = len(held)

@@ -327,6 +327,57 @@ def test_locators_on_the_bar_lines(tmp_path):
     assert plan["locators"] == [["A (1)", 2.0], ["B (3)", 8.0]]
 
 
+def test_a_3_4_plan_is_built_in_3_4_and_a_locator_live_moves_is_deleted(tmp_path, monkeypatch):
+    """The plan carries the grid's meter and lasts whole bars of it, and
+    estimate_from_plan times it in that meter; the build sets Live's time
+    signature before it places the locators. A locator Live puts elsewhere
+    (in the live check one asked at beat 9 went to 8) is deleted there and
+    reported, not left stray; the set's own cues stay."""
+    import asyncio
+    import json
+    import sys
+
+    from refdissect import evaluate
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["grid"].update(beats_per_bar=3, beat_unit=4)
+    analysis["sections"] = [{"name": "A", "start_bar": 1, "end_bar": 4}, {"name": "B", "start_bar": 4, "end_bar": 5}]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert (plan["beats_per_bar"], plan["beat_unit"], plan["length_beats"]) == (3, 4, 9.0)  # 8 beats, 3 bars
+    time = evaluate.estimate_from_plan(plan, root=tmp_path)["time"]
+    assert time["beats_per_bar"] == 3 and time["downbeats_s"][:3] == [0.0, 1.5, 3.0]
+    assert plan["locators"] == [["A (1)", 0.0], ["B (4)", 9.0]]
+    live = {"cues": [{"name": "mine", "time": 40.0}], "at": 0.0}  # a cue the set held before
+
+    def overview(args, calls):
+        return json.dumps({"tracks": [], "cue_points": live["cues"]})
+
+    def transport(args, calls):
+        if args["action"] == "jump_to":
+            live["at"] = args["time"]
+        elif args["action"] == "toggle_cue":
+            live["cues"] = [c for c in live["cues"] if c["time"] != live["at"]]
+        return "{}"
+
+    calls = _fake_live(monkeypatch, tmp_path / "lib", answers={"get_session_overview": overview,
+                                                               "transport": transport})
+
+    def place_locators(cues):  # Live moves the one at beat 9 to 8
+        calls.append(("place_locators", cues))
+        live["cues"] += [{"name": n if t != 9.0 else "1", "time": 8.0 if t == 9.0 else t} for n, t in cues]
+        return [{"name": n, "time": t, **({"error": "Live did not create it"} if t == 9.0 else {})} for n, t in cues]
+
+    monkeypatch.setattr(sys.modules["MCP_Server.extended_tools"], "place_locators", place_locators)
+    logged = []
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
+    names = [n for n, _ in calls]
+    assert names.index("set_song_properties") < names.index("place_locators")
+    assert dict(calls)["set_song_properties"]["time_signature"] == "3/4"
+    assert report["locators_moved"] == [{"name": "B (4)", "asked": 9.0, "live": 8.0, "deleted": True}]
+    assert sorted(c["time"] for c in live["cues"]) == [0.0, 40.0]
+    assert "Live put it at beat 8 for locator 'B (4)' at beat 9.0: deleted" in logged
+
+
 def test_midi_files(tmp_path):
     analysis, matches, synth = _fixture(tmp_path)
     plan = make_plan(analysis, matches, synth, tmp_path)
@@ -446,7 +497,7 @@ def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
     server = types.ModuleType("MCP_Server.server")
     server.mcp = types.SimpleNamespace(call_tool=call_tool)
     tools = types.ModuleType("MCP_Server.extended_tools")
-    tools.place_locators = lambda cues: [{"name": n} for n, _ in cues]
+    tools.place_locators = lambda cues: [{"name": n, "time": t} for n, t in cues]  # as 2.2.0 answers
     package = types.ModuleType("MCP_Server")
     package.extended_tools, package.server = tools, server
     for name, module in (("MCP_Server", package), ("MCP_Server.server", server),
