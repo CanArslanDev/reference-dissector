@@ -40,7 +40,7 @@ from .grid import Grid, estimate, offsets, onset_grid, tuning
 from .hits import Group, group, template
 from .library import Library, null_test, pair_fit, per_hit_votes, verdict
 from .structure import bar_activity, sections
-from .synth808 import Params, compare, fit, laid_out, one_shot
+from .synth808 import Params, compare, fit, laid_out, one_shot, tracked_shot
 from .xcorr import sliding_ncc
 
 TONAL_STEMS = ("bass", "other", "piano", "vocals", "guitar")
@@ -612,7 +612,22 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
     no note rings that long), or the fit's f_end where the two agree within
     2 cents, or where the template only had its unsettled tail to read
     ("qifft_tail": the fit's drop extrapolates). synth808.json keeps both,
-    the one used (pitch_hz, pitch_from) and its cents over root_midi."""
+    the one used (pitch_hz, pitch_from) and its cents over root_midi.
+
+    The one-shot's pitch follows the template's own periods, read off
+    bass808's pitch curve (synth808.tracked_shot; pitch_track records how),
+    until its drop has settled; one_shot's fitted drop where the curve holds
+    none or has settled by its second crossing. The fitted drop alone
+    (bass_low-1: 25.9 semitones with a 19 ms time constant) had settled by
+    120 ms where the 808 holds 100 cents over its settled pitch until
+    150-200 ms, so heard_808's Detune correction followed the length of the
+    notes at its common pitch (47.1, 123.4 and 82.6 cents for notes under
+    120 ms, 120-250 and 250-600), and the long notes played 42-52 cents
+    flat. The one-shot is laid out as the template is: it attacks where the
+    template does after its onset (bass808.json attack_ms), so plan_808,
+    which puts each note's attack on the analysis' t_attack, starts the
+    note at its onset and the copied periods play where the template's
+    do."""
     work = Path(work)
     analysis = _load(work / "analysis.json")
     stems_dir = Path(stems_dir or analysis["source"]["stems"])
@@ -635,7 +650,10 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
         pitch, source = params.f_end_hz, "agree" if abs(apart) <= 2 else "fit"
     else:
         pitch, source = f1, method or "tuning"
-    shot = one_shot(params, pitch)
+    tpl = (_load(work / "bass808.json") if (work / "bass808.json").is_file() else {}).get("template") or {}
+    onset_attack = tpl["attack_ms"] / 1000 - PRE / SR if tpl.get("attack_ms") is not None else None
+    tracked = tracked_shot(params, pitch, tpl["curve"], tpl["hz"], attack_s=onset_attack) if tpl.get("curve") else None
+    shot = tracked[0] if tracked else one_shot(params, pitch)
     name = "808 (synth).wav"
     write(work / name, shot, peak=None)
     result = {"params": params.to_dict(), "glide_semitones": round(params.glide_semitones, 2),
@@ -643,7 +661,10 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
               "cents": round(1200 * np.log2(pitch / 440) + 6900 - 100 * root, 1),
               "measured_hz": round(f1, 4), "measured_by": method or "tuning", "fit_vs_measured_cents": round(apart, 2),
               "fit_notes": used, "fit": info, "file": str(work / name), "file_name": name,
+              "pitch_track": tracked[1] if tracked else None,
               "compare": {"synth": compare(ref, laid_out(params, len(ref)), f1)}}
+    if tracked:  # the one-shot laid out as the template is
+        result["compare"]["tracked"] = compare(ref, np.r_[np.zeros(PRE, np.float32), shot][:len(ref)], f1)
     if library_808 is not None:
         ranked = library_808.match(ref, "808", semitones=range(-12, 13), top=10, prefilter=60)
         best = ranked[0]
@@ -653,6 +674,13 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
                                              "margin": round(best["ncc"] - ranked[1]["ncc"], 3)}
     log(f"808: one-shot at {pitch:.3f} Hz ({source}; fit f_end {params.f_end_hz:.3f} Hz, {apart:+.1f} cents "
         f"from the measured {f1:.3f})")
+    if tracked:
+        tr = tracked[1]
+        log(f"808: its pitch on the template's periods, {tr['followed']} of {tr['periods']} (to "
+            f"{1000 * tr['until_s']:.0f} ms{', settled there' if tr['settled'] else ''}), the attack scaled "
+            f"x{tr['attack_scale']}{'' if tr['read_as_template'] else ', its first crossing read apart'}"
+            + ("" if onset_attack is None else f", its attack {tr['attack_ms']:.1f} ms in (the template's "
+                                               f"{1000 * onset_attack:.1f})"))
     log(json.dumps(result["compare"]))
     _save(work / "synth808.json", result)
     return result
