@@ -571,6 +571,17 @@ def test_a_left_out_view_gives_its_hits_to_its_main_not_to_a_hat_before_it(sound
     assert found(got.events, "hat", hats).all() and extra(got.events, "hat", hats) == 0
 
 
+def test_a_silent_template_is_left_out_with_its_hits_to_no_one():
+    """A template whose weighted bands are all zero (a window of digital
+    silence) is explained whole through explained()'s energy floor, with no
+    coefficient over 0: it is left out, and its hits go to no template. The
+    HAND rule took the largest of none and raised (ValueError)."""
+    a = np.random.default_rng(1).standard_normal((4, 400)).astype(np.float32)
+    zero = np.zeros_like(a)
+    rel = layers.relations([a, zero], [[a, zero], [a, zero]], [400, 400], [20, 10], {0, 1}, [0, 0])
+    assert rel["composite"] == {1: {"share": 1.0, "by": {}}} and rel["kept"] == [0]
+
+
 def test_a_merge_survivor_that_is_an_echo_is_never_probed(sounds):
     """The kick and the snare hold the hat. When the hat's hits went into
     another column (here a hat template whose window starts 12 ms on), the
