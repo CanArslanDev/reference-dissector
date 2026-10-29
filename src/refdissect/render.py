@@ -13,10 +13,11 @@ check:
   [detune_cents 0] semitones the way Simpler does with warping off
   (audio.transpose: pitch and length change together);
 - gain = track fader (build_spec's min(6, levels[...]) dB) x 10^(volume_db/20)
-  [volume_db 0; build_spec sets a Simpler's Volume to it] x the velocity's
-  level ["live": velocity_db, Live 12.4.6's law, at the pad's or the 808's
-  vol_vel, which build_spec sets as Simpler's "Vol < Vel" (VOL_VEL);
-  "linear", v/127, was the assumption before the law was measured];
+  [volume_db 0, a pad's at most 0 (pad_settings); build_spec sets a
+  Simpler's Volume to it] x the velocity's level ["live": velocity_db, Live
+  12.4.6's law, at the pad's or the 808's vol_vel, which build_spec sets as
+  Simpler's "Vol < Vel" (VOL_VEL); "linear", v/127, was the assumption
+  before the law was measured];
 - pads are One-Shot [playback_mode "one_shot"]: a note's length does not cut
   the file; "classic" cuts it at the note end. Hits of one pad overlap and sum
   unless mono=True: whether Live's One-Shot retrigger cuts the previous hit is
@@ -74,9 +75,13 @@ def resolve(path: str | Path, root: str | Path | None = None) -> Path:
 
 
 def pad_settings(pad: dict) -> dict:
-    """A pad with every optional field filled in (PAD holds the defaults)."""
+    """A pad with every optional field filled in (PAD holds the defaults),
+    its volume_db at most 0 dB: the build keeps every pad's Simpler at or
+    under 0 dB (live.build_spec sends this Volume), and every render and
+    estimate of the plan plays it so."""
     return {**PAD, **{k: v for k, v in pad.items() if v is not None},
-            "transpose": float(pad.get("transpose", 0.0)), "role": pad.get("role", "perc")}
+            "transpose": float(pad.get("transpose", 0.0)), "role": pad.get("role", "perc"),
+            "volume_db": min(0.0, float(pad.get("volume_db") or 0.0))}
 
 
 def settings_808(track: dict) -> dict:
