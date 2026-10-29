@@ -234,7 +234,7 @@ def test_the_one_shot_only_falls_where_its_template_rises():
     """A kick in the template: its curve reads 228 cents under the drop at
     60-80 ms and 228 over it at 90-110 ms. Followed, every note of the
     one-shot swooped 456 cents up; with the fitted drop played up to the
-    rise instead (081b962), it left the template's periods before it and
+    rise instead (bff9234), it left the template's periods before it and
     read up to 577 cents apart. Pooled, the periods never shorten across
     the rise, so the one-shot's pitch never rises there, and the crossings
     before and after it stay the template's."""
@@ -369,7 +369,51 @@ def test_a_curve_that_falls_through_the_one_shot_s_settled_pitch_is_left_there()
 def test_attack_cycles_that_cannot_reach_the_first_period_are_none():
     """A first period more than 2.4 times the next gives the PCHIP no
     slope at its start: no cycle reaches z[0] (the scale was infinite and
-    the voice NaN; the rounds kept the best of what was left)."""
+    the voice NaN; the rounds kept the best of what was left). A voice
+    started before the one-shot counted its head's cycles as reaching
+    z[0]: the phase stood still up to there, at a scale of -0.11."""
     from refdissect.synth808 import _cycles, _times
     z = np.array([0.03, 0.10, 0.125, 0.15, 0.175, 0.2])
-    assert _cycles(HELD, _times(int(0.5 * SR)), 32.7, z, 4, None) is None
+    for start in (0.0, -0.01):
+        assert _cycles(HELD, _times(int(0.5 * SR)), 32.7, z, 4, None, start) is None
+
+
+def test_a_count_whose_crossings_stay_off_is_never_kept(monkeypatch):
+    """tracked_shot tries the two cycle counts nearest the drop's own and
+    keeps none whose crossings the rounds leave more than WORST_S off. One
+    scaled less was picked first and then refused, so a count 0.6 ms off
+    at scale 1.0 left no one-shot where the other was 0.2 ms off at 1.3;
+    with both past WORST_S, none."""
+    from refdissect import synth808
+    _, f0, _, kept = _held()
+    real = synth808._along
+
+    def rounds(worst):
+        calls = []
+
+        def along(p, t, pitch_hz, z, last, m, onset=(0.0, 0.0)):
+            calls.append(m)
+            return dict(real(p, t, pitch_hz, z, last, m, onset), worst_s=worst[len(calls) - 1],
+                        scale=(1.0, 1.3)[len(calls) - 1])
+        return along
+    monkeypatch.setattr(synth808, "_along", rounds((6e-4, 2e-4)))
+    _, info = synth808.tracked_shot(HELD, f0, kept, f0)
+    assert (info["worst_ms"], info["attack_scale"]) == (0.2, 1.3)
+    monkeypatch.setattr(synth808, "_along", rounds((6e-4, 7e-4)))
+    assert synth808.tracked_shot(HELD, f0, kept, f0) is None
+
+
+def test_a_first_crossing_past_300_ms_is_laid_out_too():
+    """A curve that holds its first value to 0.35 s, then drops: its first
+    crossing lies past the 300 ms _onset made the voice over, and _cycles,
+    which makes the drop up to there, read past its end (IndexError). The
+    one-shot attacks where the template does, as on any other curve."""
+    from refdissect.audio import attack_time
+    from refdissect.synth808 import tracked_shot
+    _, f0, _, _ = _held()
+    t = np.round(np.arange(0.0, 1.2, 0.01), 2)
+    falls = np.where(t < 0.35, 600.0, 600.0 * np.exp(-(t - 0.35) / 0.05))
+    curve = [[float(a), float(round(b, 1))] for a, b in zip(t, falls)]
+    y, info = tracked_shot(HELD, f0, curve, f0, attack_s=0.0067)
+    assert info["followed"] > 1 and abs(attack_time(y, "808") - 0.0067) < 0.0005
+
