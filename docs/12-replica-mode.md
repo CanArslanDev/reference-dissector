@@ -412,7 +412,7 @@ All measured on the suite (m5 unless named; m4 equals m3 on everything but the p
 - **The plan's time.** The plan carries the grid's meter (m5), which the build sets in Live.
   - The plan's meter is right on 0.955 of the scenarios (0.909 at m4), and its downbeat F is 0.924 (0.892): meter34 is planned and built in 3/4.
   - Live's bar 1 is still at 0 s: full's first bar line, at 0.4 s, lands 400 ms off.
-  - A locator off Live's grid is deleted: 3 of meter34-1's 5 in Live, where the grid follows the Arrangement's zoom. 11 of the 169 locators of the m5 and m5-ft plans lie off Live's bar lines (full and tempo72), likely to go the same way (not built).
+  - A locator off Live's grid is deleted: 3 of meter34-1's 5 in Live, where the grid follows the Arrangement's zoom. 11 of the 169 locators of the m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72), likely to go the same way (not built).
 - **Bar lines and meters missed.**
   - tempo72's bar line is wrong on both beats (downbeat F 0).
   - meter68 is read in 4/4, at x2/3.
