@@ -7,7 +7,17 @@ from conftest import burst, placed
 from scipy.optimize import nnls
 
 from refdissect.audio import SR, fit, samples, transpose, trim_onset
-from refdissect.library import Library, copies, inventory, pair_fit, role_of, speckle_path, summarize, verdict
+from refdissect.library import (
+    SILENT_DB,
+    Library,
+    copies,
+    inventory,
+    pair_fit,
+    role_of,
+    speckle_path,
+    summarize,
+    verdict,
+)
 
 
 def test_roles_from_names():
@@ -59,6 +69,34 @@ def test_save_and_load(tmp_path, kit):
     lib.save(tmp_path / "lib.npz")
     back = Library.load(tmp_path / "lib.npz")
     assert back.paths == lib.paths and back.spectra.shape == lib.spectra.shape
+
+
+def test_a_silent_file_is_never_listed(tmp_path, kit, monkeypatch):
+    """A float WAV of a snare 420 dB down (the suite library's fx file at
+    -432 dBFS matched v1orig-3's hat at NCC 0.961, and its pad played
+    silence): build() leaves it out, and from an index built before that
+    floor, which holds it at full scale, no search lists it."""
+    from refdissect import library
+
+    folder = tmp_path / "kit"
+    folder.mkdir()
+    sounds = {"quiet snare.wav": kit["snare"] * 1e-21, "hat.wav": kit["hat"], "kick.wav": kit["kick"]}
+    for name, x in sounds.items():
+        sf.write(folder / name, x, SR, subtype="FLOAT")
+    lib = Library.build(inventory([folder]), seconds=0.4)
+    assert sorted(p.rsplit("/", 1)[1] for p in lib.paths) == ["hat.wav", "kick.wav"] and lib.floor_db == SILENT_DB
+    old = Library([str(folder / name) for name in sounds], ["snare", "hat", "kick"],
+                  np.stack([fit(trim_onset(x), samples(400)) / np.max(np.abs(x)) for x in sounds.values()])
+                  .astype(np.float16), 0.4)
+    t = placed(kit["snare"], 0.0, 150)
+    assert old.floor_db is None and not old.audible(0) and old.audible(1)
+    assert sorted(r["path"].rsplit("/", 1)[1] for r in old.match(t, "snare", top=10)) == ["hat.wav", "kick.wav"]
+    old.save(tmp_path / "old.npz")
+    lib.save(tmp_path / "lib.npz")
+    assert Library.load(tmp_path / "old.npz").floor_db is None
+    back = Library.load(tmp_path / "lib.npz")
+    monkeypatch.setattr(library, "read", lambda *a, **k: 1 / 0)  # built with the floor: no file is read again
+    assert back.floor_db == SILENT_DB and back.audible(0) and back.audible(1)
 
 
 def test_verdicts():

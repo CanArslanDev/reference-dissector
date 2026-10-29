@@ -54,6 +54,7 @@ SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligne
 # a "layer" this much louder than the top match means the top match is not the template's sound (a kick
 # template's snare-band match got a kick 15 dB louder as its layer); a clap on a snare sits -6..0 dB
 LOUDER_DB = 10.0
+TIED_NCC = 0.002  # a band whose five best different sounds lie within this of each other tells none apart (_tied)
 
 
 def _save(path: Path, obj) -> Path:
@@ -388,6 +389,23 @@ def _rest(library: Library, t: np.ndarray, b: str, main: dict) -> np.ndarray:
     return (tb - g * atom[0]).astype(np.float32)
 
 
+def _tied(top: list[dict]) -> bool:
+    """Whether a band's five best different sounds (distinct) are tied:
+    within TIED_NCC of each other, the band names none of them. A kick's
+    click is all a snare or hat band holds of it, and every file that
+    starts at once matches it: full-1's kick (a low-band template) had 20
+    kick, 808 and synth-bass files within 0.0002 of NCC 0.9796 in the hat
+    band, the best two a synth bass and an 808, which the plan put on the
+    kick pad; in the kick band its own file was first at 0.960, the next
+    sound 0.116 under it. On the 48 suite beats (m3a, both models) the
+    five best of a template's chosen band lay within 0.0006 on the six
+    low- and snare-band templates matched in the hat band (kicks all; four
+    hat templates of no hits, matched there to kicks and 808s at 0.61-0.64,
+    were tied too, in their own band), and 0.0089 apart or more on every
+    other template matched at 0.65 or more."""
+    return len(top) >= 5 and top[0]["ncc"] - top[4]["ncc"] < TIED_NCC
+
+
 def _role(top: list[dict], named: Counter, guess: str, b: str) -> str:
     """A template's role, from its top five matches in band b: the top
     match's family when it is matched in the snare or hat band at NCC >=
@@ -438,7 +456,10 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     Identities are handed out from the strongest match down; a sample
     already given to another template goes to this one too only if it
     matches it just as well (>= 0.9: the same sound found twice, `same_as`),
-    otherwise this template takes its best match in another band. With
+    otherwise this template takes its best match in another band. A
+    template whose best band cannot tell its five best sounds apart (_tied)
+    is matched in its own band, the one discover() found it in
+    (`tied_band` names the band passed over). With
     kick_sources_on, a template given the kick band is then also read from
     drums + bass and from the mix with the 808 taken out (kick_sources), and
     the source whose best match is closest wins (`source`). It is off by
@@ -475,8 +496,12 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
     claims: dict[str, tuple[str, float]] = {}
     chosen: dict[str, str] = {}
     same_as: dict[str, str] = {}
-    pairs = sorted(((r[0]["ncc"], name, b) for name, bands in by_band.items() for b, r in bands.items()),
-                   reverse=True)
+    own = {name: {"low": "kick"}.get(info["band"], info["band"]) for name, info in templates.items()}
+    # a template whose best band is tied (_tied) is matched in its own band, the one discover() found it in
+    best = {name: max(bands, key=lambda b: bands[b][0]["ncc"]) for name, bands in by_band.items()}
+    tied = {name: b for name, b in best.items() if b != own[name] and _tied(by_band[name][b])}
+    pairs = sorted(((r[0]["ncc"], name, b) for name, bands in by_band.items() for b, r in bands.items()
+                    if name not in tied or b == own[name]), reverse=True)
     for score, name, b in pairs:
         if name in chosen or name in same_as:
             continue
@@ -486,8 +511,8 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
             claims[path] = (name, score)
         elif score >= 0.9 and claims[path][1] >= 0.9:
             same_as[name] = claims[path][0]
-    band_of = {name: chosen.get(name) or (same_as.get(name) and chosen.get(same_as[name]))
-               or {"low": "kick"}.get(info["band"], info["band"]) for name, info in templates.items()}
+    band_of = {name: chosen.get(name) or (same_as.get(name) and chosen.get(same_as[name])) or own[name]
+               for name in templates}
     kicks = [n for n in templates if kick_sources_on and band_of[n] == "kick" and n not in same_as
              and templates[n].get("members")]
     sources, r808, source_info = kick_sources(work, analysis, stems, drums) if kicks else ({}, None, {})
@@ -523,6 +548,9 @@ def match(work: str | Path, library: Library, stems_dir: str | Path | None = Non
                      "verdict": verdict(role, top[0]["ncc"], margin, wins_share)}
         if name in kick_source:
             out[name] |= {"source": kick_source[name]["source"], "kick_source": kick_source[name]}
+        if name in tied:  # the band passed over, and its first and fifth sounds' NCC
+            five = by_band[name][tied[name]]
+            out[name]["tied_band"] = {"band": tied[name], "ncc": [five[0]["ncc"], five[4]["ncc"]]}
         if library.speckle_info.get("version"):
             out[name]["speckle_index"] = library.speckle_info["version"]
         if name in same_as:
