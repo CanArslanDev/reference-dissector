@@ -171,7 +171,7 @@ def heard_808(notes: list[dict], shot: np.ndarray, shift0: float) -> float | Non
     fit_808's one-shot now follows the template's own periods
     (synth808.tracked_shot): those corrections are 0.1, -0.1 and -0.1, and
     the line's lies within 8 cents of 0 on 95 of the suite's 96 beat runs
-    (37 and 43 before; |median| 4.4 and 3.2 -> 1.1 and 0.9 cents), the
+    (37 and 43 before; |median| 4.4 and 3.2 -> 1.05 and 0.6 cents), the
     96th a template whose settled pitch was read on its tail.
 
     Re-scored on the 808-after4 plans (plan level, mean over the 10 lane
