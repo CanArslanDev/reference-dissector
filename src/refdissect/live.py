@@ -710,10 +710,15 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     the kick band on `low`, the drum and bass stems together, less
     `under` (the 808 track where the bass stem holds it) at each hit: a
     separation hands part of a kick to the bass stem, by a different amount
-    in every song, and the 808 plays under most kicks. Every other sound is
-    read on the drum stem. The pads of one sound (a template's pad and its
-    pitched copies) share one level, their hits pooled. A file that peaks
-    under SILENT_DB gets none.
+    in every song, and the 808 plays under most kicks. It is never read
+    under the drum stem's own reading of it, the least the stems hold of
+    it: where the bass stem holds the 808 quieter under a kick than `under`
+    plays it (a sidechain ducks it, or the 808's fader is a dB high), taking
+    `under` off leaves too little of the kick or none, and a kick left
+    without a hit had no level. Every other sound is read on the drum stem.
+    The pads of one sound (a template's pad and its pitched copies) share
+    one level, their hits pooled. A file that peaks under SILENT_DB gets
+    none.
 
     Measured per pad on the 48 suite beats against where the truth holds
     the sound it plays (median over pads; htdemucs, htdemucs_ft in
@@ -722,10 +727,20 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     stem sat -10.01 [-3.59] dB from it (-13.74 to -2.55 [-5.27 to -2.02]):
     htdemucs moves much of a kick to the bass stem. On drums + bass the
     808 under it put it at +1.50 [+1.42]; less the plan's 808, -1.30
-    [-0.75] (-2.62 to +0.17 [-2.71 to +0.44]). No kick of the suite had
-    three hits clear of every 808 note. Read only on its hits clear of
-    other sounds, a pad sat -1.37 [-1.43] dB from the truth, and the kit
-    no closer to a perfect one."""
+    [-0.75] (-2.62 to +0.17 [-2.71 to +0.44]). The floor moves the kicks of
+    1 [4] suite beats, each toward the truth (v1orig-3: -1.79 -> -0.69
+    [-1.93 -> -0.63] dB from a perfect kit); on PIRAMIT, with the plan's
+    808 1 or 2 dB louder than its fader, it holds the kick at -16.4 dB, its
+    drum stem's reading, where without it 32 and 6 of the kick's 93 hits
+    were left and it read -23.2 and -20.3 dB. It does not hold
+    a kick the separation splits under a ducked 808: 60 % of a kick in the
+    bass stem, its 808 ducked 3 to 20 dB under it, read the kick 2.2 to 8.0
+    dB low (synthetic; no suite beat ducks its 808, and PIRAMIT's bass stem
+    holds the plan's 808 at -0.3 dB over a kick's first 50 ms, -1.8 dB at
+    808 notes with no kick). No kick of the suite had three hits clear of
+    every 808 note. Read only on its hits clear of other sounds, a pad sat
+    -1.37 [-1.43] dB from the truth, and the kit no closer to a perfect
+    one."""
     bps = plan["tempo"] / 60
     pads, notes = plan["tracks"]["drums"]["pads"], plan["tracks"]["drums"]["notes"]
     shots = {}
@@ -744,11 +759,13 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     kicks = {snd for snd, key in first.items() if low is not None and low_share(shots[key][0]) >= LOW_SHARE}
     w, banded = samples(ms), {}
     heard: dict[str, list[float]] = {}
+    alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
     for key, (x, s) in shots.items():
         kick = sound[key] in kicks
         b, name = ("kick", "low") if kick else (ATTACK_BAND.get(s["role"], "full"), "drums")
-        if (name, b) not in banded:
-            banded[name, b] = band(low if kick else drums, b)
+        for src, y in ((name, low if kick else drums), ("drums", drums)):
+            if (src, b) not in banded:
+                banded[src, b] = band(y, b)
         mine = [e for e in notes if str(e["pitch"]) == key]
         at = np.array([e["start_time"] / bps for e in mine]) + attack_time(x, s["role"])
         own = band(_render(mine, lambda e, x=x: x, lambda e, s=s: velocity_gain(e["velocity"], "live", s["vol_vel"]),
@@ -759,9 +776,18 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
                 banded["under", b] = band(under, b)
             theirs = theirs - _energies(banded["under", b], at, w)
         ours = _energies(own, at, w)
-        ok = (theirs > 0) & (ours > 0)
-        heard.setdefault(sound[key], []).extend((10 * np.log10(theirs[ok] / ours[ok])).tolist())
-    return {key: float(np.median(heard[sound[key]])) for key in shots if heard.get(sound[key])}
+        heard.setdefault(sound[key], []).extend(_db(theirs, ours))
+        if kick:
+            alone.setdefault(sound[key], []).extend(_db(_energies(banded["drums", b], at, w), ours))
+    level = {snd: max(float(np.median(v)) for v in (heard[snd], alone.get(snd)) if v)
+             for snd in heard if heard[snd] or alone.get(snd)}
+    return {key: level[sound[key]] for key in shots if sound[key] in level}
+
+
+def _db(theirs: np.ndarray, ours: np.ndarray) -> list[float]:
+    """10 log10(theirs / ours) (dB) at each hit where both hold energy."""
+    ok = (theirs > 0) & (ours > 0)
+    return (10 * np.log10(theirs[ok] / ours[ok])).tolist()
 
 
 def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
