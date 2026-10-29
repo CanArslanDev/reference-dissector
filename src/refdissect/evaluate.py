@@ -451,9 +451,10 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     so is a legato note that starts after the voice has read past the
     one-shot's end (a long chain at a high pitch: the voice is silent).
     Melodic notes: the plan's melodic tracks (_plan_melodic). Rhythm: Live's
-    own grid, bar 1 at 0 s at the plan's tempo; the plan puts notes at their
-    seconds, so the song's bars fall on it only when the song's first bar
-    line is at 0 s."""
+    own grid, bar 1 at 0 s at the plan's tempo, in the plan's meter (the
+    build sets Live's time signature to it; 4/4 for a plan without one);
+    the plan puts notes at their seconds, so the song's bars fall on it
+    only when the song's first bar line is at 0 s."""
     bps = plan["tempo"] / 60
     track = plan["tracks"]["drums"]
     sounds, settings, shots, missing = {}, {}, {}, []
@@ -478,7 +479,8 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     length = plan.get("length_beats", 0.0) / bps
     return _events(scenario, {"from": "plan", "velocity_curve": str(velocity_curve), "missing": missing},
                    audio={"sr": SR, "n_samples": int(round(length * SR))},
-                   time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length),
+                   time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length,
+                                   int(plan.get("beat_unit", 4))),
                    sounds=sounds, drums=drums, bass808=bass, **_plan_melodic(plan, bps))
 
 
