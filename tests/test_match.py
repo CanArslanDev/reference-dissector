@@ -227,6 +227,34 @@ def _kick_work(tmp_path, kick: np.ndarray, hiss: float = 0.3):
     return work
 
 
+def test_a_band_that_ties_five_sounds_names_none(noisy, tmp_path, monkeypatch):
+    """A kick's click is all the hat band holds of it, and every file that
+    starts at once matches it (full-1's kick: 20 files within 0.0002 of NCC
+    0.9796 there, its own file first at 0.960 in the kick band). A
+    low-band kick whose hat band ties its five best sounds is matched in
+    the kick band, its own; one whose hat band tells them apart, in the hat
+    band as before."""
+    lib, sounds = noisy
+    work = _kick_work(tmp_path, sounds[-2])
+    search, hats = pipeline._search, [i for i, r in enumerate(lib.roles) if r == "hat"][:10]
+
+    def hat_band(spread: float):
+        def ranked(library, t, b, detune):
+            if b != "hat":
+                return search(library, t, b, detune)
+            return [{"i": i, "path": library.paths[i], "role": "hat", "ncc": round(0.999 - spread * k / 9, 4),
+                     "semitones": 0.0, "lag_ms": 0.0} for k, i in enumerate(hats)], "speckle"
+        return ranked
+
+    monkeypatch.setattr(pipeline, "_search", hat_band(0.0005))
+    out = pipeline.match(work, lib, log=lambda *a: None)["sound_1"]
+    assert out["matched_in_band"] == "kick" and out["top"][0]["path"] == lib.paths[len(sounds) - 2]
+    assert out["tied_band"] == {"band": "hat", "ncc": [0.999, 0.9988]}
+    monkeypatch.setattr(pipeline, "_search", hat_band(0.05))
+    out = pipeline.match(work, lib, log=lambda *a: None)["sound_1"]
+    assert out["matched_in_band"] == "hat" and "tied_band" not in out
+
+
 def test_kick_sources_only_when_asked(noisy, tmp_path):
     """match() reads a kick template from drums + bass and the mix only with
     kick_sources_on: by default matches.json names no source. Here there is
