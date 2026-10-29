@@ -61,8 +61,7 @@ def test_transpose_up_an_octave_halves_the_length(tmp_path):
 
 def test_a_choke_group_cuts_the_open_hat(tmp_path):
     """Open hat at 0 s, closed hat at 0.5 s in one choke group: the open hat
-    stops 5 ms after 0.5 s. Without the group, or on mono=False retriggers,
-    it rings on."""
+    stops 5 ms after 0.5 s. Without the group it rings on."""
     pads = {"46": {"path": wav(tmp_path, "oh.wav", noise(1.0)), "transpose": 0, "role": "hat", "choke_group": 1},
             "42": {"path": wav(tmp_path, "ch.wav", noise(0.05, 1)), "transpose": 0, "role": "hat",
                    "choke_group": 1}}
@@ -74,15 +73,28 @@ def test_a_choke_group_cuts_the_open_hat(tmp_path):
     free = rendered(tmp_path / "free", render_plan(plan(pads, [note(46, 0.0), note(42, 1.0)]), tmp_path / "free"),
                     "46")
     assert np.abs(free[int(0.8 * SR):int(0.9 * SR)]).max() > 0.4
-    # one pad hit again at 0.5 s: mono leaves only the second hit after the fade, the default sums both
-    # (velocities at unity, "flat", so the samples compare as they are)
-    twice = [note(46, 0.0), note(46, 1.0)]
-    mono = rendered(tmp_path / "mono", render_plan(plan(pads, twice), tmp_path / "mono", "flat", mono=True), "46")
-    poly = rendered(tmp_path / "poly", render_plan(plan(pads, twice), tmp_path / "poly", "flat"), "46")
-    hit, x = int(0.5 * SR), noise(1.0)
-    after = slice(hit + samples(5) + 1, SR)
-    second = x[after.start - hit:SR - hit]
-    assert np.allclose(mono[after], second) and np.allclose(poly[after], second + x[after])
+
+
+def test_a_pad_hit_again_cuts_its_hit_and_starts_1_ms_late(tmp_path):
+    """Live's pads play one voice (the live check, 2026-10-29): a hit that
+    comes while the pad's hit before still plays fades that one out along a
+    straight line over 1 ms from its note and starts 1 ms late, which
+    estimate_from_plan times; the hit after a file has ended starts on
+    time. mono=False sums them. Velocities at unity ("flat"), so the
+    samples compare as they are."""
+    from refdissect.render import RETRIGGER_S
+    pads = {"46": {"path": wav(tmp_path, "oh.wav", noise(1.0)), "transpose": 0, "role": "hat"}}
+    hits = [note(46, 0.0), note(46, 1.0), note(46, 4.0)]  # 0, 0.5 and 2.0 s: the file lasts 1 s
+    x, hit, late = noise(1.0), int(0.5 * SR), int(round(RETRIGGER_S * SR))
+    mono = rendered(tmp_path / "mono", render_plan(plan(pads, hits), tmp_path / "mono", "flat"), "46")
+    assert np.allclose(mono[:hit], x[:hit])
+    assert np.allclose(mono[hit:hit + late], x[hit:hit + late] * np.linspace(1, 0, late))  # the first one fades out
+    assert np.allclose(mono[hit + late:hit + late + int(0.5 * SR)], x[:int(0.5 * SR)])  # the second, 1 ms late
+    assert np.allclose(mono[2 * SR:3 * SR], x)  # on time: the second had ended
+    poly = rendered(tmp_path / "poly", render_plan(plan(pads, hits), tmp_path / "poly", "flat", mono=False), "46")
+    assert np.allclose(poly[hit:SR], x[:SR - hit] + x[hit:SR])
+    est = estimate_from_plan(plan(pads, hits))["drums"]
+    assert [round(e["t"], 4) for e in est] == [0.0, 0.501, 2.0] and [e["flags"] for e in est] == [[], ["retrigger"], []]
 
 
 def test_velocity_law_faders_and_the_drums_sum(kit, tmp_path):

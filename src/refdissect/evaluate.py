@@ -37,6 +37,7 @@ from .render import (
     chains_808,
     fader_db,
     glide_s,
+    pad_hits,
     pad_settings,
     pitch_808,
     read_at,
@@ -409,10 +410,12 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
                        velocity_curve="live") -> dict:
     """What Live would play, as an estimate (render.py's assumptions).
 
-    Drum note: t = start_time * 60 / tempo; t_attack = t + attack_time(the
-    pad's sample as played: from frame 0, or from start_s, transposed by
-    transpose + detune_cents/100 semitones) in the pad role's band; sound id
-    = the pad's note, role = the pad's. 808 note (pitch: the MIDI note
+    Drum note: t = start_time * 60 / tempo, RETRIGGER_S later where it
+    comes while its pad's hit before still plays (render.pad_hits: Live's
+    pads play one voice; flagged "retrigger"); t_attack = t +
+    attack_time(the pad's sample as played: from frame 0, or from start_s,
+    transposed by transpose + detune_cents/100 semitones) in the pad role's
+    band; sound id = the pad's note, role = the pad's. 808 note (pitch: the MIDI note
     written): the one-shot transposed by (pitch - 60) + transpose +
     detune_cents/100 semitones, attack read in the 808 band, ending at the
     note end. It settles at root_midi + cents/100 + that shift
@@ -437,8 +440,7 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     line is at 0 s."""
     bps = plan["tempo"] / 60
     track = plan["tracks"]["drums"]
-    g_drums = 10 ** (fader_db(plan, "drums") / 20)
-    sounds, settings, missing = {}, {}, []
+    sounds, settings, shots, missing = {}, {}, {}, []
     for note, pad in track["pads"].items():
         key, s = str(note), pad_settings(pad)
         path, role = resolve(pad["path"], root), _drum_role(s["role"])
@@ -447,20 +449,13 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
         except (OSError, RuntimeError):
             missing.append(str(pad["path"]))
             continue
-        settings[key] = s
+        settings[key], shots[key] = s, x
         sounds[key] = {"role": role, "path": str(path), "sha256": _sha256(path), "semitones": s["transpose"],
                        "cents": s["detune_cents"], "attack_s": round(attack_time(x, role), 5)}
-    drums = []
-    for n in track["notes"]:
-        key = str(n["pitch"])
-        if key not in sounds:
-            continue
-        s, t = settings[key], n["start_time"] / bps
-        curve = s["velocity_curve"] or velocity_curve
-        gain = g_drums * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve, s["vol_vel"])
-        drums.append({"sound": key, "role": sounds[key]["role"], "t": round(t, 5),
-                      "t_attack": round(t + sounds[key]["attack_s"], 5), "gain": round(gain, 5),
-                      "velocity": int(n["velocity"]), "layer_of": None, "flags": []})
+    drums = [{"sound": h["pad"], "role": sounds[h["pad"]]["role"], "t": round(h["t"], 5),
+              "t_attack": round(h["t"] + sounds[h["pad"]]["attack_s"], 5), "gain": round(h["gain"], 5),
+              "velocity": h["velocity"], "layer_of": None, "flags": ["retrigger"] * h["late"]}
+             for h in pad_hits(plan, shots, settings, velocity_curve)]
     drums.sort(key=lambda e: e["t_attack"])
     bass = _plan_808(plan, root, velocity_curve, sounds, missing)
     _with_kick(bass, drums)

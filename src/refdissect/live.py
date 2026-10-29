@@ -56,7 +56,16 @@ from .audio import ATTACK_BAND, PRE, SR, attack_time, band, read, rms_db, sample
 from .detect import RESIDUAL_BARS, SAME_MS, min_hits_for
 from .grid import Grid
 from .library import SILENT_DB
-from .render import VOL_VEL, as_played, glide_s, pad_settings, render_808, velocity_gain
+from .render import (
+    RETRIGGER_S,
+    VOL_VEL,
+    as_played,
+    glide_s,
+    pad_hits,
+    pad_settings,
+    pad_track,
+    render_808,
+)
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
         "perc": [43, 48, 50, 52, 53]}
@@ -403,6 +412,8 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     top match at its pitch: Transpose in whole semitones and Detune in
     whole cents (pad_pitch), as Live keeps them. Velocities play each hit's
     gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
+    note that Live starts late, as it comes while its pad's hit before
+    still plays, goes that much earlier (on_time). A
     match's layers (matches.json) are not played yet. With melodic
     (melodic.json), each tonal stem's notes get a MIDI track."""
     bpm = analysis["grid"]["bpm"]
@@ -473,6 +484,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             drum_notes.append({"pitch": pad, "start_time": round(max(0.0, t - pad_lead(pads[str(pad)], leads))
                                                                    * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
+    on_time(drum_notes, pads, beats_per_second, {})
     plan = {"tempo": bpm, "length_beats": float(length_beats),
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
                        "808": plan_808(analysis, synth, stems_dir, beats_per_second)},
@@ -628,6 +640,40 @@ def pad_lead(pad: dict, cache: dict) -> float:
     return cache[key]
 
 
+def pad_voice_s(pad: dict, cache: dict) -> float:
+    """How long Live plays a pad's hit (s): its file as Simpler plays it
+    (from start_s, at Transpose plus Detune) to the last frame, Snap off
+    (LIVE_OFF); 0 for a file that cannot be read. cache keeps one per
+    sample and setting."""
+    s = pad_settings(pad)
+    key = (pad["path"], s["start_s"], s["transpose"] + s["detune_cents"] / 100)
+    if key not in cache:
+        try:
+            cache[key] = len(as_played(read(pad["path"]), s["start_s"], key[2])) / SR
+        except (OSError, RuntimeError):
+            cache[key] = 0.0
+    return cache[key]
+
+
+def on_time(notes: list[dict], pads: dict, bps: float, cache: dict) -> None:
+    """Each drum note that Live starts RETRIGGER_S late moved that much
+    earlier, so that its sample still starts where the hit's did: a pad
+    plays one voice, and a note that comes before the pad's hit before has
+    played its file (pad_voice_s) cuts that one and starts late
+    (render.pad_hits). Placed where its sample is to start, a hit is late
+    where it comes within the file of the hit before; moved, it still is,
+    and Live starts it on its place (render.late_starts gives the same
+    hits on the moved notes)."""
+    by_pad: dict[str, list[dict]] = {}
+    for e in notes:
+        by_pad.setdefault(str(e["pitch"]), []).append(e)
+    for key, mine in by_pad.items():
+        mine.sort(key=lambda e: e["start_time"])
+        start = np.array([e["start_time"] / bps for e in mine])
+        for e in np.array(mine)[1:][start[1:] < start[:-1] + pad_voice_s(pads[key], cache)]:
+            e["start_time"] = round(max(0.0, e["start_time"] - RETRIGGER_S * bps), 4)
+
+
 def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
     """A pad per pitched copy of the sound on pad `note`: the same sample,
     transposed `semitones` further, on the next free PITCHED_PADS note (or
@@ -643,21 +689,6 @@ def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
             break
         pads.setdefault(str(free), {**base, "transpose": transpose_to, "semitones": int(st)})
         out[st] = free
-    return out
-
-
-def _render(notes: list[dict], sample_for, gain_for, n: int, bps: float, cut: bool) -> np.ndarray:
-    out = np.zeros(n, np.float32)
-    for e in notes:
-        x = sample_for(e)
-        if x is None:
-            continue
-        a = int(e["start_time"] / bps * SR)
-        if cut:
-            x = x[: int(e["duration"] / bps * SR)]
-        b = min(n, a + len(x))
-        if b > a:
-            out[a:b] += x[: b - a] * gain_for(e)
     return out
 
 
@@ -722,7 +753,7 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
         top = max(at.values(), default=0.0)
         for note, pad in plan["tracks"]["drums"]["pads"].items():
             pad["volume_db"] = round(at[note] - top, 1) + 0.0 if note in at else 0.0
-        fader = round(rms_db(stem) - rms_db(_unity_drums(plan, n, bps)) - headroom_db, 1)
+        fader = round(rms_db(stem) - rms_db(_unity_drums(plan, n)) - headroom_db, 1)
         fader = min(fader, round(top - headroom_db, 1)) if at else fader
         if fader > FADER_DB:  # what the fader cannot give, the pads under 0 dB make up as far as they can
             for pad in plan["tracks"]["drums"]["pads"].values():
@@ -735,22 +766,23 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     return out
 
 
-def _unity_drums(plan: dict, n: int, bps: float) -> np.ndarray:
+def _unity_drums(plan: dict, n: int) -> np.ndarray:
     """The drum track at unity: each pad's file from its onset at its
     volume_db, each velocity at its level under Live's law at the pad's
-    vol_vel."""
-    samples_by_pad, gain = {}, {}
+    vol_vel, each pad one voice (render.pad_hits)."""
+    shots, settings = {}, {}
     for note, pad in plan["tracks"]["drums"]["pads"].items():
-        s = pad_settings(pad)
-        gain[int(note)] = (s["vol_vel"], 10 ** (s["volume_db"] / 20))
         try:
-            samples_by_pad[int(note)] = transpose(trim_onset(read(pad["path"])),
-                                                  pad["transpose"] + pad.get("detune_cents", 0) / 100)
+            shots[str(note)] = transpose(trim_onset(read(pad["path"])),
+                                         pad["transpose"] + pad.get("detune_cents", 0) / 100)
         except Exception:
-            samples_by_pad[int(note)] = None
-    return _render(plan["tracks"]["drums"]["notes"], lambda e: samples_by_pad.get(e["pitch"]),
-                   lambda e: velocity_gain(e["velocity"], "live", gain[e["pitch"]][0]) * gain[e["pitch"]][1],
-                   n, bps, False)
+            continue
+        settings[str(note)] = pad_settings(pad)
+    hits = pad_hits(plan, shots, settings, faders=False)
+    out = np.zeros(n, np.float32)
+    for key, x in shots.items():
+        out += pad_track(x, [h for h in hits if h["pad"] == key], n)
+    return out
 
 
 def _energies(x: np.ndarray, at: np.ndarray, n: int) -> np.ndarray:
@@ -826,8 +858,7 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     [tempo160-1's extra snare, 21 of whose 37 hits play no snare: -13.3 ->
     -23.8]. The other 4 spread their clear hits 4.9 to 13.8 dB (three play
     another role's file) and keep all their hits."""
-    bps = plan["tempo"] / 60
-    pads, notes = plan["tracks"]["drums"]["pads"], plan["tracks"]["drums"]["notes"]
+    pads = plan["tracks"]["drums"]["pads"]
     shots = {}
     for key, pad in pads.items():
         s = pad_settings(pad)
@@ -844,8 +875,13 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     kicks = {snd for snd, key in first.items() if low is not None
              and low_share(shots[key][0]) >= (KICK_SHARE if shots[key][1]["role"] == "kick" else LOW_SHARE)}
     w, banded = samples(ms), {}
-    at = {key: np.array([e["start_time"] / bps for e in notes if str(e["pitch"]) == key]) + attack_time(x, s["role"])
-          for key, (x, s) in shots.items()}
+    # each pad's own track at Volume 0 dB and where its hits attack, its hits summed (mono=False): a stem holds
+    # the tail of a sound's hit before under its next one (the suite's truth sums them), and read against the hits
+    # cut as Live plays them, a pad took those tails for its own level (render_plan as Live plays: the suite's
+    # levels.vs_kit_abs_db 1.20 -> 1.30 dB, htdemucs_ft 1.19 -> 1.27; balance_abs_db 0.49 -> 0.60, 0.50 -> 0.51)
+    hits = {key: pad_hits(plan, {key: x}, {key: {**s, "volume_db": 0.0}}, faders=False, mono=False)
+            for key, (x, s) in shots.items()}
+    at = {key: np.array([h["t"] for h in hits[key]]) + attack_time(x, s["role"]) for key, (x, s) in shots.items()}
     heard: dict[str, list[float]] = {}
     alone: dict[str, list[float]] = {}  # a kick on the drum stem alone: the least the stems hold of it
     clear: dict[str, list[float]] = {}  # a sound that is no kick, at its hits clear of every other sound's
@@ -855,9 +891,7 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
         for src, y in ((name, low if kick else drums), ("drums", drums)):
             if (src, b) not in banded:
                 banded[src, b] = band(y, b)
-        mine = [e for e in notes if str(e["pitch"]) == key]
-        own = band(_render(mine, lambda e, x=x: x, lambda e, s=s: velocity_gain(e["velocity"], "live", s["vol_vel"]),
-                           len(drums), bps, False), b)
+        own = band(pad_track(x, hits[key], len(drums)), b)
         theirs = _energies(banded[name, b], at[key], w)
         if kick and under is not None:
             if ("under", b) not in banded:
