@@ -53,7 +53,8 @@ def test_plan(tmp_path):
     assert list(pads) == ["38"] and pads["38"]["transpose"] == -1
     notes = plan["tracks"]["drums"]["notes"]
     assert len(notes) == 16 and {n["pitch"] for n in notes} == {38}  # same_as shares the pad
-    assert notes[1]["start_time"] == 0.5  # 0.25 s at 120 BPM
+    # 0.25 s at 120 BPM, 1 ms early: the snare a semitone down (0.265 s) still plays then, and Live starts it 1 ms late
+    assert notes[0]["start_time"] == 0.0 and notes[1]["start_time"] == 0.498
     assert plan["tracks"]["808"]["transpose"] == 36  # MIDI 24 plays the sample's own pitch
     assert plan["stems"]["drums"]["mute"] and not plan["stems"]["other"]["mute"]
     assert plan["locators"] == [["A (1)", 0.0]]
@@ -91,6 +92,44 @@ def test_a_pads_sample_attacks_where_its_hit_did(tmp_path):
     est = evaluate.estimate_from_plan(make_plan(analysis, matches, synth, tmp_path), root=tmp_path)
     played = sorted(e["t_attack"] for e in est["drums"])
     assert np.max(np.abs(np.array(played) - hits)) < 1e-4
+
+
+def test_a_hit_live_starts_late_is_planned_1_ms_early(tmp_path):
+    """Live starts a hit that comes while its pad's hit before still plays
+    1 ms late (render.pad_hits): its note goes 1 ms earlier, so that the
+    plan, played as Live plays it, attacks where the analysis heard every
+    hit; one that comes after the file before has ended keeps its place."""
+    from refdissect import evaluate
+    analysis, matches, synth = _fixture(tmp_path)
+    del matches["sound_2"]
+    hits = [0.1, 0.3, 0.5, 1.2, 1.4]  # the snare a semitone down lasts 0.265 s
+    analysis["events"]["sound_1"] = [{"t": t, "t_attack": t, "gain": 1.0} for t in hits]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    starts = np.array([n["start_time"] for n in plan["tracks"]["drums"]["notes"]]) / 2  # s at 120 BPM
+    assert np.diff(starts) == pytest.approx([0.199, 0.2, 0.701, 0.199], abs=1e-4)
+    est = evaluate.estimate_from_plan(plan, root=tmp_path)["drums"]
+    assert [e["flags"] for e in est] == [[], ["retrigger"], ["retrigger"], [], ["retrigger"]]
+    assert np.max(np.abs(np.array([e["t_attack"] for e in est]) - hits)) < 1e-4
+
+
+def test_the_drum_fader_hears_the_pads_as_live_plays_them(tmp_path):
+    """The drum track whose RMS sets the drum fader (_unity_drums) plays a
+    pad's hits on one voice, as Live does and render_plan renders it: the
+    snare a semitone down (0.265 s) hit every 0.2 s, each hit cutting the
+    one before, plays 1.05 dB under its hits summed."""
+    from refdissect.audio import rms_db
+    from refdissect.live import _unity_drums
+    from refdissect.render import render_plan
+    analysis, matches, synth = _fixture(tmp_path)
+    del matches["sound_2"]
+    analysis["events"]["sound_1"] = [{"t": 0.2 * k, "t_attack": 0.2 * k, "gain": 1.0} for k in range(15)]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    m = render_plan(plan, tmp_path / "live", faders=False, n_samples=4 * SR)
+    live = sf.read(tmp_path / "live" / m["drums"], dtype="float32")[0]
+    assert np.allclose(_unity_drums(plan, 4 * SR), live, atol=1e-6)
+    m = render_plan(plan, tmp_path / "sum", faders=False, n_samples=4 * SR, mono=False)
+    summed = sf.read(tmp_path / "sum" / m["drums"], dtype="float32")[0]
+    assert rms_db(summed) - rms_db(live) == pytest.approx(1.05, abs=0.02)
 
 
 @pytest.mark.parametrize("named", ["sound_1", "sound_3"])
@@ -288,6 +327,57 @@ def test_locators_on_the_bar_lines(tmp_path):
     assert plan["locators"] == [["A (1)", 2.0], ["B (3)", 8.0]]
 
 
+def test_a_3_4_plan_is_built_in_3_4_and_a_locator_live_moves_is_deleted(tmp_path, monkeypatch):
+    """The plan carries the grid's meter and lasts whole bars of it, and
+    estimate_from_plan times it in that meter; the build sets Live's time
+    signature before it places the locators. A locator Live puts elsewhere
+    (in the live check one asked at beat 9 went to 8) is deleted there and
+    reported, not left stray; the set's own cues stay."""
+    import asyncio
+    import json
+    import sys
+
+    from refdissect import evaluate
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["grid"].update(beats_per_bar=3, beat_unit=4)
+    analysis["sections"] = [{"name": "A", "start_bar": 1, "end_bar": 4}, {"name": "B", "start_bar": 4, "end_bar": 5}]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    assert (plan["beats_per_bar"], plan["beat_unit"], plan["length_beats"]) == (3, 4, 9.0)  # 8 beats, 3 bars
+    time = evaluate.estimate_from_plan(plan, root=tmp_path)["time"]
+    assert time["beats_per_bar"] == 3 and time["downbeats_s"][:3] == [0.0, 1.5, 3.0]
+    assert plan["locators"] == [["A (1)", 0.0], ["B (4)", 9.0]]
+    live = {"cues": [{"name": "mine", "time": 40.0}], "at": 0.0}  # a cue the set held before
+
+    def overview(args, calls):
+        return json.dumps({"tracks": [], "cue_points": live["cues"]})
+
+    def transport(args, calls):
+        if args["action"] == "jump_to":
+            live["at"] = args["time"]
+        elif args["action"] == "toggle_cue":
+            live["cues"] = [c for c in live["cues"] if c["time"] != live["at"]]
+        return "{}"
+
+    calls = _fake_live(monkeypatch, tmp_path / "lib", answers={"get_session_overview": overview,
+                                                               "transport": transport})
+
+    def place_locators(cues):  # Live moves the one at beat 9 to 8
+        calls.append(("place_locators", cues))
+        live["cues"] += [{"name": n if t != 9.0 else "1", "time": 8.0 if t == 9.0 else t} for n, t in cues]
+        return [{"name": n, "time": t, **({"error": "Live did not create it"} if t == 9.0 else {})} for n, t in cues]
+
+    monkeypatch.setattr(sys.modules["MCP_Server.extended_tools"], "place_locators", place_locators)
+    logged = []
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
+    names = [n for n, _ in calls]
+    assert names.index("set_song_properties") < names.index("place_locators")
+    assert dict(calls)["set_song_properties"]["time_signature"] == "3/4"
+    assert report["locators_moved"] == [{"name": "B (4)", "asked": 9.0, "live": 8.0, "deleted": True}]
+    assert sorted(c["time"] for c in live["cues"]) == [0.0, 40.0]
+    assert "Live put it at beat 8 for locator 'B (4)' at beat 9.0: deleted" in logged
+
+
 def test_midi_files(tmp_path):
     analysis, matches, synth = _fixture(tmp_path)
     plan = make_plan(analysis, matches, synth, tmp_path)
@@ -310,7 +400,7 @@ def test_build_spec_for_build_tracks(tmp_path):
     assert re.fullmatch(r".+ 808 \(synth\) [0-9a-f]{8}\.wav", t808["instrument"]["sample"])
     assert t808["settings"]["Transpose"] == 36.0 and t808["clips"][0]["notes"]
     pad = drums["instrument"]["drum_rack"]["38"]
-    assert pad["sample"] == "snare.wav" and pad["settings"]["Transpose"] == -1.0
+    assert re.fullmatch(r"snare [0-9a-f]{8}\.wav", pad["sample"]) and pad["settings"]["Transpose"] == -1.0
     assert len(drums["clips"][0]["notes"]) == 16
     ref = spec["REF drums"]
     assert ref["kind"] == "audio" and ref["mute"] and ref["audio_clips"][0]["warping"] is False
@@ -327,30 +417,79 @@ def test_build_spec_sends_the_808s_detune_and_glide(tmp_path):
     plan = make_plan(analysis, matches, synth, tmp_path)
     plan["tracks"]["808"]["detune_cents"] = -12
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
-    assert t808["settings"] == {"Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0, "Vol < Vel": 0.35}
-    assert t808["voices"] is None
+    assert {k: t808["settings"][k] for k in ("Volume", "Transpose", "Detune", "Vol < Vel")} == {
+        "Volume": "0.0 dB", "Transpose": 36.0, "Detune": -12.0, "Vol < Vel": 0.35}
+    assert "Glide Mode" not in t808["settings"] and t808["voices"] is None
     plan["tracks"]["808"].update(voices=1, glide_mode="Glide", glide_time_ms=60.7)
     t808 = {t["name"]: t for t in build_spec(plan)}["808 (synth)"]
     assert (t808["settings"]["Glide Mode"], t808["settings"]["Glide Time"], t808["voices"]) == ("Glide", "60.7 ms", 1)
 
 
-def _fake_live(monkeypatch) -> list:
+def test_live_defaults_that_change_the_sound_are_turned_off(tmp_path):
+    """Simpler's Snap, on by default, ends a sample 10-30 ms before its file
+    does, and the 808 Simpler's filter, on at 22 kHz and following the key,
+    delayed its low notes by up to 0.46 ms and cut their upper harmonics in
+    the live check: Snap goes off on every pad and on the 808, and the
+    808's filter off, so Live plays the files as render.py does."""
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    spec = {t["name"]: t for t in build_spec(make_plan(analysis, matches, synth, tmp_path))}
+    assert (spec["808 (synth)"]["settings"]["Snap"], spec["808 (synth)"]["settings"]["F On"]) == ("Off", "Off")
+    assert [p["settings"]["Snap"] for p in spec["Drums (library)"]["instrument"]["drum_rack"].values()] == ["Off"]
+
+
+def test_an_808_note_live_restarts_late_is_planned_1_ms_early(tmp_path):
+    """Live starts an 808 note 1 ms late where the voice of the note before
+    at its pitch is still in its release (render.late_808): the plan starts
+    it 1 ms early, so that played as Live plays it each note attacks where
+    the analysis heard it. The build sends the release
+    render.py plays: Live's default Ve Release, 50 ms."""
+    from refdissect import evaluate
+    from refdissect.live import build_spec
+    analysis, matches, synth = _fixture(tmp_path)
+    analysis["notes_808"] = [{"t": 0.1, "t_attack": 0.1, "end": 0.5, "pitch": 24, "peak": 1.0},
+                             {"t": 0.5, "t_attack": 0.5, "end": 1.0, "pitch": 24, "peak": 1.0},
+                             {"t": 1.0, "t_attack": 1.0, "end": 1.5, "pitch": 26, "peak": 1.0}]
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    est = evaluate.estimate_from_plan(plan, root=tmp_path)["bass808"]
+    assert [n["flags"] for n in est] == [[], ["retrigger"], []]
+    assert np.max(np.abs(np.array([n["t_attack"] for n in est]) - [0.1, 0.5, 1.0])) < 1e-4
+    assert {t["name"]: t for t in build_spec(plan)}["808 (synth)"]["settings"]["Ve Release"] == "50.0 ms"
+
+
+def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
     """ableton-live-mcp faked for build: an empty set, build_tracks building
-    every track it is sent; returns the list of (tool, arguments) calls."""
+    every track it is sent, each Simpler holding the User Library copy its
+    spec names (held: another file, by pad note or "808"); answers: a tool's
+    own answer, answers[name](args, calls), which may raise as the server
+    does. Returns the list of (tool, arguments) calls."""
     import json
     import sys
     import types
 
     calls = []
 
+    def holds(path: str) -> str | None:
+        spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
+        pad = re.search(r"drum_pads (\d+)", path)
+        key = pad.group(1) if pad else "808"
+        sample = (spec["Drums (library)"]["instrument"]["drum_rack"][key] if pad
+                  else spec["808 (synth)"]["instrument"])["sample"]
+        copy = Path(library) / "Samples" / "AbletonMCP Generated" / sample if library else None
+        return (held or {}).get(key) or (str(copy) if copy else None)
+
     async def call_tool(name, args):
         calls.append((name, args))
-        if name == "get_session_overview":
+        if name in (answers or {}):
+            text = answers[name](args, calls)
+        elif name == "get_session_overview":
             built = any(c[0] == "build_tracks" for c in calls)
             tracks = [{"name": "Drums (library)", "index": 0}, {"name": "808 (synth)", "index": 1}] if built else []
             text = json.dumps({"tracks": tracks})
         elif name == "build_tracks":
             text = json.dumps({"tracks": [{"track": t["name"], "problems": []} for t in args["tracks"]]})
+        elif name == "lom_get_object":
+            text = json.dumps({"file_path": holds(args["path"])})
         else:
             text = "{}"
         return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)], is_error=False)
@@ -358,7 +497,7 @@ def _fake_live(monkeypatch) -> list:
     server = types.ModuleType("MCP_Server.server")
     server.mcp = types.SimpleNamespace(call_tool=call_tool)
     tools = types.ModuleType("MCP_Server.extended_tools")
-    tools.place_locators = lambda cues: [{"name": n} for n, _ in cues]
+    tools.place_locators = lambda cues: [{"name": n, "time": t} for n, t in cues]  # as 2.2.0 answers
     package = types.ModuleType("MCP_Server")
     package.extended_tools, package.server = tools, server
     for name, module in (("MCP_Server", package), ("MCP_Server.server", server),
@@ -404,6 +543,78 @@ def test_the_808_one_shot_is_named_by_its_content(tmp_path, monkeypatch):
     sf.write(synth["file"], np.sin(2 * np.pi * 36.7 * np.arange(SR) / SR) * 0.9, SR)  # fit-808 ran again
     assert make_plan(analysis, matches, synth, tmp_path)["tracks"]["808"]["sample"] != first
     with pytest.raises(RuntimeError, match="plan again"):
+        asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+
+
+def test_each_pad_loads_its_own_file_by_its_content(tmp_path, monkeypatch):
+    """build_tracks loads a pad through Live's browser by file name, and the
+    browser holds other files of a pad's name (the live check: an 808 on
+    v1orig-3's open-hat pad): each pad's file goes into the User Library
+    under its name and its content's digest, the spec loads that copy, and
+    the build reads back the file every Simpler holds and names a pad that
+    holds another."""
+    import asyncio
+
+    from refdissect.live import build, build_spec, one_shot_digest
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+    snare = plan["tracks"]["drums"]["pads"]["38"]["path"]
+    pad = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]["38"]
+    assert pad["sample"] == f"snare {one_shot_digest(snare)}.wav"
+    lib = tmp_path / "lib"
+    _fake_live(monkeypatch, lib)
+    report = asyncio.run(build(plan, user_library=lib, log=lambda s: None))
+    assert (lib / "Samples" / "AbletonMCP Generated" / pad["sample"]).read_bytes() == Path(snare).read_bytes()
+    assert report["samples_checked"] == 2 and "wrong_samples" not in report  # the pad and the 808
+    other = tmp_path / "kit" / "snare.wav"  # another file of the pad's name, as the browser found one
+    other.parent.mkdir()
+    sf.write(other, np.random.default_rng(5).standard_normal(SR // 8) * 0.5, SR)
+    _fake_live(monkeypatch, lib, held={"38": str(other)})
+    logged = []
+    report = asyncio.run(build(plan, user_library=lib, log=logged.append))
+    assert list(report["wrong_samples"]) == ["38"] and report["wrong_samples"]["38"]["live"] == str(other)
+    assert any(line.startswith(f"pad 38 holds {other}") for line in logged)
+
+
+def test_a_build_that_stops_says_where_and_what_it_left(tmp_path, monkeypatch):
+    """In the live check build_tracks raised at a pad whose file Live's
+    browser did not list, after the 808 track and an empty Drum Rack were
+    made, and only the error was said: the build names the pad, its file
+    and the tracks it left. A connection Live refuses says that its Remote
+    Script serves at most 8 clients."""
+    import asyncio
+    import json
+
+    from refdissect.live import build
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path)
+
+    def stop(args, calls):
+        name = next(t for t in args["tracks"] if t["name"] == "Drums (library)")["instrument"]["drum_rack"]["38"]
+        raise RuntimeError(f"Live's browser does not list {name['sample']!r}")
+
+    def overview(args, calls):
+        made = [{"name": "808 (synth)", "index": 4, "devices": ["Simpler"]},
+                {"name": "5-MIDI", "index": 5, "devices": ["Drum Rack"]}]
+        before = [{"name": f"{k}-MIDI", "index": k - 1, "devices": [], "session_clips": [], "arrangement_clip_count": 0}
+                  for k in range(1, 5)]  # the set's own empty tracks stay
+        return json.dumps({"tracks": before + (made if any(c[0] == "build_tracks" for c in calls) else [])})
+
+    logged = []
+    _fake_live(monkeypatch, tmp_path / "lib", answers={"build_tracks": stop, "get_session_overview": overview})
+    with pytest.raises(RuntimeError) as e:
+        asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
+    said = str(e.value)
+    assert "pad 38" in said and plan["tracks"]["drums"]["pads"]["38"]["path"] in said
+    assert "'808 (synth)' (Simpler), '5-MIDI' (Drum Rack)" in said and "1-MIDI" not in said
+    assert json.loads(logged[0])["tracks_made"][1]["devices"] == ["Drum Rack"]
+
+    def reset(args, calls):  # the 2.2.0 server's words, with 8 other clients connected
+        raise RuntimeError("Could not connect to Ableton Live. Is Live open, with AbletonMCP chosen as a Control "
+                           "Surface? ([Errno 54] Connection reset by peer)")
+
+    _fake_live(monkeypatch, answers={"get_session_overview": reset})
+    with pytest.raises(RuntimeError, match="serves at most 8 clients"):
         asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
 
 

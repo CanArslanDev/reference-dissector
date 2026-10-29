@@ -19,31 +19,36 @@ check:
   Simpler's "Vol < Vel" (VOL_VEL); "linear", v/127, was the assumption
   before the law was measured];
 - pads are One-Shot [playback_mode "one_shot"]: a note's length does not cut
-  the file; "classic" cuts it at the note end. Hits of one pad overlap and sum
-  unless mono=True: whether Live's One-Shot retrigger cuts the previous hit is
-  not measured;
+  the file; "classic" cuts it at the note end. A pad plays one voice [mono
+  True]: a hit that starts while the pad's hit before still plays (its file
+  to the last frame, Snap off) cuts that one with a 1 ms linear fade from
+  its note and starts RETRIGGER_S late, as Live 12.4.6 played 391 such hits
+  (late_starts); mono=False sums them;
 - pads with the same choke_group [None] cut each other: a hit fades out the
   sounding hits of the group's other pads;
 - the 808 Simpler plays its one-shot per note, transposed by
   (pitch - 60) + transpose + detune_cents / 100 semitones (Simpler plays a
   sample at its own pitch on C3; with live.tune_808's Transpose and Detune
-  a note sounds at its pitch plus the 808's tuning) and cut at the note end
-  (Classic mode, cut_808=True);
+  a note sounds at its pitch plus the 808's tuning) and released at the
+  note end as Live's 808 Simpler releases at Ve Release RELEASE_808_MS,
+  which the build sends (Classic mode, cut_808=True; _release). A note
+  that comes while the voice of a note of its pitch still sounds restarts
+  it as a pad's hit does (late_808);
 - with Glide on (the track's voices 1, glide_mode "Glide", glide_time_ms),
   a note that starts while the one before is held does not start the
   one-shot again: the voice slides to the new pitch, linearly in semitones
   over glide_time_ms, and stops at the last note's end (chains_808; measured
   in Live 12.4.6 on a 1 kHz sine: overlapping notes only, exactly the Glide
   Time, for 2 to 12 semitones);
-- every cut is a fade_ms [5 ms] linear release that starts at the cut;
+- a pad cut by its note's end (Classic) or its choke group fades out along
+  a straight line over fade_ms [5 ms] from the cut;
 - no effects; the reference stems Live plays beside these are the
   reference's own and are not rendered.
 
 live.estimate_levels makes the same assumptions for its level estimate
-(velocity_db, One-Shot pads, the 808 per note cut at its end) except two
-that leave an RMS over a whole track as it is: it trims each pad's lead-in,
-which Live plays (it moves a hit, not its level), and cuts the 808 without a
-fade.
+(velocity_db, One-Shot pads of one voice, the 808 per note released at its
+end) except one that leaves an RMS over a whole track as it is: it trims
+each pad's lead-in, which Live plays (it moves a hit, not its level).
 """
 
 from __future__ import annotations
@@ -65,6 +70,17 @@ PAD = {"start_s": 0.0, "detune_cents": 0.0, "playback_mode": "one_shot", "choke_
        "velocity_curve": None, "vol_vel": VOL_VEL}
 TRACK_808 = {"cents": 0.0, "detune_cents": 0.0, "start_s": 0.0, "volume_db": 0.0, "playback_mode": "classic",
              "velocity_curve": None, "vol_vel": VOL_VEL}
+# A note that comes while a voice of its pitch still sounds (a pad's hit before it) fades that voice out along a
+# straight line over RETRIGGER_S from the note and starts RETRIGGER_S late: in the live check (Live 12.4.6,
+# 2026-10-29; 48 kHz captures of 8 suite plans and PIRAMIT's) 391 such hits on 18 pads started 1.000 ms late
+# (median; 98 % within 0.95-1.05 ms, read on a 1/32 ms grid), the hit before gone in that ms, and 13 hits within
+# their pad's file but after Snap had ended its voice started on time
+RETRIGGER_S = 0.001
+# The 808 Simpler's release, Live's default Ve Release (live.simpler_808 sends it): in the live check (probe A,
+# four isolated notes) the voice fell 1.683 dB a ms from its note's end, a straight line in dB within 0.5 dB, and
+# stopped where it reached -60 dB, RELEASE_S on (35.7 ms)
+RELEASE_808_MS, RELEASE_DB_MS = 50.0, 1.683
+RELEASE_S = 60.0 / RELEASE_DB_MS / 1000
 
 
 def resolve(path: str | Path, root: str | Path | None = None) -> Path:
@@ -159,6 +175,18 @@ def as_played(x: np.ndarray, start_s: float, semitones: float) -> np.ndarray:
     return transpose(x[int(round(start_s * SR)):], semitones)
 
 
+def late_starts(times, ends, shift: bool = True) -> np.ndarray:
+    """Which of one voice's notes (in time order: their times, and where
+    each one's sound ends when it starts on time, s) Live starts
+    RETRIGGER_S late: those that come before the sound of the note before
+    has ended. With shift, a note that starts late ends that much later
+    too (a One-Shot pad plays its whole file from where it starts)."""
+    late = np.zeros(len(times), bool)
+    for k in range(1, len(times)):
+        late[k] = times[k] < ends[k - 1] + RETRIGGER_S * (shift and late[k - 1])
+    return late
+
+
 def velocity_db(velocity: float, vol_vel: float = VOL_VEL) -> float:
     """A velocity's level over Simpler's Volume (dB), as Live 12.4.6 plays
     it: 0.4 x vol_vel ("Vol < Vel", 0..1) x (velocity - 70) - 0.096.
@@ -190,6 +218,37 @@ def fader_db(plan: dict, track: str) -> float:
     return round(min(6.0, levels.get(f"{track}_track_db", -levels.get("headroom_db", 0.0))), 1)
 
 
+def _release(x: np.ndarray, length: int) -> np.ndarray:
+    """x held `length` samples, then released as Live's 808 Simpler releases
+    at Ve Release RELEASE_808_MS: falling RELEASE_DB_MS a ms from there,
+    silent RELEASE_S on (x itself when it ends first)."""
+    if length >= len(x):
+        return x
+    y = x[: length + int(round(RELEASE_S * SR))].copy()
+    y[length:] *= (10 ** (-RELEASE_DB_MS * 1000 / SR / 20)) ** np.arange(len(y) - length)
+    return y
+
+
+def late_808(notes: list[dict], bps: float, played_s) -> np.ndarray:
+    """Which of the 808's notes (in time order) Live starts RETRIGGER_S late,
+    as it does a pad's hit (late_starts): those that come while the voice of
+    the note before at their pitch still sounds, until RELEASE_S past that
+    note's end or the end of the one-shot as played at that pitch
+    (played_s(pitch), s), whichever comes first. In the live check the
+    808's notes after a note of their pitch started 0.94 to 1.05 ms after
+    the other notes of their pitch, whose own delay was the filter's
+    (simpler_808 now turns it off)."""
+    late = np.zeros(len(notes), bool)
+    by_pitch: dict[int, list[int]] = {}
+    for k, nt in enumerate(notes):
+        by_pitch.setdefault(nt["pitch"], []).append(k)
+    for pitch, ks in by_pitch.items():
+        t = np.array([notes[k]["start_time"] / bps for k in ks])
+        end = np.array([(notes[k]["start_time"] + notes[k]["duration"]) / bps for k in ks])
+        late[ks] = late_starts(t, np.minimum(end + RELEASE_S, t + played_s(pitch)), shift=False)
+    return late
+
+
 def _cut(x: np.ndarray, length: int, fade: int) -> np.ndarray:
     """x stopped `length` samples in, with a linear release of `fade` samples
     after that (x itself when it ends first)."""
@@ -206,20 +265,20 @@ def _place(track: np.ndarray, x: np.ndarray, a: int, gain: float) -> None:
         track[a:b] += gain * x[: b - a]
 
 
-def _stops(hits: list[dict], group_of: dict, mono: bool) -> None:
+def _chokes(hits: list[dict], group_of: dict) -> None:
     """Shorten each hit's stop to the first later hit that cuts it: one of
-    another pad in its choke group, or (mono) one of its own pad."""
+    another pad in its choke group (with the render's fade)."""
     hits.sort(key=lambda h: h["a"])
     for k, h in enumerate(hits):
         group = group_of.get(h["pad"])
-        for j in range(k + 1, len(hits)):
-            g = hits[j]
+        if group is None:
+            continue
+        for g in hits[k + 1:]:
             if g["a"] >= h["stop"]:
                 break
-            same = g["pad"] == h["pad"]
-            if g["a"] > h["a"] and ((mono and same) or (not same and group is not None
-                                                         and group_of.get(g["pad"]) == group)):
+            if g["pad"] != h["pad"] and g["a"] > h["a"] and group_of.get(g["pad"]) == group:
                 h["stop"] = g["a"]
+                h.pop("fade", None)
                 break
 
 
@@ -228,31 +287,67 @@ def _write(path: Path, x: np.ndarray) -> None:
     sf.write(str(path), x.astype(np.float32), SR, subtype="FLOAT")
 
 
-def _drum_hits(plan: dict, shots: dict, settings: dict, velocity_curve, faders: bool) -> list[dict]:
+def pad_hits(plan: dict, shots: dict, settings: dict, velocity_curve="live", faders: bool = True,
+             mono: bool = True) -> list[dict]:
+    """The plan's drum hits on the pads with a sample in shots (each as
+    played, settings[key] its pad_settings), as Live plays them: per hit its
+    pad, t (s) and a (sample) where its sample starts, stop (sample) and
+    gain (the drum fader with faders, the pad's Volume, the velocity's
+    level). mono: one voice per pad (late_starts), a hit that comes while
+    the pad's hit before plays cutting that one at its note (its fade
+    RETRIGGER_S long) and starting RETRIGGER_S late. Choke groups cut
+    across pads after that (_chokes)."""
     bps = plan["tempo"] / 60
     g_track = 10 ** ((fader_db(plan, "drums") if faders else 0.0) / 20)
-    hits = []
+    late_n = int(round(RETRIGGER_S * SR))
+    by_pad: dict[str, list[dict]] = {}
     for n in plan["tracks"]["drums"]["notes"]:
-        key = str(n["pitch"])
-        if key not in shots:
-            continue
-        s, a = settings[key], int(round(n["start_time"] / bps * SR))
-        stop = a + len(shots[key])
+        if str(n["pitch"]) in shots:
+            by_pad.setdefault(str(n["pitch"]), []).append(n)
+    hits = []
+    for key, notes in by_pad.items():
+        notes = sorted(notes, key=lambda n: n["start_time"])
+        s, length = settings[key], len(shots[key])
+        t = np.array([n["start_time"] / bps for n in notes])
+        ends = t + length / SR
         if s["playback_mode"] == "classic":
-            stop = min(stop, a + int(round(n["duration"] / bps * SR)))
-        curve = s["velocity_curve"] or velocity_curve
-        hits.append({"pad": key, "a": a, "stop": stop,
-                     "gain": g_track * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve, s["vol_vel"])})
+            ends = np.minimum(ends, t + np.array([n["duration"] / bps for n in notes]))
+        late = late_starts(t, ends) if mono else np.zeros(len(t), bool)
+        for k, n in enumerate(notes):
+            on = int(round(t[k] * SR))  # the note
+            if late[k]:  # the pad's hit before, appended last, fades out from this note
+                hits[-1]["stop"], hits[-1]["fade"] = on, late_n
+            a = on + late_n * int(late[k])
+            stop = a + length
+            if s["playback_mode"] == "classic":
+                stop = min(stop, on + int(round(n["duration"] / bps * SR)))
+            curve = s["velocity_curve"] or velocity_curve
+            hits.append({"pad": key, "t": float(t[k]) + RETRIGGER_S * int(late[k]), "a": a, "stop": stop,
+                         "late": bool(late[k]), "velocity": int(n["velocity"]),
+                         "gain": g_track * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve,
+                                                                                         s["vol_vel"])})
+    _chokes(hits, {k: s["choke_group"] for k, s in settings.items()})
     return hits
 
 
+def pad_track(shot: np.ndarray, hits: list[dict], n: int, fade: int = 0) -> np.ndarray:
+    """One pad's hits (pad_hits) of shot, n samples, each cut at its stop
+    with its own fade or `fade` samples."""
+    x = np.zeros(n, np.float32)
+    for h in hits:
+        _place(x, _cut(shot, h["stop"] - h["a"], h.get("fade", fade)), h["a"], h["gain"])
+    return x
+
+
 def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable = "live",
-                root: str | Path | None = None, fade_ms: float = 5.0, cut_808: bool = True, mono: bool = False,
+                root: str | Path | None = None, fade_ms: float = 5.0, cut_808: bool = True, mono: bool = True,
                 faders: bool = True, n_samples: int | None = None) -> dict:
     """pads/<note>.wav, drums.wav (their sum) and 808.wav in out_dir, and
     render.json naming them with the settings used (also returned). A pad's
     own velocity_curve field overrides the argument. A file that cannot be
-    read plays nothing, as in Live, and is listed under "missing"."""
+    read plays nothing, as in Live, and is listed under "missing". mono:
+    each pad one voice, as Live plays it (pad_hits); False sums a pad's
+    hits. The 808's notes end in Live's release (render_808)."""
     out = Path(out_dir)
     bps = plan["tempo"] / 60
     fade = samples(fade_ms)
@@ -264,23 +359,20 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
                                          s["transpose"] + s["detune_cents"] / 100)
         except (OSError, RuntimeError):
             missing.append(str(pad["path"]))
-    hits = _drum_hits(plan, shots, settings, velocity_curve, faders)
-    _stops(hits, {k: s["choke_group"] for k, s in settings.items()}, mono)
+    hits = pad_hits(plan, shots, settings, velocity_curve, faders, mono)
     t808 = plan["tracks"].get("808") or {}
     notes808 = (t808.get("notes") or []) if "sample_path" in t808 else []
-    ends = [h["stop"] + fade for h in hits] + [int(round((n["start_time"] + n["duration"]) / bps * SR)) + fade
+    tail = int(round(RELEASE_S * SR))
+    ends = [h["stop"] + fade for h in hits] + [int(round((n["start_time"] + n["duration"]) / bps * SR)) + tail
                                               for n in notes808]
     n = n_samples or max([int(round(plan.get("length_beats", 0) / bps * SR)), *ends, 1])
     manifest = {"sr": SR, "n_samples": n, "tempo": plan["tempo"], "velocity_curve": str(velocity_curve),
-                "fade_ms": fade_ms, "mono": mono, "cut_808": cut_808,
+                "fade_ms": fade_ms, "mono": mono, "cut_808": cut_808, "release_808_ms": RELEASE_808_MS,
                 "faders_db": {"drums": fader_db(plan, "drums") if faders else 0.0}, "tracks": {},
                 "drums": "drums.wav", "missing": missing}
     total = np.zeros(n, np.float32)
     for key in shots:
-        x = np.zeros(n, np.float32)
-        for h in hits:
-            if h["pad"] == key:
-                _place(x, _cut(shots[key], h["stop"] - h["a"], fade), h["a"], h["gain"])
+        x = pad_track(shots[key], [h for h in hits if h["pad"] == key], n, fade)
         _write(out / "pads" / f"{key}.wav", x)
         manifest["tracks"][key] = f"pads/{key}.wav"
         total += x
@@ -292,31 +384,55 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
         except (OSError, RuntimeError):
             missing.append(str(t808["sample_path"]))
         else:
-            _write(out / "808.wav", render_808(t808, shot, n, bps, fade, cut_808,
+            _write(out / "808.wav", render_808(t808, shot, n, bps, None, cut_808,
                                                 10 ** (manifest["faders_db"]["808"] / 20), velocity_curve))
             manifest["tracks"]["808"] = "808.wav"
     (out / "render.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
 
 
-def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int, cut: bool, gain: float,
+def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | None, cut: bool, gain: float,
                velocity_curve: str | Callable) -> np.ndarray:
-    """The 808 track (n samples, at `gain`): one voice per chain (chains_808), each
-    cut `fade` samples after its last note's end when cut."""
+    """The 808 track (n samples, at `gain`): one voice per chain (chains_808),
+    each stopped at its last note's end when cut: released as Live's 808
+    Simpler releases (_release) with fade None, else faded out along a
+    straight line over `fade` samples. Without Glide (one voice: not
+    measured), a note that comes while the voice of the note before at its
+    pitch still sounds (late_808) fades that voice out over RETRIGGER_S
+    from its note and starts RETRIGGER_S late, as a pad's hit does."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)
     cache: dict[float, np.ndarray] = {}
+
+    def played(pitch: int) -> np.ndarray:
+        shift = pitch_808(s, pitch)[0]
+        if shift not in cache:
+            cache[shift] = as_played(shot, s["start_s"], shift)
+        return cache[shift]
+
     g = gain * 10 ** (s["volume_db"] / 20)
-    for chain in chains_808(track):
+    chains, late_n = chains_808(track), int(round(RETRIGGER_S * SR))
+    firsts = [chain[0] for chain in chains]
+    late = (late_808(firsts, bps, lambda p: len(played(p)) / SR) if cut and not glide_s(track)
+            else np.zeros(len(chains), bool))
+    faded: dict[int, int] = {}  # a voice, and the note at its pitch that fades it out (its sample)
+    last: dict[int, int] = {}
+    for k, nt in enumerate(firsts):
+        if late[k]:
+            faded[last[nt["pitch"]]] = int(round(nt["start_time"] / bps * SR))
+        last[nt["pitch"]] = k
+    for k, chain in enumerate(chains):
         first = chain[0]
         if len(chain) == 1:
-            shift, _ = pitch_808(s, first["pitch"])
-            if shift not in cache:
-                cache[shift] = as_played(shot, s["start_s"], shift)
-            x = cache[shift]
+            x = played(first["pitch"])
         else:  # the voice slides on: one sample read at the chain's rates, the first note's velocity
             x = varispeed(shot[int(round(s["start_s"] * SR)):], chain_semitones(chain, s, bps, glide_s(track)))
-        length = int(round((chain[-1]["start_time"] + chain[-1]["duration"] - first["start_time"]) / bps * SR))
-        _place(out, _cut(x, length, fade) if cut else x, int(round(first["start_time"] / bps * SR)),
-               g * velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve, s["vol_vel"]))
+        on = int(round(first["start_time"] / bps * SR))
+        a = on + late_n * int(late[k])  # held from there to its note's end
+        length = int(round((chain[-1]["start_time"] + chain[-1]["duration"]) / bps * SR)) - a
+        if cut:
+            x = _release(x, length) if fade is None else _cut(x, length, fade)
+        if k in faded:
+            x = _cut(x, faded[k] - a, late_n)
+        _place(out, x, a, g * velocity_gain(first["velocity"], s["velocity_curve"] or velocity_curve, s["vol_vel"]))
     return out
