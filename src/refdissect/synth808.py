@@ -14,13 +14,16 @@ gets the highest correlation and loses the distortion entirely (harmonics
 
 from __future__ import annotations
 
+import functools
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import differential_evolution
 
 from .audio import PRE, SR, band, samples
+from .cache import keep, kept, key
 from .describe import envelope_db, harmonics, mel_distance
 from .xcorr import ncc
 
@@ -51,12 +54,21 @@ class Params:
         return float(12 * np.log2(self.f_start_hz / self.f_end_hz))
 
 
+@functools.lru_cache(maxsize=8)
+def _times(n: int) -> np.ndarray:
+    """The sample times of n samples (s), made once per length (read-only):
+    the fit's every candidate is as long."""
+    t = np.arange(n) / SR
+    t.setflags(write=False)
+    return t
+
+
 def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarray:
     """The voice, peak-normalized; pitch_hz moves the whole pitch curve (the
     drop keeps its size in semitones)."""
     n = int(seconds * SR)
     ratio = (pitch_hz / p.f_end_hz) if pitch_hz else 1.0
-    t = np.arange(n) / SR
+    t = _times(n)
     f = (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * ratio
     phi = p.phase + 2 * np.pi * np.cumsum(f) / SR
     amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)
@@ -84,10 +96,29 @@ def compare(reference: np.ndarray, x: np.ndarray, f1: float) -> dict:
             "mel_db": mel_distance(band(reference, "808"), band(x, "808"))}
 
 
+def _read_back(path: Path | None, log) -> tuple[Params, dict] | None:
+    """The fit kept at path (cache.kept), with info cached naming its file."""
+    found = kept(path, log)
+    try:
+        return Params.of(found["x"]), {"loss": found["loss"], "seconds": found["seconds"], "cached": path.name}
+    except (KeyError, TypeError, ValueError):  # nothing kept (None), or not a fit
+        return None
+
+
 def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int = 1,
-        maxiter: int = 150, popsize: int = 20) -> tuple[Params, dict]:
+        maxiter: int = 150, popsize: int = 20, cache: str | Path | None = None, log=print) -> tuple[Params, dict]:
     """Params whose voice matches the reference template (an averaged 808
-    note laid out with its onset PRE in), and how long the search took."""
+    note laid out with its onset PRE in), and how long the search took.
+    With a cache folder, a fit is kept there under the template's samples,
+    f1, the settings, the versions and the package's code (cache.key) and
+    read back by a fit that has the same ones (info's cached names the file;
+    seconds is the search's). The search is seeded, so it would find the
+    same Params again: 50-140 s a suite beat, and a few ms read back. log
+    gets what the cache says (code changed on disk: not read back or kept)."""
+    settings = {"f1": float(f1), "waveform_only": waveform_only, "seed": seed, "maxiter": maxiter, "popsize": popsize}
+    path = Path(cache) / f"fit-808-{key((reference,), settings)}.json" if cache else None
+    if found := _read_back(path, log):
+        return found
     target = band(reference, "808")
     h_ref = harmonics(reference, f1)
     e_ref = np.maximum(envelope_db(reference, 25), -40)
@@ -119,7 +150,9 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
     r = differential_evolution(loss, bounds, popsize=popsize, maxiter=maxiter, tol=1e-7, seed=seed,
                                polish=True)
     p = Params.of(r.x)
-    return p, {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
+    info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
+    keep(path, {"x": [float(v) for v in r.x], **info}, log)
+    return p, info
 
 
 def one_shot(p: Params, pitch_hz: float, seconds: float = 3.0, fade_ms: float = 10) -> np.ndarray:

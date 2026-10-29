@@ -88,3 +88,46 @@ def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypat
     assert set(grid["swing"]) == {"ratio_16", "ratio_8", "evidence"}
     # discover() groups onsets by their place in the beat, so a phase on the attacks finds the same hits
     assert {k: len(v) for k, v in a["events"].items()} == {k: len(v) for k, v in stems["old_events"].items()}
+
+
+def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_path, monkeypatch):
+    """pipeline._transcribe keeps bass808.transcribe's result by the two
+    stems' samples and the package's code, and reads it back with its log
+    lines, through JSON either way, saying where from (a read-back left no
+    trace in the log); other stems, or no cache, read again."""
+    from refdissect import pipeline
+
+    calls = []
+
+    def reader(bass, drums, log=None):
+        calls.append(1)
+        log("  808 template from drums onsets: 9 notes")
+        return {"template": {"hz": np.float64(32.7), "root_midi": 24}, "notes": [{"t": np.float32(0.5), "pitch": 24}]}
+    monkeypatch.setattr(pipeline.bass808, "transcribe", reader)
+    bass, drums = np.ones(100, np.float32), np.zeros(100, np.float32)
+    first, again = [], []
+    out, read_back = pipeline._transcribe(bass, drums, tmp_path, first.append)
+    path = next(tmp_path.glob("808-*.json"))
+    assert read_back is None and pipeline._transcribe(bass, drums, tmp_path, again.append) == (out, str(path))
+    assert again == [f"808 reader: read back from {path}; its log when it ran:", *first] and len(calls) == 1
+    assert out["notes"][0]["t"] == 0.5 and isinstance(out["template"]["hz"], float)
+    pipeline._transcribe(bass * 2, drums, tmp_path, lambda m: None)
+    pipeline._transcribe(bass, drums, None, lambda m: None)
+    assert len(calls) == 3
+
+
+def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems, tmp_path, monkeypatch):
+    """By default analyze keeps nothing: a script that patches a module and
+    runs it must not read back what the unpatched code found (the cache sees
+    the files, not the code in memory). Given a folder, a run that reads the
+    808 reader's result back says so in source.cached, and is otherwise the
+    run that kept it."""
+    monkeypatch.setattr(beats, "track", lambda *a, **kw: pytest.fail("the tracker ran"))
+    plain = pipeline.analyze(stems["dir"], tmp_path / "plain", log=lambda *_: None, tracker=False)
+    assert sorted(p.name for p in (tmp_path / "plain").iterdir()) == ["analysis.json", "bass808.json", "templates"]
+    kept = tmp_path / "kept"
+    first, again = (pipeline.analyze(stems["dir"], tmp_path / w, log=lambda *_: None, tracker=False, cache=kept)
+                    for w in ("first", "again"))
+    assert "cached" not in plain["source"] and "cached" not in first["source"]
+    assert again["source"].pop("cached") == {"808_reader": str(next(kept.glob("808-*.json")))}
+    assert again == first == plain

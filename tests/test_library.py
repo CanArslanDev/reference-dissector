@@ -167,3 +167,42 @@ def test_two_kicks_at_one_pitch_are_two_sounds():
     assert not copies(*played, pitched=True) and not kicks.same(0, 1, length, semitones=(0.0, -2.0))
     ranked = [{"i": 1, "semitones": -2.0}, {"i": 0, "semitones": 0.0}]
     assert [r["i"] for r in kicks.distinct(ranked, length)] == [1, 0]
+
+
+def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
+    """prepare(): the windows of a band searched together get the rankings
+    each gets alone (the same numbers), the library laid out once per band
+    and block of entries, not once per window."""
+    lib, sounds = noisy
+    snares = [placed(sounds[k], d, 150) for k, d in ((30, 0.0), (33, -1.0), (31, 0.4))]
+    kicks = [placed(sounds[k], d, 200) for k, d in ((120, 0.0), (121, -2.0))]
+    alone = [lib.match_fine(t, "snare", semitones=range(-3, 4), union=10, top=10) for t in snares]
+    alone += [lib.match(t, "kick", semitones=range(-4, 5), top=10) for t in kicks]
+    blocks = []
+    block = lib.block
+    monkeypatch.setattr(lib, "block", lambda rows, length, semitones=0.0: blocks.append(length) or
+                        block(rows, length, semitones))
+    lib.prepare({"snare": snares, "kick": kicks})
+    together = [lib.match_fine(t, "snare", semitones=range(-3, 4), union=10, top=10) for t in snares]
+    together += [lib.match(t, "kick", semitones=range(-4, 5), top=10) for t in kicks]
+    assert together == alone and sorted(blocks) == [samples(150), samples(200)]
+    lib.forget()
+    lib.match(kicks[0], "kick", top=10)
+    assert len(blocks) == 3  # forgotten: searched again
+
+
+def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monkeypatch):
+    """Library.candidate resamples only the start of an entry a transposed
+    window holds (and TRANSPOSE_MARGIN more): the samples are the same as
+    from the whole entry."""
+    from refdissect import library
+
+    lib, _ = noisy
+    read = []
+    monkeypatch.setattr(library, "transpose", lambda x, st: read.append(len(x)) or transpose(x, st))
+    for i in (0, 30, 61, 121):
+        for st in (-4, -1.5, 0.0025, 1, 3.7):
+            whole = fit(np.r_[np.zeros(samples(3), np.float32), transpose(lib.audio[i].astype(np.float32), st)],
+                        samples(80))
+            assert np.array_equal(lib.candidate(i, samples(80), st), whole)
+    assert max(read) < lib.audio.shape[1]

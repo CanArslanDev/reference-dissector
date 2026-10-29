@@ -419,3 +419,25 @@ def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path, monk
     assert len(plan["tracks"]["808"]["notes"]) == 2
     heard = estimate_from_plan(plan)["bass808"]
     assert len(heard) == 1 and heard[0]["t"] == pytest.approx(0.5, abs=0.01) and np.isfinite(heard[0]["midi"])
+
+
+def test_each_start_and_transposition_is_fitted_once(monkeypatch):
+    """candidates() fits the template at a start and transposition once:
+    neighbouring semitones share fine steps (+75 cents of one is -25 of the
+    next), 21 % of the fits on a suite beat (v1-1, 65,037)."""
+    bass, drums, _ = line(BAR, cents=11.0)
+    fitted, again = set(), []
+    best_fit, candidates = B._best_fit, B.candidates
+
+    def counted(x, y, k0, *a):
+        again.append((k0, id(y)) in fitted)
+        fitted.add((k0, id(y)))
+        return best_fit(x, y, k0, *a)
+
+    def fresh(*a, **k):
+        fitted.clear()
+        return candidates(*a, **k)
+    monkeypatch.setattr(B, "_best_fit", counted)
+    monkeypatch.setattr(B, "candidates", fresh)
+    B.transcribe(bass, drums)
+    assert again and not any(again)
