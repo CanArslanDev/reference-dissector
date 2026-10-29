@@ -1247,7 +1247,7 @@
    "pitch_hz": 32.9277,
    "fit": {
     "loss": 0.1212,
-    "seconds": 49.2
+    "seconds": 42.8
    },
    "vs_reference": {
     "ncc": 0.938,
@@ -1265,6 +1265,29 @@
     "file": "user library 808 #678ce48d",
     "semitones": 0.0,
     "margin": 0.001
+   },
+   "one_shot": {
+    "vs_reference": {
+     "ncc": 0.88,
+     "harmonics_2_5_db": 6.5,
+     "harmonics_6_12_db": 12.9,
+     "envelope_db": 1.3,
+     "mel_db": 19.29
+    },
+    "pitch_track": {
+     "periods": 49,
+     "pooled": 0,
+     "followed": 9,
+     "until_s": 0.2689,
+     "settled": true,
+     "curve_rms_cents": 0.024,
+     "attack_scale": 0.94,
+     "read_as_template": false,
+     "worst_ms": 0.001,
+     "start_ms": 0.0,
+     "quiet_ms": 6.7,
+     "attack_ms": 5.24
+    }
    }
   }
  },
@@ -1276,6 +1299,8 @@
     "role": "kick",
     "sample": "Core Library: Kick Doctor M.wav",
     "transpose": -3,
+    "detune_cents": 0,
+    "volume_db": -8.5,
     "ncc": 0.8475,
     "verdict": "no close match"
    },
@@ -1283,6 +1308,8 @@
     "role": "snare",
     "sample": "user library snare #d76487c9",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": -4.4,
     "ncc": 0.4664,
     "verdict": "no close match"
    },
@@ -1290,6 +1317,8 @@
     "role": "snare",
     "sample": "user library snare #9cb42e08",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": -5.3,
     "ncc": 0.9864,
     "verdict": "same family"
    },
@@ -1297,6 +1326,8 @@
     "role": "hat",
     "sample": "user library hat #78ab0c64",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": -6.8,
     "ncc": 0.9837,
     "verdict": "same family"
    },
@@ -1304,6 +1335,8 @@
     "role": "hat",
     "sample": "user library hat #c4d162c2",
     "transpose": -2,
+    "detune_cents": -1,
+    "volume_db": -10.3,
     "ncc": 0.9758,
     "verdict": "same family"
    },
@@ -1311,6 +1344,8 @@
     "role": "hat",
     "sample": "user library hat #b4cac0a0",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": -7.9,
     "ncc": 0.9468,
     "verdict": "same family"
    },
@@ -1318,6 +1353,8 @@
     "role": "perc",
     "sample": "user library perc #84280561",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": 0.0,
     "ncc": 0.9297,
     "verdict": "candidate: maybe the same sample, processed (check by ear)"
    },
@@ -1325,6 +1362,8 @@
     "role": "hat",
     "sample": "user library hat #6b0ee162",
     "transpose": 1,
+    "detune_cents": -2,
+    "volume_db": -10.1,
     "ncc": 0.925,
     "verdict": "same family"
    },
@@ -1332,6 +1371,8 @@
     "role": "snare",
     "sample": "user library snare #d0c608be",
     "transpose": 0,
+    "detune_cents": 0,
+    "volume_db": -12.1,
     "ncc": 0.8865,
     "verdict": "candidate: maybe the same sample, processed (check by ear)"
    },
@@ -1339,14 +1380,22 @@
     "role": "snare",
     "sample": "user library snare #9cb42e08",
     "transpose": -1,
+    "detune_cents": 0,
+    "volume_db": -5.3,
     "ncc": 0.9864,
     "verdict": "same family"
    }
   },
   "808_notes": 101,
+  "808": {
+   "transpose": 36,
+   "detune_cents": 1,
+   "tuning_cents": 11.8,
+   "heard_cents": 0.8
+  },
   "levels": {
    "headroom_db": 4.0,
-   "drums_track_db": -20.2,
+   "drums_track_db": -12.5,
    "808_track_db": -13.9,
    "stems_track_db": -4.0
   },

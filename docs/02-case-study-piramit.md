@@ -3,7 +3,11 @@
 A Turkish trap track (album *VERITAS II*), 2:06.
 - **Goal.** Take it apart and build a near replica in Ableton Live from a personal sample library and Live's own devices.
 - **Starting point.** The Demucs stems and a prototype whose beat tracker gave 68.18 BPM.
-- **Where the numbers come from.** The run of 2026-10-29: `analyze`, `melodic`, `match`, `fit-808` and `plan` with replica mode's code of c758437, on the same stems and with the options of the run of 2026-10-22 (the defaults); `--no-cache`, so every step was computed. Two more runs of the same code wrote the same files, value for value but for the fit's seconds. `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *2026-10-22* come from the first run with replica mode (analysis, matches and fit with the code of 9ccc759, the plan with 4f30623's). Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
+- **Where the numbers come from.** The run of 2026-10-29, on the same stems and with the options of the run of 2026-10-22 (the defaults), with `--no-cache`, so every step was computed:
+  - `analyze`, `melodic` and `match` with replica mode's code of c758437 (the suite's tag m3). Two more runs of that code wrote the same files, value for value but for the fit's seconds.
+  - `fit-808` and `plan` again with the code of 74931ce, which gives each drum pad a level of its own and makes the 808 one-shot follow its template's pitch. Between the two, the code that `analyze`, `melodic` and `match` reach changed only by a rename and by a rule for a template of digital silence, which PIRAMIT does not reach, so their files are kept. Two runs of `fit-808` and `plan` wrote the same files, value for value but for the fit's seconds.
+
+  `results/piramit/summary.json` holds its aggregates; counts per bar and the measurements on the stems come from the same run's local files. Numbers marked *m3 code* come from c758437's `fit-808` and `plan` on the same analysis. Numbers marked *2026-10-22* come from the first run with replica mode (analysis, matches and fit with the code of 9ccc759, the plan with 4f30623's). Numbers marked *before replica mode* come from the run of 2026-10-17 (42cb7d9).
 - **No truth.** Nobody has transcribed PIRAMIT by hand. Where the runs differ, this page says which one is right only where a measurement on the stems shows it; everything else is not verified.
 - **What is not here.** The song, its stems and the note-by-note transcription stay local: see [09](09-data-and-copyright.md).
 
@@ -52,7 +56,7 @@ Before replica mode the medians were within 0.4 ms of these and the p90s within 
 
 **What it is not.** It could have been a whole track sped up: 1.5 % faster would also turn 135 BPM into 137. Matching every drum sample shifted by +0.26 semitones made the matches *worse*: the snare fell from 0.86 to 0.25 and the hat from 0.90 to 0.63. The drums are at their own pitch, and so are the melodic parts.
 
-**In Live.** The 808 one-shot is rendered at the template's settled pitch, C1 + 11.8 cents (32.93 Hz). The plan plays it with Transpose +36 and Detune +2. The 2 cents are `heard_cents` (+1.6): the drop the analysis heard over the notes, less the one-shot's own. Before replica mode the one-shot sat at C1 + 33 cents (33.33 Hz) with Transpose +36, so the rebuilt 808 now settles about 19 cents lower. Melodic parts need no offset.
+**In Live.** The 808 one-shot is rendered at the template's settled pitch, C1 + 11.8 cents (32.93 Hz). The plan plays it with Transpose +36 and Detune +1. The 1 cent is `heard_cents` (+0.8): the drop the analysis heard over the notes, less the one-shot's own. With the m3 code's one-shot, whose pitch fell faster than the template's, it was +1.6 and Detune +2 ([808](#808)). Before replica mode the one-shot sat at C1 + 33 cents (33.33 Hz) with Transpose +36, so the rebuilt 808 now settles about 20 cents lower. Melodic parts need no offset.
 
 ## Drums
 
@@ -140,9 +144,9 @@ What the table says about the beat:
 | decay | 0.51 s | 0.46 s |
 | drive | 2.88 (tanh), asym −0.028 | 1.95, nearly symmetric |
 | one-shot pitch | 32.93 Hz, the template's (the fit's 33.05 Hz is 6.5 cents off it) | 33.33 Hz, the +33 cents |
-| fit | 49 s, beside another job (50 s on 2026-10-22) | 49 s |
+| fit | 43 s in two runs (49 s with the m3 code beside another job, 50 s on 2026-10-22) | 49 s |
 
-The fit is 2026-10-22's: the template and its 53 notes are the same, and so are the parameters, the loss, the comparison below and the one-shot, byte for byte.
+The fit is 2026-10-22's: the template and its 53 notes are the same, and so are the parameters, the loss and the comparison below. So was the one-shot, byte for byte, up to the m3 code; the one the plan plays now follows the template's own pitch (below).
 
 **Compared with the reference** (in brackets: before replica mode, against its own reference):
 
@@ -161,6 +165,23 @@ The two runs fit different references, so their numbers are not comparable cell 
 - Whether the one-shot now sounds like the 808 alone or like an 808 with a kick is not checked by ear. In Live the kick also plays on its own pad.
 
 See [05](05-808-synthesis.md) for why a fit on waveform alone loses the grit entirely.
+
+**The one-shot the plan plays.** Since 74931ce, `fit-808` writes the fitted voice on the template's own periods (the period-by-period pitch of the 53 notes) as long as its drop lasts: 9 of its 49 periods, to 269 ms, where it has settled; then the fitted drop. It is laid out as the template is: it attacks 5.2 ms after its start, where the template attacks 5.4 ms after its onset, so the plan starts each note at its onset. The m3 code's one-shot was the fitted voice alone at the template's settled pitch, attacking at its start.
+
+| | now | m3 code |
+|---|---|---|
+| its pitch against the template's, played attack on attack: median (max) distance over 50–100 ms | 1.5 cents (14) | 65 cents (85), sharp |
+| over 100–150 ms | 0.2 cents (0.5) | 38 cents (48), flat |
+| over 150–300 ms | 0.1 cents (1.4) | 10 cents (33) |
+| over 300–600 ms | 1.1 cents (4.4) | 1.1 cents (4.4) |
+| within 20 cents of its settled pitch from (after its onset) | 190 ms, as the template | 125 ms |
+| against the fit's reference (808 band, drums + bass): waveform NCC, log-mel distance | 0.880, 19.3 dB | 0.921, 18.9 dB |
+| harmonics 2–5 and 6–12, envelope, off by | 6.5, 12.9, 1.3 dB | 6.5, 12.9, 1.3 dB |
+
+- The table starts at 50 ms: the template's curve has no reading before 40 ms (the first needs two zero crossings).
+- The waveform matches the fit's reference less. The one-shot now follows the bass stem's 808, while the reference holds the kicks too; whether that is why is not separated, and nothing here is checked by ear.
+- **One Detune for every length.** `heard_808`'s correction per C1 note, by the note's length (6 notes of 120–250 ms, 15 of 250–600 ms, 66 longer; none shorter): +41.4, +4.8 and +1.6 cents with the m3 code; −0.1, 0.0 and +0.8 now. The track takes their median, +0.8 cents (+1.6): Detune +1 (+2). All 87 corrections lie within 8 cents of 0 (81 with the m3 code).
+- **Played as the plan plays it** (`estimate_from_plan`: each note heard as the one-shot sounds over its length), against the pitch the analysis heard, the 101 notes paired within 20 ms. By length: 2 notes under 120 ms +131 cents (+205 with the m3 code), 9 of 120–250 ms +0.3 (−40), 22 of 250–600 ms +1.3 (−2.1), 68 longer +0.4 (+0.6). 91 of 101 sound within 20 cents of the analysis (82), the median distance 1.1 cents (1.4) and the p90 19 (39). The two notes under 120 ms still read far apart; why is not checked. This compares the plan with the analysis, not with the song: nobody has transcribed it.
 
 ## Melodic parts
 
@@ -215,11 +236,11 @@ Measured on the way (Live 12.4):
   - the unmatched snare, and the kick;
   - new: the perc (8 notes, a "candidate" at 0.930), the hat's file found in the snare band (7 notes, 0.947) and the snare-like sound (8 notes, a "candidate" at 0.886);
   - the click and a second kick get no pads, as on 2026-10-22;
-- 101 808 notes at Transpose +36 and Detune +2, one per note, no Glide;
+- 101 808 notes at Transpose +36 and Detune +1 (+2 with the m3 code), one per note, no Glide;
 - three muted MIDI tracks (other, piano, vocals) with Drift as a placeholder;
-- 8 locators, the 808's fader at −13.9 dB (−13.6 on 2026-10-22) and the drums' at −20.2 dB. Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, under which velocity 127 plays 7.9 dB over the Volume. On 2026-10-22, taken as linear levels (v/127), the same notes had the faders at −6.6 and −12.3 dB (the 808's at −6.2 dB before replica mode).
+- 8 locators, the 808's fader at −13.9 dB (−13.6 on 2026-10-22) and the drums' at −12.5 dB, each pad at a Volume of its own from −12.1 to 0 dB (with the m3 code, −20.2 dB and every pad at 0 dB). Velocities follow Live 12.4.6's law at "Vol < Vel" 35 %, under which velocity 127 plays 7.9 dB over the Volume. On 2026-10-22, taken as linear levels (v/127), the same notes had the faders at −6.6 and −12.3 dB (the 808's at −6.2 dB before replica mode).
 
-**What changed in the plan since 2026-10-22:**
+**What changed in the plan from 2026-10-22 to the m3 code:**
 - **Three pads are new**, and none is gone. The new ones are sounds of the residual pass that the 12-hit floor kept out. A pad now takes, here, 5 hits (one per 16 bars), clean 0.5, and for a sound of the residual pass, hits that recur: at least half of them with another hit at their place of the bar (within 6 ms) 1–8 bars away ([12](12-replica-mode.md)). The perc recurs at 0.75 and is clean 0.875; the hat 1.0 and 1.0; the snare-like sound 0.75 and 1.0. None of the three is checked by ear.
   - 6 of the perc's 8 notes lie 0.7 ms before a note of the main hat: a layer, or the hat found again (not verified).
   - The new hat plays a copy of the hat's file (NCC 1.0 between the two files) on step 14 of 7 bars. In 5 the main hat has no note there; the other 2 double a main-hat note 0.3 ms away, at gains of 0.29 and 0.35 where its other hits have 0.71–1.12. The rule that plays a strike once looks at one pad, not at one recording on two.
@@ -231,6 +252,30 @@ Measured on the way (Live 12.4):
 - **The 808**: the 93 notes found again start where they did, at the same pitch; 6 are shorter. 22 of them play a velocity step lower: velocity 115 is the line's median peak, which rose 0.045 dB with the new notes.
 - **Locators**: D (48) and E (52) where 2026-10-22 had D (49), and D (72) for the outro.
 
+**What the final code changed** (`fit-808` and `plan` with 74931ce, against the m3 code, on the same analysis):
+- **Each pad plays at a level of its own**, where the stems hold its sound: the median over its hits of the stems' energy over 50 ms from each attack, in its role's band, against the pad's own track at 0 dB. The loudest pad plays at 0 dB and the others under it; the drum fader matches the drums' RMS to the drum stem's.
+
+  | pad | Volume | fader + Volume | with the m3 code |
+  |---|---|---|---|
+  | kick | −8.5 dB | −21.0 dB | −20.2 dB |
+  | unmatched snare | −4.4 dB | −16.9 dB | −20.2 dB |
+  | snare file, at 0 and at −1 | −5.3 dB | −17.8 dB | −20.2 dB |
+  | hat | −6.8 dB | −19.3 dB | −20.2 dB |
+  | the hat's copy at −2 | −10.3 dB | −22.8 dB | −20.2 dB |
+  | the hat's file found in the snare band | −7.9 dB | −20.4 dB | −20.2 dB |
+  | other hat at +1 | −10.1 dB | −22.6 dB | −20.2 dB |
+  | perc | 0.0 dB | −12.5 dB | −20.2 dB |
+  | snare-like sound | −12.1 dB | −24.6 dB | −20.2 dB |
+
+- The drum fader, −12.5 dB, is the RMS match; the stop at the loudest pad (−10.3 dB) does not bind.
+- **The kick** is read on the drum and bass stems together, less the plan's own 808: 14.7 dB under its pad at 0 dB, over 87 of its 93 hits (at the other 6 the 808 leaves nothing). The drum stem alone holds it 16.4 dB under, so the floor at that reading does not bind. Under the m3 code's one-shot the kick read 14.9 dB under: the new one-shot moved its Volume from −8.6 to −8.5 dB and the drum fader from −12.4 to −12.5 dB. The reading leans on that 808: played 1 dB quieter under the kick, it would put the kick's Volume at −5.6 dB; 1 dB louder, at −10.1 dB, the floor. Not verified.
+- **The perc is the loudest pad**, read on hits it mostly shares: 6 of its 8 notes lie within 50 ms of another pad's (0.7 ms before the main hat's). On its 2 clear hits it reads 3.0 dB lower; the rule that reads a sound on its clear hits needs 3 of them, reading more than 6 dB under all its hits. Against the other pads it may play 3 dB loud. Not verified.
+- **These levels are the stems'.** No truth says where the song holds each sound. On the suite's beats, a pad read on the drum stem sits a median 1.3 dB under where the truth holds its sound. Not checked by ear.
+- **The 808's notes start at their onsets**: a median 5.3 ms earlier than with the m3 code (2.4 to 5.9 ms), now a median 0.2 ms after the analysis' onset, where the m3 code started them on their attacks. In both plans each note attacks within 0.02 ms of the analysis' attack. The pitches and velocities are the same; 28 notes end up to 2.5 ms earlier (one voice: a note ends just before the next starts). Detune +1 (see [808](#808)); the 808's fader stays at −13.9 dB.
+- **Nothing else moved**: the drum notes, each pad's file, Transpose and Detune, the melodic tracks, the stems and the locators. `drums.mid` and the melodic MIDI files are the same, byte for byte; `808.mid` moved with the starts.
+- **Buildable, not built.** The plan's tracks pass a format check against ableton-live-mcp 2.2.0's `build_tracks` (pad Volumes as "x.y dB" at or under 0 dB, Detune in range, no Glide). Nothing was built or recorded in Live.
+- **Seconds.** `fit-808` took 45.6 and 46.1 s in the two runs (the fit itself 42.8 and 43.1 s), `plan` 1.9 and 2.0 s, with Live open, no suite running and a load of 2.5–3.6. `plan` now renders each pad and reads the stems for the levels: 0.68 GB at its peak. With the m3 code, beside another job, `fit-808` took 61.6 s and `plan` 1.4 s (0.24 GB); on a quiet machine, 45.8 s and 0.7 s.
+
 See [07](07-building-in-live.md).
 
 ## Still open
@@ -239,6 +284,8 @@ See [07](07-building-in-live.md).
 - **The 808 in section D** has four notes where the stem shows five: one attack rises 6.5 dB over the note still ringing, under the 9 dB a rise needs, and no kick marks it (see 808). The reader also settles these notes about 30 cents over what their sustain reads; the plan does not play that.
 - **One recording on two pads.** The hat's file found in the snare band doubles 2 of the main hat's notes (see In Live).
 - **The 808 voice** now starts like a kick. Fitting it on notes without a kick, or from after the kick's decay, would tell whether the kicks in the reference cause it.
+- **The one-shot's waveform** matches the fit's reference less than the m3 code's did (NCC 0.880 against 0.921), while its pitch now follows the template's. Which of the two sounds closer is not checked by ear.
+- **The perc's level** is read on hits it mostly shares with the main hat; on its 2 clear hits it reads 3.0 dB lower (see In Live).
 - **808 slides** are not read by default; PIRAMIT's reading has none.
 - **Melody, chords and vocal chops.** They are transcribed and planned as muted MIDI tracks. The original stems still play them; choosing instruments is the next stage.
-- **The ear test.** Every number here is a measurement; none of it has been confirmed by listening yet, and the replica-mode plan has not been built in Live.
+- **The ear test.** Every number here is a measurement; none of it has been confirmed by listening yet, the pad levels and the new one-shot included, and the replica-mode plan has not been built in Live.
