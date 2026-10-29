@@ -20,16 +20,20 @@ def kick(seconds: float = 0.12) -> np.ndarray:
 
 
 def line(notes, root_hz: float = 32.70, cents: float = 0.0, bpm: float = 140.0, bars: int = 4, leak: float = 0.15,
-         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1
+         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0
          ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """A bass stem, a drum stem and the truth of `bars` bars of notes (16th
     step, length in 16ths, semitones over the root, and "legato" for a note
     that slides in from the one before over slide_ms without starting the
     sample again), the 808 settling at root_hz + cents and starting `drop`
-    semitones over it; a kick on every other attacked note, leaking into the
-    bass stem at `leak`."""
+    semitones over it (and `tail` more semitones falling with a time
+    constant of 150 ms, as real 808s' drops end); a kick on every other
+    attacked note, leaking into the bass stem at `leak`."""
     f = root_hz * 2 ** (cents / 1200)
     sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, 1.5, 3, 2.0, 0.05, 0.3), 2.5)
+    if tail:
+        t = np.arange(len(sample)) / SR
+        sample = np.interp(np.cumsum(2 ** (tail * np.exp(-t / 0.15) / 12)), np.arange(len(sample)), sample)
     step = 60 / bpm / 4
     n = int((bars * 16 * step + 1.5) * SR)
     bass, drums = np.zeros(n, np.float32), np.zeros(n, np.float32)
@@ -209,6 +213,100 @@ def test_a_kick_inside_a_held_note_is_the_note_going_on():
         assert [n["midi_settled"] for n in out] == [22.1, 17.1][:kept]
 
 
+def tone(parts, hz: float = 32.70, seconds: float = 3.0) -> np.ndarray:
+    """The 808 band of a tone at hz that starts again (from zero phase, at
+    level 1) at each (start, end, decay seconds, gain curve or None) of
+    parts and is silent between them, with noise at -100 dB."""
+    from refdissect.audio import band
+    y = np.random.default_rng(0).standard_normal(int(seconds * SR)) * 1e-5
+    for a, b, decay, gain in parts:
+        t = np.arange(int((b - a) * SR)) / SR
+        g = np.exp(-t / decay) * (gain(t) if gain else 1.0)
+        y[int(a * SR):int(a * SR) + len(t)] = np.sin(2 * np.pi * hz * t) * g
+    return band(y.astype(np.float32), "808")
+
+
+def note(t: float, end: float, ncc: float, midi: float = 24.0) -> dict:
+    return {"t": t, "t_attack": t + 0.005, "end": end, "midi_settled": midi, "ncc": ncc, "flags": []}
+
+
+FLAT = B.Template(np.zeros(1), np.zeros(1), [], 32.70, "qifft_300_600ms", [[0.0, 0.0], [2.0, 0.0]])
+
+
+def test_a_note_never_holds_across_a_silence():
+    """PIRAMIT's failure: an 808 note, 1.0 s of silence, then the 808 alone
+    (no kick) on a note whose onset sits 27 ms before its envelope rises
+    and whose template fit is 0.89; a note found in the rest, 60 dB under
+    the others. Both were the note before going on, which then held the
+    rest (15.3 s on PIRAMIT). Now the note before ends where it falls
+    silent (0.4 s), the note after the rest is a note of its own, and the
+    note in the rest is none."""
+    lo = tone([(0.0, 0.4, 1.0, None), (1.4, 2.4, 1.0, None), (0.9, 1.0, 1.0, lambda t: 1e-3)])
+    notes = [note(0.0, 0.9, 0.97), note(0.9, 1.373, 0.4), note(1.373, 2.4, 0.89)]
+    feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+    feet = feet[(feet < 1.38) | (feet > 1.42)]  # its rise aside: the rest alone makes it a note
+    out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+    assert [n["t"] for n in out] == [0.0, 1.373]
+    assert out[0]["end"] == pytest.approx(0.4, abs=0.02) and out[1]["end"] == 2.4
+
+
+def test_a_rise_after_the_onset_attacks_the_note():
+    """PIRAMIT's 808 alone, re-attacking from a sustain 16 dB down (no
+    silence, no kick): its envelope rises 12-21 dB 27 ms after the onset
+    the template's fit gives (0.89). The rise attacks the note. A weak rise
+    there (4 dB: the suite's notes merged with a foot 20-40 ms late rise
+    -5.6 to +7.9 dB) does not."""
+    for jump_db, kept in ((16.0, 2), (4.0, 1)):  # the sustain decays to jump_db under the new note's level
+        lo = tone([(0.0, 1.427, 1.427 / np.log(10 ** (jump_db / 20)), None), (1.427, 2.6, 1.0, None)])
+        notes = [note(0.0, 1.4, 0.97), note(1.4, 2.6, 0.89)]
+        feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+        out = B.legato(notes, lo, FLAT, feet, np.zeros(0))
+        assert len(out) == kept and out[-1]["end"] == 2.6
+
+
+def test_a_note_after_a_rest_starts_on_its_rise_at_the_pitch_its_periods_hold():
+    """PIRAMIT's notes after a rest, kept by the rest alone (no kick, a
+    template fit under 0.9): segment() placed one 27 ms before its rise at
+    +13 semitones (C#2 where the stem holds C1) and one 45 ms after its rise
+    at +84.5 cents. Each now starts on its rise, at the template's whole
+    transposition nearest the pitch its periods settle at (C1). A pitch
+    within half a semitone of the stem's is kept."""
+    lo = tone([(0.0, 0.4, 1.0, None), (1.4, 1.9, 1.0, None), (2.4, 3.0, 1.0, None)], seconds=3.2)
+    feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+    rises = [feet[np.argmin(np.abs(feet - t))] for t in (1.4, 2.4)]  # the band filter puts them 8 ms early
+    for second, third in ((37.0, 24.845), (24.3, 24.3)):
+        notes = [note(0.0, 0.9, 0.97), note(rises[0] - 0.027, 2.4, 0.89, second),
+                 note(rises[1] + 0.045, 3.2, 0.78, third)]
+        out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+        settled = [FLAT.midi if m > 24.5 else m for m in (second, third)]
+        assert [n["t"] for n in out[1:]] == pytest.approx(rises, abs=1e-5)
+        assert [n["midi_settled"] for n in out[1:]] == pytest.approx(settled, abs=0.01)
+        pre = B.PRE / SR  # the attack moves with the onset, read at the note's new rate
+        lead = [(0.005 + pre) * 2 ** ((m - s) / 12) - pre for m, s in zip((second, third), settled)]
+        assert [n["t_attack"] - n["t"] for n in out[1:]] == pytest.approx(lead, abs=1e-4)
+
+
+def test_a_note_under_a_sidechain_duck_stays_one_note():
+    """A held 808 ducked 20 or 30 dB for 80 ms by a sidechained kick every
+    0.4 s (the deepest dip inside the suite's truth notes was 26.8 dB under
+    the note's peak), recovering over 60 ms: the notes found in a duck
+    where nothing attacks (70 ms in: the duck's own start shows an
+    envelope foot) are the note going on, never cut at a duck."""
+    for depth in (20.0, 30.0):
+        def duck(t, depth=depth):
+            g = np.ones_like(t)
+            for k in (0.4, 0.8, 1.2):
+                d = t - k
+                g = np.where((d >= 0) & (d < 0.08), 10 ** (-depth / 20), g)
+                g = np.where((d >= 0.08) & (d < 0.14), 10 ** (-depth / 20 * (1 - (d - 0.08) / 0.06)), g)
+            return g
+        lo = tone([(0.0, 1.6, 3.0, duck)])
+        notes = [note(0.0, 0.47, 0.97), note(0.47, 0.87, 0.8), note(0.87, 1.6, 0.8)]
+        feet = np.array([o["i"] for o in B.reattacks(lo)]) / SR
+        out = B.legato(B.audible(notes, B.rms_envelope(lo, 25.0)), lo, FLAT, feet, np.zeros(0))
+        assert len(out) == 1 and out[0]["end"] == 1.6
+
+
 def test_a_kick_split_off_the_next_note_at_the_edge_of_the_search():
     """PIRAMIT's C#2 notes: 60 ms on a kick at +1310 cents (past the
     search's whole semitones), followed at once by a C1 note: the C1 note
@@ -262,6 +360,42 @@ def test_the_settled_pitch_waits_for_the_drop_to_settle():
     bass, drums, truth = line([(0, 8, 0), (8, 4, 5), (12, 2, 0), (14, 2, 7)], cents=11.0, drop=8.0, glide_ms=120.0)
     b = B.transcribe(bass, drums)
     assert abs(b["template"]["tuning_cents"] - 11.0) < 3
+
+
+def test_short_notes_read_their_settled_pitch_past_the_template():
+    """bass_low's failure: 110-330 ms notes of an 808 whose drop ends in a
+    slow tail (2.5 semitones more, falling with a 150 ms time constant)
+    never settle, and one exponential fitted to the template's drop leaves
+    the tail out: the tuning read 35.0 cents sharp (+46.0 for +11). Notes
+    up a fifth play the sample 1.5 times as fast and reach past the
+    template's end; read on them, 20.4 cents. A template whose notes
+    settled (QIFFT window) keeps its own reading."""
+    bass, drums, _ = line([(0, 2, 0), (2, 1, 0), (3, 1, 0), (4, 3, 0), (7, 2, 0), (9, 1, 5), (10, 3, 7), (13, 3, 0)],
+                          root_hz=21.83, cents=11.0, bpm=136.0, drop=8.0, glide_ms=40.0, tail=2.5)
+    b = B.transcribe(bass, drums)
+    assert b["template"]["method"].startswith("notes_") and abs(b["template"]["tuning_cents"] - 11.0) < 25
+    assert B.settle(B.band(bass, "808"), FLAT, [(0.0, 0.3, 700.0)] * 3) is FLAT
+
+
+def test_settle_refuses_notes_that_read_apart():
+    """producer-2's failure: the notes in settle()'s window read 105-186
+    cents apart (some an octave off, some sliding to their cut), and the
+    median of all their periods, under a 30 ms margin or 5 notes, moved its
+    template 64 cents the wrong way. Three notes at the 808's settled pitch
+    and three a semitone under it, the template 30 cents over: the first
+    reading took the lower ones' (the median of 10 periods: 100 cents
+    under); the notes' spread now refuses it. Six at the settled pitch are
+    read within 2 cents."""
+    sharp = B.Template(np.zeros(1), np.zeros(1), [], 32.70 * 2 ** (30 / 1200), "drop_fit", [[0.0, 0.0], [2.0, 0.0]])
+    starts = [0.1 + 0.8 * k for k in range(6)]
+    spans = [(a, a + 0.45, 0.0) for a in starts]
+
+    def lo(under: float) -> np.ndarray:
+        return tone([(a, a + 0.45, 3.0, None) for a in starts[:3]], seconds=5.0) \
+            + tone([(a, a + 0.45, 3.0, None) for a in starts[3:]], hz=32.70 * 2 ** (-under / 1200), seconds=5.0)
+
+    assert B.settle(lo(100.0), sharp, spans) is sharp
+    assert abs(1200 * np.log2(B.settle(lo(0.0), sharp, spans).hz / 32.70)) < 2
 
 
 def test_tune_808_splits_a_fraction_into_transpose_and_detune():
