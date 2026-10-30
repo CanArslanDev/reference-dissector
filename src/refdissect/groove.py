@@ -1,7 +1,7 @@
 """How the parts lock to the kick: the checks a producer hears first.
 
 A rebuilt beat can match a reference's sounds, notes and loudness and still
-sound unrelated to its drums. On HAYIR DEMELIYDIM (Motive) the first rebuild
+sound unrelated to its drums. On HAYIR DEMELIYDIM the first rebuild
 failed by ear for three reasons none of the other measures saw:
 
 - **ducking** - the reference's 808 falls ~20 dB within 20 ms of every kick and

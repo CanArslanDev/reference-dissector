@@ -3,27 +3,37 @@
 ## Time
 
 - **Half time and double time.** A beat tracker reported 68.18 BPM for a 137 BPM track. Both fit, because every other grid line carries a hit. Decide explicitly with `--bpm-range`, then check that the snare sits on the beat the genre puts it on (trap: beat 3).
-- **An average tempo hides drift.** 136.36 BPM was 0.47 % off: within ±2 ms at the start, 49 ms off by the end. Fit the grid and look at the *last* bars (`grid.offsets`).
+- **An average tempo hides drift.** 136.36 BPM was 0.47 % off: PIRAMIT's snares sat 2 ms off its grid in bar 1, 50 ms off in bar 7 and 0.59 s off by the end (computed). `grid.offsets` looks within 50 ms of each grid line, so it lost them after bar 7, and this page said "49 ms off by the end". Fit the grid, then check that the *last* bars still land on it, and count them: at 136.999 BPM `grid.offsets` finds beat 3 in 58 bars; at 136.36 it finds the snares in bars 1–7 only.
+- **A tracker's median interval is quantized.** beat_this's beats come on 20 ms frames, so their median interval is a whole number of frames: 0.88 s (68.18 BPM) on PIRAMIT. A line through the same beats gives 68.498.
 - **Seconds versus beats.** MIDI notes go into Live in beats. Convert with the fitted tempo (beat = s × BPM / 60), and place the stems unwarped at beat 0 so both share a clock. A MIDI file's own tempo is not applied by Live's import: ableton-live-mcp's `import_midi_file` reads beats.
-- **The grid phase is not the attack.** Onset-strength peaks come 2–8 ms after the attack. That is fine for a grid; it is not fine for lining up waveforms.
+- **The grid phase is not the attack.** Onset-strength peaks come 4.8–13.2 ms after the attacks (82 test beats; 7.1 ms on PIRAMIT's drums). That is fine for finding a tempo; it is not fine for lining up waveforms or placing notes. The grid is moved onto the attacks, and every hit and note is timed where its sound starts.
 
 ## Pitch
 
-- **An 808 not at A440.** PIRAMIT's 808 sits at +33 cents while the rest of the track is at A440; it made every 808 note "C or C#". Measure the 808's own offset and remove it before rounding.
+- **An 808 not at A440.** PIRAMIT's 808 settles at +11.8 cents while the rest of the track is at A440. Read about 30 cents over C, with its drop, every 808 note came out "C or C#". Measure the 808's own tuning and remove it before writing notes.
+- **A pitch tracker on an 808 measures its drop.** An 808's pitch falls for 0.1–0.6 s after every attack, and a median over the note reads the drop. Read the note as a transposition of the 808 itself: PIRAMIT's 808 read +33 cents by a pYIN median over 60–450 ms, +11.8 by QIFFT of its template's sustain. pYIN also reads 14–27 cents sharp under 50 Hz by itself.
+- **An 808 may not have settled by 300 ms.** Check that the two halves of the sustain window agree: one suite 808 read 35 cents sharp over 300–600 ms and 1.2 cents flat over 600–750 ms.
+- **A short 808 never settles.** bass_low's 110–220 ms notes never reach their settled pitch. Read from a fitted drop, it came out 44–60 cents sharp and every note of one beat was written a semitone high. On htdemucs_ft, read from a 217 ms tail, it was 2.4 semitones off (note F1@50 0.34). The notes found say more: a note c cents up plays the sample 2^(c/1200) times as fast, so the notes reach past the template's end. Read on them, bass_low-1's template came within 14 cents of the truth, and bass_low's written pitch went 0.487 → 0.987.
+- **Two errors can cancel.** bass_low-1's plan played its 808 a median 17.5 cents off with the template 60 cents sharp and every note written a semitone high. With both fixed, the plan played it 41.7 cents off: its one-shot dropped faster than the 808 it copies, which the two errors had hidden. Expect a fix to show the next error. With the one-shot on the template's own periods, the plan plays it 15.1 cents off (note F1 0.718 → 1.0).
+- **A wrong part can hide wrong inputs.** On full, m3's too-fast one-shot offset two analysis errors: one note written a semitone high and 5 short notes heard 41 cents low. With the one-shot right, full's plan 808 note F1 fell 0.890 → 0.851 while the suite's rose 0.921 → 0.934. Look at the scenarios that lose when a part gets better.
+- **One Detune for every note.** Simpler has one Detune, fitted where most notes are. With a one-shot whose drop is not the 808's, the correction a note needs depends on its length (bass_low-1: its notes of 120–600 ms played 42–52 cents flat). Make the one-shot fall as the 808 does, and the correction is the same for every length: −0.1, −0.19 and −0.11 cents for notes under 120, 120–250 and 250–600 ms.
+- **A yardstick shorter than a period.** The pitch curve of a 110 ms note under 30 Hz is read over less than one period, so its reading depends on phase: 89 and 160 cents for one drop, on two near-identical one-shots. Check a measure on what it will read before trusting its differences.
 - **`librosa.estimate_tuning` is not reliable.** Up to 60 cents off on synthetic tones; it read PIRAMIT as +0.28 semitones throughout. Check any tuning method on tones of known pitch first.
 - **Sped up, or tuned?** Same pitch shift, different cause. Test it: shift every drum sample by the offset and see whether matches improve. On PIRAMIT they collapsed (0.86 → 0.25), so the drums were not shifted.
 - **Transposed samples decorrelate completely.** −1 semitone: 0.95 at −1, 0.15 at 0, 0.13 at ±0.25. Never assume 0, and do not shortlist candidates by their score at 0.
+- **Whole semitones are not a pitch.** The true file's NCC halves within 1–5 cents. A snare 0.70 semitones down was matched at −1 and played 30 cents off. Search the cents (the speckle) and play them (Detune).
 
 ## Lining up
 
 - **The sign of a lag.** `ncc(t, c)` returns d when t is c delayed by d; align with `shift(c, +d)`, or read the window at `s − d`. Using the opposite sign doubled every misalignment, and the averaged templates blurred. There is a test for it (`tests/test_xcorr.py`).
 - **Different onset definitions on the two sides.** Library files were trimmed at their first rise above −30 dB, templates at an onset-strength peak. Samples with a quiet lead-in ended up 12–21 ms apart. The true snare scored 0.15 instead of 0.85. Align templates on the attack and search ±30 ms.
 - **The same fix in the wrong place.** Moving library files to the attack point too made things worse (27/30 → 14/30), because bleed changes where a template's attack seems to be. One side robustly placed plus a wide lag search worked; both sides re-placed did not.
+- **An attack read in the wrong band.** In the full band a snare's attack sat on the kick or 808 before it: all six calibration snares were placed 13–24 ms early. Read a sound's start in its own role's band.
 
 ## Windows
 
 - **Patterns live inside windows.** Everything that always follows a hit is in its average: the kick two sixteenths after the snare, the hat on every eighth. A 300 ms window made the following kick decide the snare's detections (352 ms early) and its matches. Use the attack (40–80 ms) to detect, a little more (80–200 ms) to identify.
-- **NCC ignores level.** The quiet tail of a low hit matches its own template; a 55 Hz kick was found again 183 ms after every hit. Drop hits far below the template's usual level, and suppress tails behind louder hits.
+- **NCC ignores level.** The quiet tail of a low hit matches its own template; a 55 Hz kick was found again 183 ms after every hit, and a tonal snare's template matched its own ring 101 times for 32 snares. Drop hits no louder than the template's own ring at that lag, where nothing starts.
 - **A low tone correlates with itself a period later.** Below 200 Hz, keep hits at least 100 ms apart.
 
 ## Grouping and naming
@@ -31,25 +41,65 @@
 - **The same sound split into groups.** Overlaps differ from hit to hit (hat or no hat on a kick), so one sample lands in several groups. Merge groups whose averages match.
 - **Different sounds merged as "duplicates".** A snare that always lands on a hat shares every moment with the hat and looks like it in the hat band. Require the same waveform in both bands before calling two templates one sound.
 - **Naming by energy fails.** Bright snares and dull hats overlap; an 808 under a snare makes it look like a kick. Name sounds after matching (the library's file names vote), and keep the discovery band only as a hint.
+- **A role from the wrong band.** The kick band does not tell recordings apart: an open hat's top match there was an fx file at 0.957, and its attack was then read on the next kick, 220 ms later. Let a close match name the role only in the snare and hat bands.
 - **One template, two sounds.** Hand identities out from the strongest match down, so a hat heard under a kick is not reported as the kick.
+- **Guessing slides costs more than it gains.** A rule that called every unattacked 808 pitch move a slide was right 6 times in 79. Merging those notes into the note before scored better on every 808 number.
+- **A kick inside a held 808 note** reads as a short low note followed by the held note found again. Read it as the held note going on.
+- **A note without an attack is not always the note before.** Merging unattacked 808 notes bridged a 1.2 s and a 7.4 s rest on PIRAMIT (the 808 band 40 dB under its median note peak). An 808 alone after a rest had its onsets read 27 ms before its envelope's feet, and no kick to anchor them, so four notes became one, held through both rests. Check a held note against the stem's level: a note now ends where the 808 band falls 40 dB under its peak for 50 ms, and a 9 dB rise attacks a note. Inside the suite's 5,448 truth notes the band never fell more than 26.8 dB under a note's peak.
+- **Order decides more than it should.** Taken by hit count, a kick's view in the snare band (18 hits) came before the kick's own template (15), explained it, and timed every kick on the click or late on the body. A left-out template's hits went to every template with a coefficient above 0, so the order decided where they went: a hat that came first by one hit took a view's hits at 0.08 and lost 32 of its own 92. Tie the order to what the templates are (a view right after its main), and hand hits only to what explains a real share (a tenth).
+- **A clean count read in the wrong band.** A hit's NCC is read in its own template's band, and the low band reads high whatever the template: a snare's low-band template read 16 of 16 hits clean, its snare-band twin 7 of 18; in one band they read 1 of 16 and 7 of 18. Compare two templates' counts only within one band.
 
 ## Libraries
 
-- **Kits copy each other.** The same file appears under several names. Treat > 95 % correlation between two entries as one recording, or the margin to the "next" sound is the sound itself.
+- **Kits copy each other.** The same file appears under several names, and at other pitches. Treat > 95 % correlation between two entries as one recording, or the margin to the "next" sound is the sound itself. Compare them as they were found: a kit's copy 0.22 semitones down tied the original at 0.84. Different kicks brought to one pitch agree where their tone is: a wrong kick 2 semitones down hid the true one as its "copy" (0.952 over the full band, 0.83 in the snare band).
+- **A wider search finds closer neighbours.** Searched at any pitch, PIRAMIT's hat still matched its file at 0.984, but another kit's hat 3 semitones up reached 0.958. The margin fell from 0.078 to 0.025 and the verdict to "same family".
 - **Names are not roles.** "808 Snare" is a snare, "Kick 808 Tone" may be a 808; role rules are ordered and only approximate.
 - **Generated files match themselves.** Leave `AbletonMCP Generated` (and Live's backups) out of the inventory.
+- **NCC does not hear level.** Every entry is normalized to full scale, so a float WAV holding a recording about 430 dB down matched v1orig-3's hat at 0.961 ("same sample"), and its pad played 144 hats as silence. Leave out files that peak under −60 dBFS.
+- **A click matches every file.** A kick's click is all the hat band holds of it, and every file that starts at once matches that: full-1's kick tied 20 kick, 808 and synth-bass files within 0.0002 of NCC 0.9796 there, and a synth-bass one-shot went on its pad. A band whose five best sounds tie names none of them; match such a template in its own band.
 
 ## Measuring the measurer
 
 - **One number rewards what dominates it.** Correlation in the 808 band is the fundamental. A fit on it alone drove the distortion to zero (harmonics 25 dB off) at NCC 0.969. Score on every dimension you care about.
-- **Pictures hide level differences.** On a 70 dB scale, a library 808 with harmonics 12–17 dB too strong looked like a match.
-- **Score against the right truth.** The truth time of a hit is where the file starts, a detection is where the attack is. Remove a constant offset before computing F1, or a perfect transcription scores 0.
+- **Pictures hide level differences.** On a 70 dB scale, a library 808 with harmonics 12–17 dB too strong looked like a match, and a snare's tail looked 75 ms longer than its file's where the levels differ by 9 ms at −40 dB.
+- **Votes always have a winner.** Per-hit votes rank the top three candidates only: PIRAMIT's unmatched snare wins 26 of 27 votes for a file at NCC 0.47. The null test (−1.1 dB) is what says no.
+- **Score where the sound starts.** The truth time of a hit is where its file starts, a detection is where the attack is. Removing one constant offset per sound hid that the v1 plans put the calibration snares 21–24 ms early (F1 1.00; strict F1 at 20 ms 0). Time both sides at the attack in the sound's own band, and remove nothing.
+- **A mean over sounds is not a mean over hits.** 37 pitched copies of 1–68 hits each count as much as a main hat of about 170 hits. Report both.
+- **A count is not evidence.** A 12-hit pad gate left out open hats (4–8 hits a beat) and let junk through: templates on a loop's transients got 0.71 pads a beat. Hits that recur bar to bar separate them (3 of 86 junk templates recur, 209 of 214 drum sounds). But recurrence on a constant grid is a tempo test: with the bpm 0.2 % off, the suite's drums stopped recurring (plan drums F1@20 0.866 → 0.637). Ask it of the residual pass only, on the grid's own bars.
+- **One strike, two templates.** Two templates of one sound (a hat found in the snare band, a kick's view) each put the same strike on a pad, and the pad played it twice. Play each strike once per pad, and once per backbone kick or snare. One recording on two pads still sounds twice (PIRAMIT).
+- **A mean of signed medians.** The plan's hat median read −1.24 ms over the suite, while 20 of 22 scenarios lay within 0.5 ms: one beat's hats, found 29.1 ms early, set the mean. Look per scenario before calling a timing shift.
+- **A newly played sound brings its level.** The pad gate played sounds the plan had left out, at their samples' own level: plan levels went 3.67 → 4.09 dB from a perfect kit, while the sounds measured before moved 3.55 → 3.58 dB. Compare levels on the same sounds too.
+- **A file's level is not the song's.** With every pad at 0 dB under one fader, hats played 6.2 dB and open hats 11.6 dB over a perfect kit: the files are louder than the songs play them. Read each pad where the stems hold its sound: 1.1 and 0.09 dB under it, and the plan 4.09 → 1.25 dB from a perfect kit.
+- **A kick lives in two stems.** Demucs hands part of a kick to the bass stem, and an 808 plays under most kicks. Read a kick on the drum and bass stems together, less the plan's own 808, and never under what the drum stem alone holds of it.
+- **A level read under another part moves with it.** When the 808 one-shot changed, the plan's 808 at tempo95-2's kicks went from 2.31 to 0.77 dB under the truth's 808, and the kick read 1.74 dB lower: its pad's Volume −0.5 → −2.2 dB. 109 of 227 pad Volumes moved, though no drum note did. Measure the levels again after any change to the 808.
+- **A balance across two stems.** Balance is each sound against the median sound, the 808 among the drums, and the htdemucs drum stem sits 5.52 dB under the truth's drums where its bass stem sits 0.96 dB under the truth's bass. With the drums at their kit level, the 808's balance went −1.76 → +2.70 dB while the 808 itself moved 1.98 → 1.87 dB under its kit. Compare a sound with its own group's kit.
+
+## Merging
+
+- **Measure the merged pipeline, not each part.** The joint fit was built on the old templates (one per 16th slot). On the attack-based ones, residual templates and variants of a sound were held under the main templates and found their hits a second time. On 22 beats the false hits went from 32 to 60 a beat; over the suite, open hats fell from 0.98 to 0.90.
+- **A rule keyed on where a template was found.** match kept whole semitones for templates found in the low band, which used to be kicks. The new discovery finds snares there too, and drum_pitch-2's detuned snare came out 30 cents off.
+- **A shared pad hides a pitch.** A template found twice, as the same file at another pitch, shared its twin's pad and played at the twin's pitch, 300 cents off.
+- **A reused step reads stale inputs.** Re-running analyze while reusing melodic.json left the chords built on the old 808 notes. The suite marks such steps `reused_stale`.
+- **Chords follow the sections, which follow the drums.** A change in the drum hits moved a section boundary on full-2 and broke its 8-bar loop: chords majmin 0.999 → 0.961, with the same notes.
+- **A cache keyed on files read late.** The first caches hashed a hand-kept list of files, read when a result was kept. A run whose files were edited after it started filed the old code's results under the new code's key: a fit read back that way had f_start 93.3 Hz where the edited code finds 53.2 Hz. Hash every file of the package as the process loaded it, and keep or read nothing while one differs on disk. Code patched in memory is still not seen: a script that patches must not use a cache.
+- **A cache times itself.** Suite runs shared each beat's cache between tags, and a read-back left no trace: fit-808 took 1.6 s read back, 68–70 s run, and both counted as the code's seconds. A measurement now reads nothing back unless asked, and records what it read back.
 
 ## Live
 
-- **Simpler loads at −12 dB.** Set 0 dB, or every level estimate is 12 dB off.
+- **Simpler loads at −12 dB.** Set 0 dB, or every level estimate is 12 dB off. "0.0 dB" as text lands on −0.005 dB. A pad's own Volume goes the same way: "−6.6 dB" lands on −6.605, and from −10 dB on a display step lower ("−14.9 dB" on −14.95).
 - **Simpler's root is C3.** Transpose +36 for an 808 whose notes are written at C1 (MIDI 24).
+- **Transpose and Detune keep whole numbers.** 11.99 semitones play as 11; a Detune of 11.5 plays as 11, the text "11.5 ct" as 12 (Live 12.4.6). Write whole semitones and whole cents.
+- **Velocity is not a linear level.** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume: velocity 127 plays 7.9 dB (35 %) or 10.2 dB (45 %) over it, and the amount depends on how the Simpler was made. Set "Vol < Vel" on every Simpler and invert the law: taken as v/127, m2g's plans would have played 9.3 dB from a perfect kit, against 3.7 dB (computed from the law).
+- **Snap cuts the end.** On by default, it stops every sample 10–30 ms early: 19–27 ms on three pads of the first live check. The build turns it off.
+- **A pad loaded by name can be another file.** Live's browser finds a sample by its name, and other files of that name can come first: a hat pad played an 808, another an FX hit, and a one-character name was not among the search's first 20 results, so `build_tracks` stopped half way. Copy each file under a name of its content, and read back the file each Simpler holds.
+- **A pad plays one voice.** A hit that comes while its pad's hit before still plays cuts it and starts 1 ms late; a render that summed a pad's hits played kick rolls up to 5.6 dB loud. The 808's Simpler restarts a note of the same pitch the same way.
+- **The 808's Simpler filters by default.** Loaded through the browser it is Classic with a 22 kHz lowpass that follows the note: each note 0.13–0.46 ms late by its pitch, enough to take three notes past a 20 ms window. Turn it off.
+- **Its release is 50 ms, not none.** The voice falls 1.683 dB a ms after a note's end and stops 35.7 ms later. Against Live's recording, the 808 track rendered with a 5 ms fade left −11 to −22 dB of residual, with Live's release −42 to −49 dB.
+- **Live moves a locator off its grid**, in the right meter too: the Arrangement's grid follows its zoom (6 beats at the zoom found), and a cue's time cannot be set. Delete what moved, and say so.
+- **Live serves 8 clients.** With 8 MCP servers of other sessions connected, a new one is refused ("Connection reset by peer").
+- **A plan's score moved by measured lags is not Live's score.** The first live check shifted the plan's estimate by the lags it measured and called that Live's score; a wrong-file pad's hits, dropped as silent, raised a drum F1. Read every Live score off the recording.
+- **The browser keeps an old file.** Loaded by a name Live has loaded before, a pad plays the old content after the file is overwritten; a file loaded by path is read again. Give changed content a new name: the 808 one-shot's carries its digest.
 - **New files reach the browser after a few seconds;** retry, do not fail.
 - **Locators at fractional beats were refused,** so round them.
-- **A new audio clip starts at its first transient.** Live's warp analysis moves the start, 21 ms to 3.6 s in here, and it stays moved with warping off. Set `loop_start` back to 0, or the reference plays early against the notes.
+- **A new audio clip starts at its first transient.** Live's warp analysis moves the start, from 21 ms to a few seconds in here, and it stays moved with warping off. Set `loop_start` back to 0, or the reference plays early against the notes.
 - **The Trial cannot save.** Keep the plan, rebuild in seconds.
