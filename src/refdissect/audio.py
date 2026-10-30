@@ -3,6 +3,7 @@ everything else is built on. All analysis runs on mono float32 at 44.1 kHz."""
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +58,8 @@ def write(path: str | Path, x: np.ndarray, peak: float | None = 0.9, subtype: st
     return path
 
 
-def _sos(role: str):
+@functools.cache
+def _design(role: str):
     lo, hi = BANDS[role]
     if lo and hi:
         return butter(4, [lo, hi], btype="band", fs=SR, output="sos")
@@ -66,6 +68,15 @@ def _sos(role: str):
     if hi:
         return butter(4, hi, btype="low", fs=SR, output="sos")
     return None
+
+
+def _sos(role: str):
+    """The role's band filter, designed once (a copy each call: scipy's
+    sosfilt wants it writable): butter() takes 0.13 ms, a quarter of
+    filtering a 0.6 s 808 template, and the 808 fit filters one per
+    candidate (about 24,000 a fit)."""
+    sos = _design(role)
+    return None if sos is None else sos.copy()
 
 
 def band(x: np.ndarray, role: str) -> np.ndarray:
@@ -96,6 +107,22 @@ def attack(x: np.ndarray, rise: float = 0.3, search: int | None = None) -> int:
     w = samples(1)
     env = np.convolve(head, np.ones(w) / w, mode="same")
     return int(np.argmax(env >= rise * env.max()))
+
+
+# The band each role's attack is read in: a hat's attack is where its high
+# band rises, not where the kick under it does.
+ATTACK_BAND = {"kick": "kick", "snare": "snare", "clap": "snare", "rim": "snare", "perc": "snare", "tom": "snare",
+               "hat": "hat", "open_hat": "hat", "crash": "hat", "ride": "hat", "crash/ride": "hat", "808": "808"}
+
+
+def attack_time(x: np.ndarray, role: str = "full", rise: float = 0.3, search_s: float = 0.25) -> float:
+    """Seconds from the start of x to its attack (attack() in the role's
+    band, over the first search_s). The one definition of when a sound
+    happens: truth, detections and the plan all use it, so their times can
+    be compared without removing an offset per sound."""
+    head = x[: int(search_s * SR) + samples(20)]
+    return attack(band(head, ATTACK_BAND.get(role, role if role in BANDS else "full")), rise,
+                  search=int(search_s * SR)) / SR
 
 
 def trim_onset(x: np.ndarray, floor_db: float = -30.0, pre_ms: float = 2.0) -> np.ndarray:

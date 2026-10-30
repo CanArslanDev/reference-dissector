@@ -9,6 +9,8 @@ the reference and still miss its distortion by 25 dB.
 
 from __future__ import annotations
 
+import functools
+
 import librosa
 import numpy as np
 from scipy.ndimage import uniform_filter1d
@@ -42,12 +44,21 @@ def note_name(hz: float) -> str:
 _FREQS = np.fft.rfftfreq(1 << 16, 1 / SR)
 
 
+@functools.lru_cache(maxsize=8)
+def _hann(n: int) -> np.ndarray:
+    """np.hanning(n), made once per length (read-only): 70 us of the 808
+    fit's 2.6 ms a candidate."""
+    w = np.hanning(n)
+    w.setflags(write=False)
+    return w
+
+
 def harmonics(x: np.ndarray, f1: float, upto: int = 12, start_s: float = 0.15,
               end_s: float = 0.6) -> np.ndarray:
     """Levels of harmonics 2..upto relative to the fundamental (dB, floor -60),
     from the steady part of a tone."""
     seg = x[int(start_s * SR):int(end_s * SR)]
-    seg = seg * np.hanning(len(seg))
+    seg = seg * _hann(len(seg))
     p = np.abs(np.fft.rfft(seg, 1 << 16)) ** 2
     # each harmonic's ±3 % band as a slice of the sorted frequency axis
     lo = np.searchsorted(_FREQS, np.arange(1, upto + 1) * f1 * 0.97, side="right")
