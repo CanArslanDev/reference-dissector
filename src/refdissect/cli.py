@@ -11,6 +11,7 @@
     refdissect fit-808 work/song --library-808 work/library_808.npz
     refdissect plan work/song
     refdissect live-build work/song          (needs the [live] extra and Live running)
+    refdissect live-build work/song --bars 9-16       (bars 9 to 16 only, from 0: a short live check)
     refdissect calibrate work/inventory.json --library work/library.npz --out work/calibration
 
   calibration v2, a suite of beats with every answer kept (scenarios.py, suite.py):
@@ -139,7 +140,15 @@ def _build(a):
     from .live import build
     path = Path(a.plan)
     plan = json.loads((path / "plan.json" if path.is_dir() else path).read_text(encoding="utf-8"))
-    asyncio.run(build(plan, a.user_library))
+    bars = _bars(a.bars) if a.bars else None
+    work = path if path.is_dir() else path.parent
+    out = Path(a.stems_out or work / f"excerpt-{bars[0]}-{bars[1]}") if bars else None
+    asyncio.run(build(plan, a.user_library, bars=bars, stems_out=out))
+
+
+def _bars(text: str) -> tuple[int, int]:
+    a, _, b = text.partition("-")
+    return int(a), int(b or a)
 
 
 def _calibrate(a):
@@ -386,6 +395,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("live-build", help="build the plan in the open (empty) Live set")
     s.add_argument("plan", help="plan.json or the work folder")
     s.add_argument("--user-library", default=str(USER_LIBRARY))
+    s.add_argument("--bars", default=None, metavar="A-B",
+                   help="build bars A to B only (Live's ruler, from 1), moved to start at 0, with the stems cut "
+                        "to them: a short live check")
+    s.add_argument("--stems-out", default=None,
+                   help="where the excerpt's stems go (default: excerpt-A-B/ beside the plan)")
     s.set_defaults(run=_build)
     s = sub.add_parser("calibrate", help="synthetic beats from known samples, scored")
     s.add_argument("inventory")
