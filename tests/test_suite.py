@@ -473,3 +473,32 @@ def test_the_dev_subset_is_a_beat_of_each_family(tmp_path, monkeypatch):
     monkeypatch.setattr(suite, "run", run)
     assert main(["suite", "run", str(tmp_path), "--library", "x.npz", "--tag", "t", "--subset", "dev"]) == 0
     assert got["subset"] == "dev"
+
+
+def test_clean_empties_the_runs_of_other_tags_but_keeps_their_records(tmp_path, capsys):
+    _fake_suite(tmp_path, ["v1-1", "v1-2"])
+    for beat in ("v1-1", "v1-2"):
+        for tag in ("keep", "old"):
+            work = tmp_path / beat / "runs" / tag
+            (work / "templates").mkdir(parents=True)
+            (work / "templates" / "sound_1.npy").write_bytes(b"0" * 1000)
+            (work / "plan.json").write_text("{}")
+            (work / "scores.json").write_text('{"beat": "x"}')
+    going = tmp_path / "v1-2" / "runs" / "going"  # a run that has not written its record yet
+    going.mkdir()
+    (going / "plan.json").write_text("{}")
+    (tmp_path / "scores-old.json").write_text("{}")
+    (tmp_path / "v1-1" / "stems-htdemucs").mkdir()
+
+    def files():
+        return sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    before = files()
+    assert main(["suite", "clean", str(tmp_path), "--keep", "keep"]) == 0  # a dry run
+    assert files() == before and "would go" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="--keep"):
+        suite.clean(tmp_path, [])
+    tags = suite.clean(tmp_path, ["keep"], delete=True)
+    assert tags["old"] == {"beats": 2, "bytes": 2 * 1002, "no_record": []}
+    assert tags["going"] == {"beats": 0, "bytes": 0, "no_record": ["v1-2"]}
+    assert files() == sorted(f for f in before if "/runs/old/" not in f or f.endswith("scores.json"))
+    assert suite.clean(tmp_path, ["keep"], delete=True)["old"]["bytes"] == 0

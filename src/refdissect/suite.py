@@ -14,6 +14,8 @@ matched, planned and scored, so a change to any step shows up per scenario.
               not wait on the slow ones (fit-808: 50-140 s a beat).
     report()  markdown tables of those means per scenario, with the deltas
               between tags.
+    clean()   the run folders of the tags not kept, emptied but for their
+              records (a dry run unless asked to delete).
 
 A beat folder after a run:
     events.json, mix*, stems_truth/   the truth (scenarios)
@@ -545,6 +547,49 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
         summary["last_run"]["subset"] = subset
     (root / f"scores-{tag}.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
+
+
+# ── Disk ──
+
+RECORDS = ("scores.json", "run.json")  # what clean() keeps of a run folder: its record, about 20 KB a beat
+
+
+def _size(path: Path) -> int:
+    files = [path] if path.is_file() else [f for f in path.rglob("*") if f.is_file()]
+    return sum(f.stat().st_size for f in files)
+
+
+def clean(root: str | Path, keep, delete: bool = False) -> dict:
+    """The run folders of the tags not in keep emptied but for their record
+    (RECORDS), so scores-<tag>.json can be aggregated again and per-beat
+    scores compared later (the m3 and m3a folders were removed whole, and
+    only their means per scenario were left to compare with); every
+    root/scores-<tag>.json, the stems, the truth and cache/ stay. A folder
+    without a record (a run going on, or one stopped) is left as it is.
+    Without delete nothing goes: a dry run. Returns, per tag, its beats,
+    the bytes that go (or went) and the folders left without a record. A
+    suite of 48 beats held 1.5 GB of run folders in 5.5 GB (2026-11-04),
+    4.7 MB a beat under m5."""
+    keep = set(keep)
+    if not keep:
+        raise ValueError("Name the tags to keep (--keep): clean empties the run folders of every other tag")
+    out: dict[str, dict] = {}
+    for work in sorted(Path(root).glob("*/runs/*")):
+        if not work.is_dir() or work.name in keep or not (work.parents[1] / "events.json").is_file():
+            continue
+        tag = out.setdefault(work.name, {"beats": 0, "bytes": 0, "no_record": []})
+        if not any((work / r).is_file() for r in RECORDS):
+            tag["no_record"].append(work.parents[1].name)
+            continue
+        doomed = [p for p in work.iterdir() if p.name not in RECORDS]
+        tag["beats"] += 1
+        tag["bytes"] += sum(_size(p) for p in doomed)
+        for p in doomed if delete else []:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+    return out
 
 
 # ── Means per scenario ──
