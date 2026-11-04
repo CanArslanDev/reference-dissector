@@ -21,6 +21,7 @@
         --tag new --steps analyze,match,plan,score --reuse base     (melodic and fit-808 copied from base)
     refdissect suite run ... --tag try --subset dev --cache         (11 beats, a family each: for iterations)
     refdissect suite report work/calibration-v2 --tags base,new --out report.md
+    refdissect suite clean work/calibration-v2 --keep base,new      (a dry run; --yes empties the other tags' runs)
 
   comparing and choosing (docs/11):
     refdissect compare ref/stems rebuild/stems --out compare.json   (both separated by the same model)
@@ -199,6 +200,17 @@ def _suite_report(a):
     print(f"-> {a.out}" if a.out else text)
 
 
+def _suite_clean(a):
+    from .suite import clean
+    tags = clean(a.dir, _list(a.keep) or [], delete=a.yes)
+    for tag, t in sorted(tags.items()):
+        left = f"; left, no record: {', '.join(t['no_record'])}" if t["no_record"] else ""
+        print(f"{tag}: {t['beats']} beats, {t['bytes'] / 1e6:.1f} MB{left}")
+    total = sum(t["bytes"] for t in tags.values()) / 1e6
+    print(f"{total:.1f} MB {'deleted' if a.yes else 'would go (a dry run: --yes deletes)'}; records and "
+          "scores-<tag>.json kept")
+
+
 def _spans(values):
     out = []
     for v in values or []:
@@ -306,6 +318,11 @@ def _suite_parser(sub) -> None:
     s.add_argument("--tags", required=True, help="comma-separated; deltas are last minus first")
     s.add_argument("--out", default=None)
     s.set_defaults(run=_suite_report)
+    s = ss.add_parser("clean", help="empty the run folders of the tags not kept, but for their records (dry run)")
+    s.add_argument("dir")
+    s.add_argument("--keep", required=True, help="comma-separated tags whose run folders stay whole")
+    s.add_argument("--yes", action="store_true", help="delete (default: a dry run that lists what would go)")
+    s.set_defaults(run=_suite_clean)
 
 
 def main(argv: list[str] | None = None) -> int:
