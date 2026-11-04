@@ -207,6 +207,7 @@ def test_two_kicks_at_one_pitch_are_two_sounds():
     assert [r["i"] for r in kicks.distinct(ranked, length)] == [1, 0]
 
 
+@pytest.mark.slow
 def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
     """prepare(): the windows of a band searched together get the rankings
     each gets alone (the same numbers), the library laid out once per band

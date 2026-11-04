@@ -1,6 +1,7 @@
 """The drum pipeline on a synthetic beat whose answer is known."""
 
 import numpy as np
+import pytest
 
 from refdissect.calibrate import _f1
 from refdissect.detect import detect, discover
@@ -8,6 +9,7 @@ from refdissect.grid import fit_grid
 from refdissect.structure import bar_activity, sections
 
 
+@pytest.mark.slow
 def test_snare_and_hats_found_on_their_own(beat):
     grid, _ = fit_grid(beat["audio"], (100, 180))
     templates = discover(beat["audio"], grid)

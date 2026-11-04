@@ -46,10 +46,19 @@ packages = ["src/refdissect"]
 allow-direct-references = true
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.6",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# the tests that took 2 s or more each (48 of 357, 250 of their 308 s on a 10-core M4): the fast loop leaves
+# them out (pytest -m "not slow" -n auto); the whole suite runs before every commit and in CI
+# with -n, a worker that runs out of tests takes some of another's (the whole suite at -n 4: 132 s -> 94 s)
+addopts = "--dist worksteal"
+markers = ["slow: 2 s or more in one process; left out of the fast loop"]
 
 [tool.ruff]
 line-length = 120
