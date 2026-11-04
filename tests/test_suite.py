@@ -447,3 +447,29 @@ def test_the_song_export_says_how_the_plan_plays(tmp_path):
     assert one_shot["vs_reference"] == {"ncc": 0.88} and out["808"]["synth"]["vs_reference"] == {"ncc": 0.94}
     assert one_shot["pitch_track"] == {"periods": 49, "followed": 9, "until_s": 0.27, "settled": True}
     assert "/Volumes/" not in text and "hat 1" not in text and "808 (synth)" not in text and "611" not in text
+
+
+def _fake_suite(root: Path, names) -> None:
+    for name in names:
+        scenario, seed = name.rsplit("-", 1)
+        (root / name).mkdir(parents=True)
+        (root / name / "events.json").write_text(json.dumps({"scenario": scenario, "seed": int(seed)}))
+
+
+def test_the_dev_subset_is_a_beat_of_each_family(tmp_path, monkeypatch):
+    names = [f"{s}-{k}" for s in suite.ORDER for k in (1, 2)]
+    _fake_suite(tmp_path, names)
+    dev = suite.beat_dirs(tmp_path, subset="dev")
+    assert [d.name for d in dev] == [n for n in names if n in suite.SUBSETS["dev"]]
+    assert len(dev) == 11 and len({d.name.rsplit("-", 1)[0] for d in dev}) == 11
+    assert [d.name for d in suite.beat_dirs(tmp_path, ["glides", "v1"], subset="dev")] == ["v1-1", "glides-1"]
+    with pytest.raises(ValueError, match="Unknown subset"):
+        suite.beat_dirs(tmp_path, subset="nope")
+    got = {}
+
+    def run(*args, **kwargs):
+        got.update(kwargs)
+        return {"overall": {"analysis": {}, "plan": {}}, "beats": 0, "failed": []}
+    monkeypatch.setattr(suite, "run", run)
+    assert main(["suite", "run", str(tmp_path), "--library", "x.npz", "--tag", "t", "--subset", "dev"]) == 0
+    assert got["subset"] == "dev"

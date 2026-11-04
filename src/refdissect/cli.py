@@ -19,6 +19,7 @@
         --tag base --render                                         (scores-<tag>.json: means per scenario)
     refdissect suite run work/calibration-v2 --library work/library.npz --library-808 work/library_808.npz \
         --tag new --steps analyze,match,plan,score --reuse base     (melodic and fit-808 copied from base)
+    refdissect suite run ... --tag try --subset dev --cache         (11 beats, a family each: for iterations)
     refdissect suite report work/calibration-v2 --tags base,new --out report.md
 
   comparing and choosing (docs/11):
@@ -185,7 +186,7 @@ def _suite_run(a):
     from .suite import run
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
             {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, _list(a.steps), a.reuse,
-            cache=a.cache, log=_say)
+            cache=a.cache, subset=a.subset, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
@@ -280,6 +281,9 @@ def _suite_parser(sub) -> None:
     s.add_argument("--tag", required=True, help="names this run: runs/<tag>/ per beat, scores-<tag>.json")
     s.add_argument("--model", default=DEFAULT_MODEL, help="Demucs model; stems are kept per model")
     s.add_argument("--scenarios", default=None, help="comma-separated (default: every beat under dir)")
+    s.add_argument("--subset", default=None, metavar="NAME",
+                   help="a named set of beats for quick iterations (suite.SUBSETS; dev: 11 beats, a family each); "
+                        "the final numbers stay on every beat")
     s.add_argument("--jobs", type=int, default=3, help="beats in parallel processes (each loads the library, 0.5 GB)")
     s.add_argument("--render", action="store_true", help="render each plan offline for the level scores (deleted)")
     s.add_argument("--resume", action="store_true",
