@@ -421,6 +421,7 @@ def test_estimate_from_analysis_takes_the_templates_own_attack(kit, tmp_path):
     assert est["sounds"]["sound_1"]["attack_s"] == pytest.approx(0.003, abs=1e-5)
 
 
+@pytest.mark.slow
 def test_analysis_times_land_on_the_attacks_of_a_synthetic_beat(beat, kit, tmp_path):
     """detect() reports a hit PRE (5 ms) after its template window starts: with
     the template's own attack added, the snares of the synthetic beat land

@@ -29,6 +29,7 @@ def test_one_shot_level_and_fade():
     assert abs(y[-1]) < 1e-3
 
 
+@pytest.mark.slow
 def test_fit_gets_close():
     reference = laid_out(TRUE, int(0.6 * SR))
     p, info = fit(reference, 41.2, maxiter=25, popsize=10, seed=0)
@@ -61,6 +62,7 @@ def test_envelope_and_harmonics_match_their_direct_forms():
     assert np.allclose(harmonics(y, 33.3), masks)
 
 
+@pytest.mark.slow
 def test_a_fit_is_read_back_while_nothing_it_depends_on_changed(tmp_path, monkeypatch):
     """A cached fit is the one the search would find again (it is seeded);
     another template, f1 or setting, or no cache folder, searches."""

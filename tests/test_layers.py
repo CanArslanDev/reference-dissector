@@ -98,6 +98,7 @@ def test_hats_under_every_snare(sounds):
                if np.min(np.abs(snares - e["t"])) < 0.003)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("late", ["0-8 ms", "0 ms"])
 def test_a_clap_layered_on_a_snare(sounds, late):
     """Clap alone on 6, snare alone on 12, both on 4, the clap 0-8 ms late
@@ -204,6 +205,7 @@ def discovered(beat: dict) -> list[Template]:
     return discover(beat["audio"], fit_grid(beat["audio"], (100, 180))[0])
 
 
+@pytest.mark.slow
 def test_the_conftest_beat_with_discovered_templates(beat):
     """The conftest beat (a hat on every eighth, under the 20 snares and the
     40 kicks too) with discover()'s templates, as the pipeline runs: every
@@ -248,6 +250,7 @@ def test_no_hat_under_a_kick_that_has_none(sounds):
     assert found(events, "hat", hats).all() and extra(events, "hat", hats) == 0
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("kick_gain", [0.9, 0.45])
 def test_hats_under_the_snare_when_kicks_land_on_hats(sounds, kick_gain):
     """discover()'s templates on a beat whose kicks land on 2 of every 8
@@ -403,6 +406,7 @@ def test_hits_carry_where_their_sound_starts(sounds):
     assert len(late) >= 20 and np.median(t_err) > 0.0008 and np.median(attack_err) < 0.0003
 
 
+@pytest.mark.slow
 def test_a_residual_template_keeps_its_own_hits(sounds):
     """A template of the hat's sound and another one (as a residual
     template of discover() can be, on loop transients htdemucs left in the
@@ -486,6 +490,7 @@ def test_a_view_its_main_explains_is_left_out(sounds):
     assert events["view"] == []
 
 
+@pytest.mark.slow
 @pytest.mark.xfail(strict=True, reason="B9: a view and its main merge by hits, not by where the sound starts")
 @pytest.mark.parametrize("late_ms", [12, 20])
 def test_a_view_later_on_the_sound_leaves_the_kicks_on_their_attack(sounds, late_ms):

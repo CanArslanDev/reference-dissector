@@ -4,6 +4,7 @@ on synthetic stems whose differences are known."""
 import json
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from refdissect.audio import SR
@@ -65,6 +66,7 @@ def test_listening_round_numbers_the_files(tmp_path):
     assert "Which pad?" in text and "cand1.wav" in text
 
 
+@pytest.mark.slow
 def test_commands_run(tmp_path, capsys):
     from refdissect.cli import main
     write_stems(tmp_path / "ref", duck_db=-20)

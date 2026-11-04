@@ -109,6 +109,7 @@ def truth_basic_pitch(audio, out_dir, presets, files=None):
     return result
 
 
+@pytest.mark.slow
 @needs_ffmpeg
 def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     root = tmp_path / "suite"
@@ -185,6 +186,7 @@ def test_steps_need_their_inputs_or_a_reuse():
     assert suite.check_steps(["score"], reuse="base") == ("score",)
 
 
+@pytest.mark.slow
 @needs_ffmpeg
 def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     """The melodic scenario with a perfect Basic Pitch: notes and chords
@@ -317,6 +319,7 @@ USERS = "/".join(("", "Users", ""))
 HOME = USERS + "someone"
 
 
+@pytest.mark.slow
 def test_the_export_keeps_means_per_scenario_only(tmp_path):
     ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
     ns["suite_scores"].__globals__["ROOT"] = tmp_path
