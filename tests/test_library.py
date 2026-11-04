@@ -245,3 +245,35 @@ def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monk
                         samples(80))
             assert np.array_equal(lib.candidate(i, samples(80), st), whole)
     assert max(read) < lib.audio.shape[1]
+
+
+def test_a_loaded_library_is_memory_mapped_from_a_store_checked_against_its_npz(noisy, tmp_path, monkeypatch):
+    """Library.load maps the audio, spectra and speckles from .npy files
+    beside the .npz (each job of a suite run held its own 481 MB copy), the
+    same arrays sample for sample, read-only; the store follows the .npz
+    when it is saved again, and a folder that cannot hold one gives the
+    arrays in memory as before."""
+    from refdissect import library
+    lib, _ = noisy
+    lib.save(tmp_path / "lib.npz")
+    lib.save_speckle(speckle_path(tmp_path / "lib.npz"))
+    back = Library.load(tmp_path / "lib.npz")
+    assert isinstance(back.audio, np.memmap) and not back.audio.flags.writeable
+    assert isinstance(back.speckles["snare"][1], np.memmap)
+    assert back.audio.dtype == lib.audio.dtype and np.array_equal(back.audio, lib.audio)
+    assert np.array_equal(back.spectra, lib.spectra) and back.paths == lib.paths
+    assert all(np.array_equal(back.speckles[b][1], lib.speckles[b][1]) for b in lib.speckles)
+    assert sorted(p.name for p in library.store_path(tmp_path / "lib.npz").iterdir()) == \
+        ["audio.npy", "source.json", "spectra.npy"]
+    t = placed(lib.audio[5].astype(np.float32), 0.0, 150)
+    assert back.match(t, "snare", top=5) == lib.match(t, "snare", top=5)
+    fewer = Library(lib.paths[:50], lib.roles[:50], lib.audio[:50], lib.seconds)
+    fewer.save(tmp_path / "lib.npz")  # the .npz changes: its store is written again
+    assert np.array_equal(Library.load(tmp_path / "lib.npz").audio, lib.audio[:50])
+
+    def unwritable(*args):
+        raise PermissionError("read-only folder")
+    monkeypatch.setattr(library, "_write_store", unwritable)
+    lib.save(tmp_path / "other.npz")
+    kept = Library.load(tmp_path / "other.npz")
+    assert not isinstance(kept.audio, np.memmap) and np.array_equal(kept.audio, lib.audio)

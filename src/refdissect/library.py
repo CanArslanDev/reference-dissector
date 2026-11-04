@@ -26,7 +26,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -198,6 +201,73 @@ def speckle_path(library_path: str | Path) -> Path:
     return p.with_name(f"{p.stem}_speckle.npz")
 
 
+def store_path(npz: str | Path) -> Path:
+    """Where mapped() keeps an .npz's arrays as .npy files: library.npz ->
+    library_mapped/."""
+    p = Path(npz)
+    return p.with_name(f"{p.stem}_mapped")
+
+
+def _members(npz: Path) -> dict:
+    """What a store is checked against: the .npz's size and each member's
+    CRC-32, read from the zip's directory (no array is read)."""
+    with zipfile.ZipFile(npz) as z:
+        return {"size": npz.stat().st_size, "crc": {i.filename: i.CRC for i in z.infolist()}}
+
+
+def _same_bits(a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether two arrays hold the same bytes, of the same dtype and shape."""
+    return a.dtype == b.dtype and a.shape == b.shape and np.array_equal(
+        np.ascontiguousarray(a).reshape(-1).view(np.uint8), np.ascontiguousarray(b).reshape(-1).view(np.uint8))
+
+
+def _write_store(npz: Path, names: list[str], members: dict) -> None:
+    """names' arrays of npz as .npy files in store_path(npz), each read back
+    and compared bit for bit with the .npz's before the store is put in
+    place (a folder renamed into place: two jobs that write it at once
+    leave one store)."""
+    store = store_path(npz)
+    tmp = Path(tempfile.mkdtemp(prefix=f".{store.name}-", dir=npz.parent))
+    try:
+        with np.load(npz, allow_pickle=False) as data:
+            for name in names:
+                np.save(tmp / f"{name}.npy", data[name])
+                if not _same_bits(np.load(tmp / f"{name}.npy", mmap_mode="r"), data[name]):
+                    raise OSError(f"{name}.npy does not read back as {npz.name}'s {name}")
+        (tmp / "source.json").write_text(json.dumps({"npz": npz.name, "arrays": names, **members}), encoding="utf-8")
+        shutil.rmtree(store, ignore_errors=True)
+        os.replace(tmp, store)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def mapped(npz: str | Path, names: list[str]) -> dict[str, np.ndarray]:
+    """names' arrays of an .npz (those it holds), memory-mapped read-only
+    from a store of .npy files beside it (store_path), so the jobs of a
+    suite run share one copy in the page cache and none holds its own: with
+    np.load each job read the whole library.npz into its memory (481 MB;
+    with 4 jobs and Live open, swap reached 7-9 GB). The store is written
+    once, from the .npz, and used while the .npz's size and its members'
+    CRC-32 are the ones it was written from (_members); otherwise, or where
+    it cannot be written, it is written again, or the arrays are read into
+    memory as before. The arrays are the .npz's, sample for sample."""
+    npz = Path(npz)
+    store, members = store_path(npz), _members(npz)
+    names = [n for n in names if f"{n}.npy" in members["crc"]]
+    try:
+        info = json.loads((store / "source.json").read_text(encoding="utf-8"))
+        ok = {k: info.get(k) for k in members} == members and set(names) <= set(info.get("arrays", []))
+    except (OSError, ValueError):
+        ok = False
+    try:
+        if not ok:
+            _write_store(npz, names, members)
+        return {n: np.load(store / f"{n}.npy", mmap_mode="r") for n in names}
+    except OSError:  # a folder it cannot write to: in memory
+        with np.load(npz, allow_pickle=False) as data:
+            return {n: data[n] for n in names}
+
+
 def _digest(paths: list[str]) -> str:
     return hashlib.sha256("\n".join(paths).encode("utf-8")).hexdigest()[:16]
 
@@ -300,11 +370,11 @@ class Library:
     def load(cls, path: str | Path) -> Library:
         """The library, with its speckle index when one is kept next to it
         (speckle_path) and was built from these entries by this version."""
-        with np.load(str(path), allow_pickle=False) as data:  # each array read once: not copied again (0.5 GB)
-            spectra = data["spectra"] if "spectra" in data.files else None
+        arrays = mapped(path, ["audio", "spectra"])  # memory-mapped, shared by every job (0.5 GB)
+        with np.load(str(path), allow_pickle=False) as data:
             floor = float(data["floor_db"]) if "floor_db" in data.files else np.nan
-            lib = cls([str(p) for p in data["paths"]], [str(r) for r in data["roles"]],
-                      data["audio"], float(data["seconds"]), spectra, None if np.isnan(floor) else floor)
+            lib = cls([str(p) for p in data["paths"]], [str(r) for r in data["roles"]], arrays["audio"],
+                      float(data["seconds"]), arrays.get("spectra"), None if np.isnan(floor) else floor)
         if speckle_path(path).is_file():
             lib.load_speckle(speckle_path(path))
         return lib
@@ -337,7 +407,8 @@ class Library:
 
     def load_speckle(self, path: str | Path) -> dict:
         """A saved speckle index, if it is this version's, with these settings,
-        of these entries; otherwise none, and speckle_info says why."""
+        of these entries; otherwise none, and speckle_info says why. Its
+        speckles are memory-mapped (mapped), as the library's audio is."""
         settings = json.dumps({"bands": SPECKLE, "n_fft": SPECKLE_N, "smooth": SPECKLE_SMOOTH})
         with np.load(str(path), allow_pickle=False) as data:
             why = ("another version" if int(data["version"]) != SPECKLE_VERSION
@@ -346,10 +417,11 @@ class Library:
             if why:
                 self.speckles, self.speckle_info = {}, {"ignored": f"{Path(path).name}: built for {why}"}
                 return self.speckle_info
-            rows = data["rows"]
-            self.speckles = {name: (rows, data[name]) for name in SPECKLE}
-            self.speckle_info = {"version": SPECKLE_VERSION, "entries": int(len(rows)),
-                                 "build_s": float(data["build_s"]), "file": Path(path).name}
+            rows, build_s = data["rows"], float(data["build_s"])
+        bank = mapped(path, list(SPECKLE))
+        self.speckles = {name: (rows, bank[name]) for name in SPECKLE}
+        self.speckle_info = {"version": SPECKLE_VERSION, "entries": int(len(rows)), "build_s": build_s,
+                             "file": Path(path).name}
         return self.speckle_info
 
     def shortlist(self, t: np.ndarray, semitones, chosen: list[int], keep: int) -> dict[int, list[float]]:
