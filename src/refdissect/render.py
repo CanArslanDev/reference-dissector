@@ -76,6 +76,13 @@ TRACK_808 = {"cents": 0.0, "detune_cents": 0.0, "start_s": 0.0, "volume_db": 0.0
 # (median; 98 % within 0.95-1.05 ms, read on a 1/32 ms grid), the hit before gone in that ms, and 13 hits within
 # their pad's file but after Snap had ended its voice started on time
 RETRIGGER_S = 0.001
+# With Glide on (one voice), whether a note that comes while the chain before still sounds in its release, at any
+# pitch, takes that voice over as a note of its pitch does without Glide (late_808 mono: the chain faded out over
+# RETRIGGER_S from the note, the note RETRIGGER_S late, planned that much earlier). Not measured in Live (a note 1,
+# 10 or 25 ms after a held chain under Glide), and on the suite with slides it moved glides-1's and glides-2's 808
+# notes 1 ms with no 808 note F1 gain while the glides scenario's median |balance| went 0.24 -> 0.29 dB: off until
+# Live measures it. Off, a note under Glide starts on time and the chain before rings out its release.
+GLIDE_TAKEOVER = False
 # The 808 Simpler's release, Live's default Ve Release (live.simpler_808 sends it): in the live check (probe A,
 # four isolated notes) the voice fell 1.683 dB a ms from its note's end, a straight line in dB within 0.5 dB, and
 # stopped where it reached -60 dB, RELEASE_S on (35.7 ms)
@@ -254,6 +261,12 @@ def late_808(notes: list[dict], bps: float, played_s, mono: bool = False) -> np.
     return late
 
 
+def takes_over(gliding: bool) -> bool:
+    """Whether late_808 applies to an 808 track: always without Glide, with
+    it only where GLIDE_TAKEOVER (read at call time)."""
+    return not gliding or GLIDE_TAKEOVER
+
+
 def voices_808(chains: list[list[dict]]) -> list[dict]:
     """Each chain (chains_808) as the one note its voice plays: the first
     note's pitch and start, held to the last note's end."""
@@ -410,11 +423,12 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | No
     """The 808 track (n samples, at `gain`): one voice per chain (chains_808),
     each stopped at its last note's end when cut: released as Live's 808
     Simpler releases (_release) with fade None, else faded out along a
-    straight line over `fade` samples. A note that comes while the voice
-    of the note before at its pitch still sounds (late_808) fades that
-    voice out over RETRIGGER_S from its note and starts RETRIGGER_S late,
-    as a pad's hit does; with Glide on (one voice), the voice of the chain
-    before at any pitch (the release's overlap: not measured in Live)."""
+    straight line over `fade` samples. Without Glide, a note that comes
+    while the voice of the note before at its pitch still sounds (late_808)
+    fades that voice out over RETRIGGER_S from its note and starts
+    RETRIGGER_S late, as a pad's hit does; with Glide on (one voice), only
+    where GLIDE_TAKEOVER (off: not measured in Live), and then the voice of
+    the chain before at any pitch."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)
     cache: dict[float, np.ndarray] = {}
@@ -428,7 +442,8 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | No
     g = gain * 10 ** (s["volume_db"] / 20)
     chains, late_n, mono = chains_808(track), int(round(RETRIGGER_S * SR)), glide_s(track) > 0
     firsts = voices_808(chains)
-    late = late_808(firsts, bps, lambda p: len(played(p)) / SR, mono) if cut else np.zeros(len(chains), bool)
+    late = late_808(firsts, bps, lambda p: len(played(p)) / SR, mono) if cut and takes_over(mono) \
+        else np.zeros(len(chains), bool)
     faded: dict[int, int] = {}  # a voice, and the note at its pitch (any, mono) that fades it out (its sample)
     last: dict[int, int] = {}
     for k, nt in enumerate(firsts):
