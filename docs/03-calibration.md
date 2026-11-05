@@ -375,6 +375,50 @@ m3a: the merged code (e2a5ab4), 48 beats, 2 jobs, every step run, no cache, `--r
 - m5 and m5-ft ran plan and score only, at 4 jobs, no cache: 5.8 and 4.4 s a beat over scenarios (plan 0.5 s, render 4.0 and 2.6 s), 74 and 53 s wall for the 48 beats.
 - **With `--cache`**, on 6 beats (v1, glides and bass_low, both seeds): the run that filled each beat's `cache/` took as long as a fresh one (analyze 35.5 s and fit-808 43.9 s a beat, against 35.6 and 44.7 s). A second run read both back: analyze 8.1 s, fit-808 1.0 s. Every output equals the fresh run's (`analysis.json`, `bass808.json`, `synth808.json`, the templates, the one-shot), the read-back markers and the fit's seconds aside, and the log names each file read back.
 
+### A dev subset
+
+`suite run --subset dev` runs 11 beats, one of each family:
+- the base: v1-1;
+- tempo: tempo160-1;
+- meter: meter68-1;
+- swing: swing66-1;
+- drum detail: rolls-1, layers-1;
+- the 808: bass_low-1, glides-1;
+- tonal stems: melodic-1, full-1;
+- the v1 beats rebuilt with truth stems: v1orig-1.
+
+It is for iterations with `--cache`. The final numbers stay on all 48 beats of both models.
+
+**Time** (2026-11-05, 2 jobs, `--render`, no other heavy job; [12](12-replica-mode.md#the-suite) has the memory):
+- No cache: 673.5 s wall, 114.4 s a beat (702.6 s at 06a88b1's code; one run each, the same CPU total, so the gap is noise).
+- `--cache`, filling each beat's `cache/`: 672.0 s.
+- `--cache`, read back: 260.1 s, 45.2 s a beat (analyze 8.3 s, fit-808 1.4 s, match 32.5 s).
+- The fill run's outputs equal the no-cache run's; the read-back run's differ only in the read-back records (`analysis.json` `source.cached`, `synth808.json` `fit.cached`).
+
+**How it tracks the whole suite**, on the 30 headline numbers of the report (overall means):
+
+| pair | moved by 0.01 (0.5 dB, ms or cents) or more over the 48 beats | same sign on the subset |
+|---|---|---|
+| m2g-vel → m3a | 7 | 7 |
+| m3 → m4 | 4 | 4 |
+| m4 → m5 | 0 | – |
+| m2g-ft-vel → m3a-ft | 5 | 5 |
+| m3-ft → m4-ft | 4 | 4 |
+
+Examples (all 48 → subset):
+- m2g-vel → m3a: plan drums F1@20 +0.256 → +0.220; 808 written pitch +0.023 → +0.045; level distance from a perfect kit +0.55 → +0.41 dB.
+- m3 → m4: 808 cents −3.8 → −4.4; level distance from a perfect kit −2.85 → −3.10 dB.
+
+Limits:
+- The subset weighs each of its scenarios twice as much as the whole suite does, so a change carried by one scenario (bass_low's 808 pitch) comes out about twice as large.
+- A change under 0.1 dB can read the other way (balance −0.04 → +0.02 dB on m4 → m5).
+- m3's and m3a's run folders had been removed, so the pairs that touch them compare the subset's scenarios' means over both seeds; m4 → m5 compares its beats.
+- The set was chosen with these pairs in view, so the agreement is in-sample. A first pick (tempo72, meter34, drum_pitch, no bass_low) missed m2g-vel → m3a's 808 pitch changes.
+
+**Outputs.** At this code, a fresh run of the subset (no cache) equals m5 and m5-ft on all 11 beats: 352 files byte for byte in each model, and 33 JSON files apart from seconds, the run record and the run folder's name in paths. No file is missing or extra.
+
+**`suite clean DIR --keep a,b`** empties the run folders of the other tags but keeps each `scores.json`, so their beats can still be compared later. It is a dry run unless `--yes`, and it leaves alone a folder without a record yet, such as a run in progress. A dry run keeping m5, m5-ft and one other tag listed 1,172 MB in 12 tags, in 1.1 s; the suite's run folders held 1.5 GB of its 5.5 GB (4.7 MB a beat under m5).
+
 ### Running it
 
 ```bash
@@ -384,7 +428,7 @@ uv run refdissect suite run "$W/work/calibration-v2" --library "$W/work/library.
 uv run refdissect suite report "$W/work/calibration-v2" --tags base-htdemucs,mine
 ```
 
-`$V1_TRUTH` holds the v1 beats rebuilt with truth stems (`beatN` folders). No command in this repository makes them; without them the suite has the 42 scenario beats. `--steps`, `--reuse`, `--resume`, `--model`, `--scenarios` and `--cache` are in [12](12-replica-mode.md). A measurement runs without `--cache`, so every step runs and its seconds are the code's. `scripts/export_results.py --suite` publishes a tag's means per scenario, and nothing else: the beats are made from your library and stay local ([09](09-data-and-copyright.md)).
+`$V1_TRUTH` holds the v1 beats rebuilt with truth stems (`beatN` folders). No command in this repository makes them; without them the suite has the 42 scenario beats. `--steps`, `--reuse`, `--resume`, `--model`, `--scenarios`, `--subset` and `--cache` are in [12](12-replica-mode.md). A measurement runs without `--cache`, so every step runs and its seconds are the code's. `scripts/export_results.py --suite` publishes a tag's means per scenario, and nothing else: the beats are made from your library and stay local ([09](09-data-and-copyright.md)).
 
 **Limits:**
 - The beats are synthetic, mastered alike, without per-track processing.
