@@ -18,7 +18,7 @@ Live must be running with the AbletonMCP Remote Script selected as a control sur
 | other / piano / guitar / vocals (notes) | a MIDI track per tonal stem with `melodic`'s notes, Drift as a placeholder instrument, muted |
 | REF drums / bass / other / piano / vocals | the stems as Arrangement audio clips from beat 0, warping off; drums, bass and vocals muted |
 
-Glide is on only for an 808 line with three legato notes or more, and the 808 reader writes none by default ([01](01-pipeline.md#808-notes-bass808transcribe)): no plan of the suite or of PIRAMIT turns it on.
+Glide is on only for an 808 line with three legato notes or more, and the 808 reader writes legato notes only with `--slides` ([01](01-pipeline.md#808-notes-bass808transcribe)): by default no plan of the suite or of PIRAMIT turns Glide on. With `--slides`, glides-1's and glides-2's plans do (162.5 and 82.5 ms, htdemucs), and PIRAMIT's still has no legato note.
 
 Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode), and the time signature, to the plan's meter (3/4 for meter34), before any locator;
@@ -209,11 +209,21 @@ Kicks played within 0.004 dB of `render.py` and the 808 within 0.022 dB; snares 
 
 **The meter.** meter34-1 was built in 3/4 (read back), Live's bar 1 at 0 s. Two of its five locators landed where planned, at beats 0 and 48. Live made the other three (9, 21 and 33) at 12, 24 and 36, and the build deleted and reported them. A new cue goes to the nearest line of the Arrangement's grid, which follows its zoom (6 beats at the zoom found); zoomed in four steps (`zoom_view`), beat 9 landed exactly. In 4/4, 24 of 24 locators on the other four builds landed where planned.
 
+### Live 12.4.6, a plan with Glide (2026-11-05)
+
+Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 s of the plan) at 1c29335, built with the calls `live.build` sends for the excerpt (`live.build_spec`), through the check's own session: Live's Remote Script served 8 clients, so `live-build`'s own client could not connect. 8 tracks, no problem reported; the 808's Simpler set from 6 voices to 1.
+- **Read back:** Glide Mode "Glide", Glide Time 163.0 ms shown for 162.5 ms sent, Transpose 36, the filter off, Ve Release 50 ms, "Vol < Vel" 35 %, the fader −16.3 dB.
+- **The 808 alone, recorded** (34 beats, 15.0 s, 48 kHz, resampled to 44.1 kHz), against `render.py`'s render of the same excerpt plan: aligned at 0 ms, the same RMS (−13.14 dB), the difference 31.5 dB under the render, each note's first 100 ms within 0.76 dB (median 0.0 dB, 30 notes).
+- **The slides.** The excerpt holds 5 legato notes: 4 slide inside it, and the fifth is cut by the excerpt's end and slides in neither. Over the 4 slides' 102 periods Live's pitch lies within 1.21 cents of `render.py`'s (p90; median 0.0), 1.18–3.5 cents per slide (p90 over the ramp; 3.5 on the 9-semitone one), and each slide starts and ends within 0.3 ms of `render.py`'s.
+- **The pipeline's 808 reader on both**, with slides on: 30 notes on Live's audio and 28 on `render.py`'s, 28 of them within 20 ms of each other at the same pitch; Live's other 2 are read an octave low. Neither has a legato note: the reader does not read the slides Glide plays, while `estimate_from_plan` scores the plan's legato notes as legato. Not investigated.
+- **Not measured:** the one-voice takeover on its own (a note 1, 10 or 25 ms after a held chain at Release 35.7 ms), per-note Glide Time, and a whole plan with Glide. Nothing was judged by ear.
+
 ### What the build does with it
 
 - **Snap is off** on every Simpler, and **the 808's filter** too. Measured on the second check: hits play their whole files, and no 808 note is delayed by its pitch.
 - **The 808's release stays at Live's 50 ms.** It is sent explicitly, and `render.py` and the level estimate play it (`render._release`). It was chosen over a short release for two reasons: Live was measured at 50 ms only, and on PIRAMIT's 20 plan notes that end in a rest the bass stem holds a median −7.5 dB over the next 40 ms (against the note's last 20 ms), where Live's release gives −7.9 dB, `render.py`'s old 5 ms fade −10.7 and the same law at 5 ms −18.3 (the last one extrapolated, not measured).
 - **One voice per pad, and the 808's restart.** `render_plan`, the level estimate and `estimate_from_plan` play a hit or 808 note that comes while its voice still sounds as Live does: the old voice fades over 1 ms and the new one starts 1 ms late. `make_plan` starts each such note 1 ms early, so Live sounds it where the analysis heard it: on PIRAMIT 98 of the 630 drum notes and 62 of the 101 808 notes.
+- **With Glide, one voice takes over a release at any pitch** (2e4a3ef). A note that comes while the chain before still sounds in its release cuts that chain over 1 ms and starts 1 ms late, whatever its pitch, in `render.py` and `estimate_from_plan`, and the plan starts it 1 ms earlier, its end kept. This follows the measured same-pitch restart. Only plans with Glide change: on the suite with `--slides`, glides' median |balance| 0.24 → 0.29 dB, every 808 F1 the same. Not measured in Live on its own.
 - **`pad_levels` still reads a pad against its own hits summed.** Read against the hits cut as Live plays them, the suite's plans sat 1.30 dB from a perfect kit instead of 1.20 (htdemucs_ft 1.27 instead of 1.19): a stem keeps a sound's tail under its next hit, as the suite's truth sums them.
 - **Pads load by content, and the build checks them.** Each pad's file goes into the User Library under a name of its content, and every Simpler's file is read back.
 - **The plan carries its meter**, which the build sets before the locators; a locator Live still moves is deleted, not kept where Live put it.
@@ -242,7 +252,7 @@ Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 bea
 - **`refdissect live-build` end to end.** Both checks found Live serving 8 clients and sent the build's calls through their own session. The package's read-back, locator deletion and failure messages ran as the same commands, not as its code.
 - **One `build_tracks` call of PIRAMIT's size**, which went as 5, and **a build that stops half way**: no build of the second check failed, so the failure message has not been seen.
 - **How long the browser takes** to find a pad's content name: not timed.
-- **htdemucs_ft plans**, **a plan with Glide** (only a probe glided; the restart is not modelled for one voice), and **choke groups**.
+- **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups**.
 - **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in, one probe placed such a locator; that is not in the build. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it.
 - **Simpler's top-end loss** per sample rate and transposition, as a curve. `render.py` does not model it: hats played up to 0.97 dB and snares up to 0.16 dB under `render.py`.
