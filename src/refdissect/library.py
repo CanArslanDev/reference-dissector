@@ -22,6 +22,7 @@ fitted to a template together.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -29,8 +30,15 @@ import re
 import shutil
 import tempfile
 import time
+import warnings
 import zipfile
+import zlib
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
 
 import numpy as np
 from scipy.fft import next_fast_len
@@ -215,30 +223,84 @@ def _members(npz: Path) -> dict:
         return {"size": npz.stat().st_size, "crc": {i.filename: i.CRC for i in z.infolist()}}
 
 
-def _same_bits(a: np.ndarray, b: np.ndarray) -> bool:
-    """Whether two arrays hold the same bytes, of the same dtype and shape."""
-    return a.dtype == b.dtype and a.shape == b.shape and np.array_equal(
-        np.ascontiguousarray(a).reshape(-1).view(np.uint8), np.ascontiguousarray(b).reshape(-1).view(np.uint8))
+def _stat(npy: Path) -> list[int] | None:
+    """An .npy's [size, mtime_ns] as a store records it (None: missing)."""
+    try:
+        st = npy.stat()
+    except OSError:
+        return None
+    return [st.st_size, st.st_mtime_ns]
+
+
+def _store_ok(store: Path, members: dict, names: list[str]) -> bool:
+    """Whether store holds names' arrays as written from an .npz with these
+    members: its source.json names them and each .npy has the size and
+    mtime it was written with. A .npy cut short, rewritten or deleted
+    since is caught here (comparing every byte again would read the
+    store's 620 MB on every load)."""
+    try:
+        info = json.loads((store / "source.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    files = info.get("files") or {}
+    return {k: info.get(k) for k in members} == members and all(
+        files.get(n) is not None and files.get(n) == _stat(store / f"{n}.npy") for n in names)
+
+
+def _crc(path: Path) -> int:
+    """A file's CRC-32, read 4 MB at a time."""
+    crc = 0
+    with open(path, "rb") as f:
+        while block := f.read(1 << 22):
+            crc = zlib.crc32(block, crc)
+    return crc
 
 
 def _write_store(npz: Path, names: list[str], members: dict) -> None:
-    """names' arrays of npz as .npy files in store_path(npz), each read back
-    and compared bit for bit with the .npz's before the store is put in
-    place (a folder renamed into place: two jobs that write it at once
-    leave one store)."""
+    """names' members of npz copied out as they are, .npy files in
+    store_path(npz), each with the member's CRC-32 (the zip checks it as it
+    reads, and each copy is checked again once written), then put in place
+    (a folder renamed into place) with each file's size and mtime in
+    source.json. Copied a block at a time, the same bytes as when the
+    arrays were read whole and saved: writing library.npz's and its
+    speckles' stores took 0.69 s at a 98 MB footprint, against 1.74 s and
+    1.1 GB."""
     store = store_path(npz)
     tmp = Path(tempfile.mkdtemp(prefix=f".{store.name}-", dir=npz.parent))
     try:
-        with np.load(npz, allow_pickle=False) as data:
+        with zipfile.ZipFile(npz) as z:
             for name in names:
-                np.save(tmp / f"{name}.npy", data[name])
-                if not _same_bits(np.load(tmp / f"{name}.npy", mmap_mode="r"), data[name]):
+                with z.open(f"{name}.npy") as src, open(tmp / f"{name}.npy", "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 22)
+                if _crc(tmp / f"{name}.npy") != members["crc"][f"{name}.npy"]:
                     raise OSError(f"{name}.npy does not read back as {npz.name}'s {name}")
-        (tmp / "source.json").write_text(json.dumps({"npz": npz.name, "arrays": names, **members}), encoding="utf-8")
+                np.load(tmp / f"{name}.npy", mmap_mode="r")  # an array np.load can map (ValueError if not)
+        files = {n: _stat(tmp / f"{n}.npy") for n in names}  # a rename keeps both
+        (tmp / "source.json").write_text(json.dumps({"npz": npz.name, "arrays": names, "files": files, **members}),
+                                         encoding="utf-8")
         shutil.rmtree(store, ignore_errors=True)
         os.replace(tmp, store)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def _locked(npz: Path):
+    """An exclusive lock on the .npz (flock, on a read-only handle) while a
+    job checks, writes and maps its store: 3 jobs that found it missing at
+    once each wrote it, and 1-2 of them, meeting another's store half
+    replaced, fell back to memory for the whole run (4 of 5 trials). No
+    lock where the system has none (the jobs then race as before, and
+    every array is still checked or read from the .npz)."""
+    if fcntl is None:
+        yield
+        return
+    with open(npz, "rb") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def mapped(npz: str | Path, names: list[str]) -> dict[str, np.ndarray]:
@@ -248,24 +310,33 @@ def mapped(npz: str | Path, names: list[str]) -> dict[str, np.ndarray]:
     np.load each job read the whole library.npz into its memory (481 MB;
     with 4 jobs and Live open, swap reached 7-9 GB). The store is written
     once, from the .npz, and used while the .npz's size and its members'
-    CRC-32 are the ones it was written from (_members); otherwise, or where
-    it cannot be written, it is written again, or the arrays are read into
-    memory as before. The arrays are the .npz's, sample for sample."""
+    CRC-32 are the ones it was written from (_members) and each .npy is as
+    written (_store_ok); otherwise it is written again. Where it cannot be
+    written or read, the arrays are read into memory as before, with a
+    warning: they are the same, but each job holds its own. The arrays are
+    the .npz's, sample for sample."""
     npz = Path(npz)
     store, members = store_path(npz), _members(npz)
     names = [n for n in names if f"{n}.npy" in members["crc"]]
     try:
-        info = json.loads((store / "source.json").read_text(encoding="utf-8"))
-        ok = {k: info.get(k) for k in members} == members and set(names) <= set(info.get("arrays", []))
-    except (OSError, ValueError):
-        ok = False
-    try:
-        if not ok:
-            _write_store(npz, names, members)
-        return {n: np.load(store / f"{n}.npy", mmap_mode="r") for n in names}
-    except OSError:  # a folder it cannot write to: in memory
+        with _locked(npz):
+            if not _store_ok(store, members, names):
+                _write_store(npz, names, members)
+            return {n: np.load(store / f"{n}.npy", mmap_mode="r") for n in names}
+    except (OSError, ValueError) as e:  # a folder it cannot write to, a store damaged while mapped
+        warnings.warn(f"{npz.name}: read into memory, not mapped ({type(e).__name__}: {e})", RuntimeWarning,
+                      stacklevel=2)
         with np.load(npz, allow_pickle=False) as data:
             return {n: data[n] for n in names}
+
+
+def ready(npz: str | Path) -> None:
+    """The stores Library.load maps for this library written (or checked)
+    now, its speckle index's too: suite.run does this once before its jobs
+    start, so they find them in place and none waits on another's write."""
+    mapped(npz, ["audio", "spectra"])
+    if speckle_path(npz).is_file():
+        mapped(speckle_path(npz), list(SPECKLE))
 
 
 def _digest(paths: list[str]) -> str:
