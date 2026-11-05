@@ -53,11 +53,11 @@ uv run refdissect plan "$W/song/refdissect"
 uv run --extra live refdissect live-build "$W/song/refdissect"
 ```
 
-- `analyze` takes `--bpm-range lo hi` (default 100–180: the octave the tempo is counted in), `--bpm` (forces the tempo), `--meter N/D` (3/4, 6/8; default: the tracker's, 4/4 when unsure) and `--no-tracker` (the comb alone, as before replica mode).
+- `analyze` takes `--bpm-range lo hi` (default 100–180: the octave the tempo is counted in), `--bpm` (forces the tempo), `--meter N/D` (3/4, 6/8; default: the tracker's, 4/4 when unsure) and `--no-tracker` (the comb alone, as before replica mode). `--slides` reads the 808's slides as legato notes (`bass808.glides`), off by default ([Known limits](#known-limits)); `suite run` passes it on.
 - `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/` and read them back where nothing that decides them changed ([01](01-pipeline.md#808-notes-bass808transcribe)); `--no-cache` runs them again.
 - `melodic` takes `--min-hz`, `--snap-ms`, `--no-vote` and `--drop-below`.
 - `match` takes `--detune X` and `--kick-sources`. Kick sources are off by default: they need fit-808's one-shot, so `fit-808` must run first.
-- Three models run in uv environments of their own and download on first use: Demucs (`separate`), beat_this (`analyze`, an 81 MB checkpoint) and Basic Pitch (`melodic`). Torch never loads into the main process.
+- Three models run in uv environments of their own and download on first use: Demucs (`separate`), beat_this (`analyze`, an 81 MB checkpoint) and Basic Pitch (`melodic`). Torch never loads into the main process. Demucs' environment pins torch 2.14.1: unpinned, it resolved torch 2.15.0, whose MPS stems are wrong (on 22 new beats the bass stem correlated −0.01 to 0.06 with the true bass stem, against 0.98 for the stored stems). With 2.14.1, glides-1 separates byte-identical to its stored stems.
 
 ### The suite
 
@@ -290,6 +290,7 @@ m3's and m3-ft's seconds are m3a's and m3a-ft's, which ran every step at e2a5ab4
   - Worse: the distance from the kit in 10 (7) scenarios, dynamics by 0.90 dB (1.27 → 2.16) and the others by 0.12 dB at most (0.045); balance in 11 (6), by up to 0.23 dB (0.08), full 0.94 → 1.17 (1.33 → 1.41) and flams 0.22 → 0.40; per role clap +0.60 → +0.70 (+1.58 → +1.73), tom +0.57 → +0.67 (−0.74 → −0.84), rim +0.64 → +0.84, open hat −0.09 → +0.15 dB; htdemucs_ft's 808 onset p90 7.0389 → 7.0393 ms. On dynamics-2 (0.34 → 2.03 dB) the drum track at unity plays 1.3 dB quieter with its pads on one voice (79 hits cut), so the RMS match raises its fader −23.5 → −22.2 dB and its snare and hats sit 2.0–2.4 dB over the kit.
   - Of the 34 (32) beats whose distance from the kit moved, 17 (12) moved with one voice per pad and 28 (25) with the 808's release and restart, some with both, none with the meter.
   - In Live: four of these plans (v1orig-3, meter34-1, bass_low-1, dynamics-1) are those the second live check built and recorded ([In Live](#in-live)); the other 92 are not built.
+- **g1 and g1-ft** (`suite-g1.json`, `suite-g1-ft.json`) measured the 808's slides with `--slides` at 2e4a3ef: every step, all 48 beats, `--render`, no cache (below). Slides are off by default, and off, the reader's notes equal m5's on all 96 beat runs (replayed in memory), so m5 and m5-ft stay the default's numbers.
 
 **The first five fixes of 2026-10-29**, each on a branch of its own from 4f30623, measured there against m2g-vel (m2g-ft-vel), then merged; m3a ran every step of the merged code (e2a5ab4), and m3 the last round on top of it:
 - **The pad gate** (fix/pad-gate, `live.py`; plan level, in memory on m2g-vel's analyses, render included: the harness gave the suite's own plan scores exactly on 4 code and tag pairs). Pads on evidence, the backbone first, each strike once, each note early by its sample's attack: plan drums 0.612 → 0.866 (0.648 → 0.898), open hat 0.043 → 0.980 (0.022 → 0.993), snare 0.813 → 0.935, false hits 23.0 → 10.3 a beat (10.2 → 3.7); levels 3.67 → 4.16 dB (3.21 → 3.79).
@@ -313,6 +314,30 @@ Merged, every 808 number held at g8-f1's. The levels moved from lv-f3's 1.27 to 
 - Snap off, the 808's filter off, the pads by content and the build's messages change nothing `render.py` plays.
 - m4's plans scored as Live plays them (lb-5s, score only) sit 1.259 dB (1.242) from a perfect kit, balance 0.566 dB (0.506), the 808's onset error median 1.636 ms (1.574): the fair baseline for the numbers above.
 - Not adopted: each pad read against its hits cut as Live plays them, 1.302 and 0.600 dB (1.273 and 0.511; lb-1); read only on the hits clear of its own hit before, 1.156 and 0.530 dB (1.281 and 0.542; lb-1b).
+
+**The 808's slides** (feat/808-glides, 2026-11-05: `bass808.glides`, `render.py`, `live.py`; tags g1 and g1-ft, every step at 2e4a3ef with `--slides`, all 48 beats, `--render`, no cache). Off by default. Thresholds were chosen on seed 1 and the dev subset only; seed 2 and the held-out glide beats ([03](03-calibration.md#held-out-glide-beats)) report.
+- **Where m5 lost them.** Of the truth's 24 legato notes, 14 (11) were merged into the note before, 9 (12) read as attacked notes, 8 (9) of those at a wrong pitch, and 1 (1) dropped. A kick sits under 18 of the 24 slide starts, and the old rule's drum test called those attacked. Where it took a slide, its start, a 0.3-semitone crossing, came 24–43 ms late.
+- **The reader.** A slide is read from the 808 band's period track, inside a run of notes one voice may have played: a hold, a straight move to a hold at a whole transposition of the template (within 0.35 semitones), and no restart, so no rise of 2.5 dB or more from 80 ms before the move to 40 ms after (seed 1's slides rise 1.9 dB at most). A drum attack alone is no attack. The legato note starts where a least-squares ramp starts and glides over the ramp's length. The old `_slide` rule is gone.
+- **Legato notes at analysis level** (matched of made; recall against the truth):
+
+| beats | truth | htdemucs | htdemucs_ft |
+|---|---|---|---|
+| suite seed 1 (in-sample) | 10 | 8 of 8, recall 0.80; start a median 3.4 ms from the truth's | 8 of 8, 0.80; 4.4 ms |
+| suite seed 2 | 14 | 4 of 10, recall 0.286; 24.9 ms | 3 of 5, 0.214; 16.6 ms |
+| suite, all 48 beats | 24 | 12 of 18: recall 0.50, precision 0.67 | 11 of 13: 0.458, 0.85 |
+| held-out B, kit 1 (seed 1's kit, partly in-sample) | 18 | 5 of 7 | 7 of 7 |
+| held-out B, kit 2 | 22 | 4 of 8, recall 0.18 | 6 of 8, 0.27 |
+| held-out A, new kits | 52 | 14 of 20, recall 0.27; 3.7 ms | 20 of 24, 0.385; 7.0 ms |
+
+- **Beats without a slide.** 2 (1) get one false legato note each, none on seed 1: swing66-2, a missed retrigger whose template drop looks like a 3-semitone slide, 808 note F1@50 0.9143 → 0.9057 at analysis and in the plan; tempo160-2, a missed truth note found but called legato, analysis F1@50 0.9204 → 0.9123 and onset F1@20 0.9558 → 0.9474, plan F1@50 0.9204 → 0.9298; (bass_low-2, 0.0276 → 0.0275). The other 41 (42) beats without a slide keep their 808 notes and plan byte for byte. This is why slides stay off.
+- **Over the 48 beats**, m5 → g1 (m5-ft → g1-ft). 808 note F1@50 0.9360 → 0.9385 at analysis (0.9245 → 0.9267), 0.9342 → 0.9367 in the plan (0.9345 → 0.9364); F1@20 0.9108 → 0.9118 (0.9133 → 0.9156) and 0.9095 → 0.9104 (0.9202 → 0.9222); median |cents| 6.05 → 5.99 (12.07 → 12.03) and 4.42 → 4.37 (9.63 → 9.54); chords, tetrads 0.826 → 0.830 (0.810 → 0.814), on full-1, whose chords take the new 808 as their bass. glides 0.791 → 0.847 (0.839 → 0.884) at analysis, 0.782 → 0.829 (0.821 → 0.867) in the plan; full 0.8901 → 0.8969 (0.9225 → 0.9259) at analysis. Drums, tempo, downbeats, meter, swing, melodic F1 and locators did not move. Seed 1 is in-sample, so half of glides' and full's gain is.
+- **Worse.** The repo sets no numeric tolerance, and a fresh run reproduces stored outputs byte for byte, so each of these counts. htdemucs' 808 onset p90 7.98 → 8.03 ms (glides 17.0 → 17.9); htdemucs_ft's distance from a perfect kit 1.1516 → 1.1536 dB and balance 0.4761 → 0.4774; the 808's level spread p90 1.463 → 1.501 dB (0.946 → 0.993), glides 1.28 → 2.06 (0.74 → 1.71); tempo160 at analysis 0.933 → 0.929 (in the plan 0.933 → 0.938) and swing66 0.902 → 0.897; htdemucs_ft full's plan 0.890 → 0.887, full-1's F1@20 0.9494 → 0.9434, whose 2 legato notes, under three, play as notes of their own.
+- **The plan with Glide.** glides-1 and glides-2 plan voices 1, Glide Mode "Glide" and 162.5 and 82.5 ms; their plan-level legato notes, 6 of 6 and 4 of 8 right (htdemucs_ft 6 of 6 and 3 of 4), equal the analysis'. One Glide Time per track is a mean 47 ms off the truth's per-note glides on glides-1 (88–276 ms) and 93 ms on glides-2 (64–263 ms).
+- **One voice under Glide** (2e4a3ef). A note that comes while the chain before still sounds in its release, at any pitch, cuts that chain and starts 1 ms late, as the measured same-pitch restart does, and the plan starts it 1 ms earlier. Only plans with Glide change: glides' median |balance| 0.24 → 0.29 dB, every 808 F1 the same. Not measured in Live on its own.
+- **Held-out, all numbers.** B (the suite's kits, new patterns): analysis 808 note F1@50 0.7834 → 0.7941 (0.8182 → 0.8304), glides 0.791 → 0.828 (0.835 → 0.873); worse, full 0.8927 → 0.8898 and producer 0.6664 → 0.6651 (0.7136 → 0.7122), the 808's onset p90 11.71 → 12.19 ms (12.73 → 13.67). A (new kits): 0.5425 → 0.5532 (0.6391 → 0.6568), glides 0.590 → 0.613 (0.619 → 0.658), full 0.731 → 0.741 (0.780 → 0.794), no legato note on its 3 producer beats without a slide; worse, plan |cents| 88.0 → 88.2 (58.5 → 58.8) and distance from a perfect kit 1.852 → 1.877 dB (1.949 → 1.958).
+- **Slides it does not read.** full-2's 100 ms legato notes (about 30 ms of hold after the ramp); producer-2's octave slides after notes of 17–83 ms (no hold before); slow 1-semitone slides over 263–276 ms; glides-2's octave-low readings near slides; a slide straight after a slide. Comparing a restarted sample against a ramp did not separate slides from retriggers (ratios 1.05–212 against 1.13–3.83) and was left out.
+- **PIRAMIT**, with `--slides` as without: 101 notes, 0 legato in each of its 8 sections; `bass808.json`, `plan.json` and the one-shot equal the stored run's, and no Glide.
+- **The one-shot's length** was measured and left at 3 s: the longest suite chain reads 1.58 s of it (glides-1), and PIRAMIT has no chain.
 
 **The lanes of m2g, each alone**, on m1's other steps:
 - **Drum discovery** (m1 → l1a-fix, 48 beats, `suite-l1a-fix.json`):
@@ -345,7 +370,7 @@ The plan carries every setting below, and `live.build_spec` sends it to `build_t
 - **One voice per pad.** A hit that comes while its pad's hit before still plays cuts it and starts 1 ms late (391 hits on 18 pads, first check). `render.py` now plays it so: on the second check the 254 such hits started 0.004–0.019 ms after `render.py`'s (medians per pad), and every one of the 1,320 planned hits within 0.04 ms.
 - **Snap off.** Hits play their whole files: kicks and snares end within 0.04 ms of `render.py`'s (medians per pad), hats up to 0.8 ms earlier, likely as Simpler's top-end loss lowers their tails. Snap on had cut them 4.7–27 ms short.
 - **The 808**: the one-shot on its template's periods, the notes at their onsets, Live's 50 ms release, which `render.py` now plays, and a restart 1 ms late after a note of its pitch. On the second check 408 notes started within 0.11 ms of `render.py`'s, at −43.1 to −50.8 dB of residual (medians per beat). With its filter on, the first check found the notes delayed 0.13–0.46 ms by their pitch; the filter is off now.
-- **Glide**, on a probe: Glide Mode and Glide Time read back, voices set to 1, the slide within 1.04 cents (p90) of `render.py`. No plan turns Glide on.
+- **Glide**, on a probe (2026-10-29): Glide Mode and Glide Time read back, voices set to 1, the slide within 1.04 cents (p90) of `render.py`. On bars 3–10 of glides-1's g1 plan (2026-11-05, [07](07-building-in-live.md#live-1246-a-plan-with-glide-2026-11-05)): Glide Time 163.0 ms shown for 162.5 sent, the 808 alone 31.5 dB of residual under `render.py`'s, the 4 slides within 1.21 cents (p90 over 102 periods) and each starting and ending within 0.3 ms of `render.py`'s. By default no plan turns Glide on.
 - **The meter.** A 3/4 plan is built in 3/4.
 - **The scores.** On the four m5 beats, drum F1@20 per role read off Live's audio equals `render.py`'s. The recorded levels scored within −0.25 to +0.12 dB of `render.py`'s distance from a perfect kit and −0.12 to +0.40 dB of its balance: Simpler's top-end loss, which `render.py` does not model (hats up to 0.97 dB under it).
 - **Melodic tracks and stems** (PIRAMIT, second check): 3 muted Drift tracks with their 1,150 notes as sent, 5 stems, 8 locators where planned.
@@ -353,7 +378,7 @@ The plan carries every setting below, and `live.build_spec` sends it to `build_t
 **Not verified in Live:**
 - `refdissect live-build` end to end. Live's Remote Script served 8 clients on both checks, which sent the build's calls through their own session.
 - One `build_tracks` call of PIRAMIT's size (it went as 5), and a build that stops half way.
-- htdemucs_ft plans, a plan with Glide, and choke groups. A choke group cuts with a 1 ms fade (the battery); `render.py` fades a cut over 5 ms, and the plan sets none.
+- htdemucs_ft plans, a whole plan with Glide (an excerpt was built), one voice taking over a release at another pitch under Glide, and choke groups. A choke group cuts with a 1 ms fade (the battery); `render.py` fades a cut over 5 ms, and the plan sets none.
 - Locators off the Arrangement's grid: Live moves them, and the build deletes them (3 of meter34-1's 5).
 - Bar 1: Live's bar 1 sits at 0 s, so full's first bar line, 0.4 s in, lands 400 ms off it.
 - Simpler's top-end loss as a curve per sample rate and transposition.
@@ -407,13 +432,16 @@ All measured on the suite (m5 unless named; m4 equals m3 on everything but the p
 - **bass_low-2 on htdemucs_ft**: its template is read from its tail 57 cents flat. `settle()` refuses its reading (the window's halves lie 120 cents apart), and would only lower a template anyway, so its written pitch stays at 0.130. On htdemucs_ft bass_low's note F1@50 is 0.338 (plan 0.513 at m4, bass_low-1 0.981).
 - **An attack under 9 dB** over a note still ringing, with no kick on it, stays in that note (once on PIRAMIT, 6.5 dB). Candidates inside a silence are dropped after the segmentation, not before it.
 - **Legato notes are off by default.** Legato recall is 0; the truth has 24 legato notes on 5 beats.
-  - The opt-in slide rule was tuned on the beats it was measured on.
+  - With `--slides` (g1), recall is 0.50 [0.458]: 8 of seed 1's 10 (in-sample), 4 [3] of seed 2's 14, 4 [6] of held-out B kit 2's 22. It stays off because 2 [1] beats without a slide get a false legato note (swing66-2, tempo160-2 [bass_low-2]), which costs swing66-2 0.009 of 808 note F1@50.
+  - Not read with it: legato notes of about 100 ms (full-2), octave slides after notes of 17–83 ms (producer-2), slow 1-semitone slides over 263–276 ms, a slide straight after a slide.
   - Merging every unattacked note into the note before loses a few real notes (tempo160-1 1.000 → 0.946 in the lane).
   - Two 16th notes at one pitch at 160 BPM are split only in part: 2 of the 4 pairs of the unit-test bar still merge.
 - **The plan's 808 sits 1.9 dB under a perfect kit** (−1.87 dB [−2.01] at m4 and m5; −1.98 dB at m3, −1.97 dB at m2g-vel, −1.95 dB at m2g; +0.09 dB in m1). Its fader matches the bass stem's whole-track RMS, which now sees the notes' real lengths.
-- **The tails of long legato chains are silent.** The one-shot is 3 s long.
+- **The tails of legato chains longer than the one-shot are silent.** The one-shot is 3 s long; the longest suite chain reads 1.58 s of it (glides-1), and PIRAMIT has none.
 - **The 808 reader and the plan's estimate disagree on short restarted notes.** The suite's plan-level 808 scores come from `estimate_from_plan`. Run on the plan's own 808 audio, Live's or `render.py`'s, the pipeline's reader reads bass_low-1's 64 notes of 110 ms 63–68 cents flat: note F1@50 0.59, where the estimate gives 1.0. With m4's notes, before restarts started 1 ms early, it read 6 of the 156 more than 50 cents off. On the truth's own 808 stem it misreads 92 of them, so it cannot say which is right.
-- **With Glide** (one voice), the restart and the release's overlap are not modelled. No plan of the suite or of PIRAMIT turns Glide on.
+- **With Glide** (one voice), a note in the release of the chain before cuts it and starts 1 ms late at any pitch (2e4a3ef), by analogy with the measured same-pitch restart: not measured in Live on its own. By default no plan of the suite or of PIRAMIT turns Glide on.
+  - One Glide Time per track: a mean 47 ms [glides-1] and 93 ms [glides-2] off the truth's per-note glides (64–276 ms).
+  - The reader does not read the slides Glide plays. On Live's recording of glides-1's excerpt, and on `render.py`'s, it finds no legato note with slides on, where the plan has 4 slides; plan-level legato comes from `estimate_from_plan`. Not investigated.
 - **A beat without an 808** gets an 808 track that doubles its kicks where the bass stem holds the kick's leak: the reader learns a template from the leak, fit-808 fits a one-shot to it, and the plan plays it on the kicks. On synthetic stems (8 bars at 140 BPM, 32 kicks, no 808) a leak at 0.15 or 0.5 of the kick's level gave 31 notes from a 71.2 Hz template, the same at 4f30623; a silent bass stem gives none. Nothing refuses a template learnt on drum attacks alone, and the suite has no beat without an 808.
 - **A kick inside a held note** is taken back into it (`legato()`: an attacked note of 120 ms or less whose follower settles at the held note's pitch). That rule can take a note that a rest or a rise kept, and hold the note before over the rest (found in review). No suite beat reaches it: the silence and rise rules change one beat run of 96.
 
@@ -448,8 +476,8 @@ All measured on the suite (m5 unless named; m4 equals m3 on everything but the p
 
 In order ([10](10-roadmap.md) has the metrics, targets and gaps):
 1. **The plan with Live's measured behaviour:** Simpler's top-end loss in `render.py`, choke groups, bar 1 and the locators off Live's grid; the levels per beat (the kick against the snare, dynamics) and balance within each stem group. Velocities follow Live's law (m2g-vel), pads are given on evidence (m3), each pad has a level of its own (m4), and Snap, one voice per pad, the 808's release and the meter follow Live (m5).
-2. **The 808 in the plan:** a note's own cents (full, producer), the reader against the estimate on short restarted notes, and the one-shot's head by ear. Its pitch on short, low notes is done (m4).
-3. **The build in Live:** `refdissect live-build` end to end, one `build_tracks` call of a song's size, htdemucs_ft plans, Glide and a build that fails. Suite plans and PIRAMIT's were built, recorded and scored as the plan is scored on 2026-10-29 ([In Live](#in-live)).
+2. **The 808 in the plan:** slides on by default once no beat without a slide gets one (`--slides`), a note's own cents (full, producer), the reader against the estimate on short restarted notes, and the one-shot's head by ear. Its pitch on short, low notes is done (m4).
+3. **The build in Live:** `refdissect live-build` end to end, one `build_tracks` call of a song's size, htdemucs_ft plans, a whole plan with Glide and a build that fails. Suite plans and PIRAMIT's were built, recorded and scored as the plan is scored on 2026-10-29 ([In Live](#in-live)).
 4. **The closed loop:** measure the recording, correct levels, pitch and timing, rebuild, and stop when the distance stops falling.
 5. **Speed:** a controlled timing of the whole suite, and fit-808 and match faster with the same outputs. The tests run in parallel, the dev subset and the shared library are done ([The suite](#the-suite)).
 6. **The open limits above.**
