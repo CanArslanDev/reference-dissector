@@ -325,3 +325,21 @@ def test_convert_v1(rows, tmp_path):
         tmp_path / "rebuild" / "beat1" / "mix.wav").stat().st_ino  # hard-linked
     v = S.verify(tmp_path / "suite" / "v1orig-1")
     assert v["attack_err_max_ms"] <= 2.0 and v["stems_vs_mix_db"] < -100 and v["mp3_lag_samples"] == 0
+
+
+def test_a_legato_chain_past_its_sample_writes_no_note_that_ends_before_it_starts():
+    """A chain read faster than its sample lasts falls silent before its last
+    notes start: those sound nothing and are left out, and every note left
+    ends after it starts (a held-out glides draw wrote one ending 148 ms
+    before its start)."""
+    t = np.arange(int(0.2 * SR)) / SR
+    shot = (np.sin(2 * np.pi * F808 * t) * np.exp(-t / 0.1)).astype(np.float32)
+    beat = S.Beat(S.Clock(120.0), 3 * SR, 1, "4/4")
+    beat.sounds["808"] = S.make_sound("808", "808.wav", shot, 1.0)
+    bass = [S._note(0, 1, 0.0), S._note(1, 2, 12.0, False), S._note(2, 3, 24.0, False), S._note(3, 4, 19.0, False)]
+    for b in bass[1:]:
+        b["glide"] = {"kind": "legato", "semis": 0, "ms": 60.0}
+    S.play_808(beat, bass)
+    assert 2 <= len(beat.bass808) < 4
+    assert all(e["end"] > e["t"] for e in beat.bass808)
+    assert not [p for k, e in enumerate(beat.bass808) for p in evaluate._event_problems("bass808", k, e, None)]
