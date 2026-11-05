@@ -92,10 +92,13 @@ def _analyze_options(s) -> None:
     s.add_argument("--bpm", type=float, default=None, help="force the tempo (quarter notes per minute)")
     s.add_argument("--meter", default=None, help="N/D, e.g. 3/4 or 6/8 (default: the tracker's, 4/4 when unsure)")
     s.add_argument("--no-tracker", action="store_true", help="fit the grid without beat_this, as before")
+    s.add_argument("--slides", action="store_true",
+                   help="read the 808's slides as legato notes (bass808.glides; off by default: see docs/12)")
 
 
 def _analyze_kwargs(a) -> dict:
-    return {"bpm_range": tuple(a.bpm_range), "bpm": a.bpm, "meter": a.meter, "tracker": not a.no_tracker}
+    return {"bpm_range": tuple(a.bpm_range), "bpm": a.bpm, "meter": a.meter, "tracker": not a.no_tracker,
+            **({"slides": True} if a.slides else {})}
 
 
 def _match_options(s) -> None:
