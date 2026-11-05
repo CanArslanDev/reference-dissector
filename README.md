@@ -175,15 +175,15 @@ Every step writes JSON next to its inputs, so you can read what it decided befor
 `uv sync` installs pytest, pytest-xdist and ruff. No test needs your library, Demucs, Live or a model download.
 
 ```bash
-uv run pytest -m "not slow" -n auto     # the fast loop: 303 tests in 22 s at -n 4
-uv run pytest -n auto                   # the whole suite, before every commit and in CI: 96 s at -n 4 (307 s in one process)
+uv run pytest -m "not slow" -n auto     # the fast loop: 306 tests in 22 s at -n 4
+uv run pytest -n auto                   # the whole suite, before every commit and in CI: 94 s at -n 4 (307 s in one process)
 uv run ruff check .
 ```
 
-- The 48 tests marked `slow` took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
+- The 48 test functions marked `slow` (62 test items, with their parameters) took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
 - With `-n`, an idle worker takes tests from a busy one (`--dist worksteal`, set in pyproject). At -n 4 that cut the whole suite from 132 s to 94–96 s.
 - On a machine you are working on, `-n 4` leaves cores free.
-- Measured on a 10-core Apple M4 (2026-11-04/05): 363 passed, 3 skipped, 2 expected failures. CI runs `-n auto`; its time there is not measured yet.
+- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`; its time there is not measured yet.
 
 For pipeline changes, iterate on the suite's dev subset, then measure on every beat:
 
@@ -200,7 +200,7 @@ uv run --extra live refdissect live-build "$W/song/refdissect" --bars 9-16   # a
 - `suite clean` keeps every tag's `scores.json`, so a cleaned tag can still be compared beat by beat.
 - `live-build --bars A-B` builds bars A to B of a plan from 0, with the stems cut alike ([07](docs/07-building-in-live.md#a-short-live-check)). It has not been run in Live yet.
 - The library's arrays are memory-mapped, so the jobs of a run share one copy. At 2 jobs each job's peak physical footprint fell from 1.7–1.8 GB to 1.0 GB, at the same wall time ([12](docs/12-replica-mode.md#the-suite)).
-- None of this changes an output: on the dev subset's 11 beats, every file of a fresh run at this code equals m5's and m5-ft's, seconds and run records aside.
+- None of this changes an output: on the dev subset's 11 beats, every output file of a fresh run at this code but `log.txt` equals m5's and m5-ft's, seconds and run records aside.
 
 ## Documentation
 
