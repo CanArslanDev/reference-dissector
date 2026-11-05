@@ -1,4 +1,8 @@
 import json
+import os
+import shutil
+import sys
+import warnings
 
 import numpy as np
 import pytest
@@ -275,5 +279,70 @@ def test_a_loaded_library_is_memory_mapped_from_a_store_checked_against_its_npz(
         raise PermissionError("read-only folder")
     monkeypatch.setattr(library, "_write_store", unwritable)
     lib.save(tmp_path / "other.npz")
-    kept = Library.load(tmp_path / "other.npz")
+    with pytest.warns(RuntimeWarning, match="other.npz: read into memory"):
+        kept = Library.load(tmp_path / "other.npz")
     assert not isinstance(kept.audio, np.memmap) and np.array_equal(kept.audio, lib.audio)
+
+
+def _store_npz(tmp_path):
+    rng = np.random.default_rng(0)
+    arrays = {"audio": rng.standard_normal((40, 500)).astype(np.float16),
+              "spectra": rng.standard_normal((40, 24)).astype(np.float32)}
+    np.savez(tmp_path / "lib.npz", paths=np.array(["x"] * 40), **arrays)
+    return tmp_path / "lib.npz", arrays
+
+
+def test_a_store_changed_cut_or_missing_a_file_is_written_again(tmp_path):
+    """mapped() maps a store only while each .npy has the size and mtime it
+    was written with: a .npy rewritten at its size gave other numbers with
+    no warning, one cut short raised ValueError, and one deleted left every
+    later load in memory, the store never repaired."""
+    from refdissect import library
+    npz, arrays = _store_npz(tmp_path)
+    library.mapped(npz, list(arrays))
+    store = library.store_path(npz)
+
+    def damage(name, how):
+        p = store / f"{name}.npy"
+        if how == "missing":
+            p.unlink()
+            return
+        b = bytearray(p.read_bytes())
+        st = p.stat()
+        if how == "changed":
+            b[-4:] = b"\x00\x00\x80\x7f"
+        p.write_bytes(bytes(b[: len(b) // 2] if how == "cut" else b))
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))  # however coarse the folder's clock
+
+    for name, how in (("audio", "changed"), ("audio", "cut"), ("spectra", "missing")):
+        damage(name, how)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # no fall-back to memory
+            got = library.mapped(npz, list(arrays))
+        assert all(isinstance(got[n], np.memmap) and np.array_equal(got[n], arrays[n]) for n in arrays), how
+        assert sorted(p.name for p in store.iterdir()) == ["audio.npy", "source.json", "spectra.npy"]
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []
+
+
+def _mapped_kinds(npz: str) -> list[str]:
+    from refdissect import library
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        got = library.mapped(npz, ["audio", "spectra"])
+    return [type(got["audio"]).__name__, str(np.asarray(got["audio"]).sum()), len(caught)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no flock")
+def test_jobs_that_find_the_store_missing_at_once_all_map_one_store(tmp_path):
+    """3 spawned jobs mapping a library with no store yet, at once: each
+    wrote it, and 1-2 of them fell back to memory for the run (4 of 5
+    trials). They now write it one at a time, and every job maps it."""
+    from concurrent.futures import ProcessPoolExecutor
+    from multiprocessing import get_context
+    npz, arrays = _store_npz(tmp_path)
+    want = ["memmap", str(np.asarray(arrays["audio"]).sum()), 0]
+    with ProcessPoolExecutor(3, mp_context=get_context("spawn")) as pool:
+        for _ in range(3):
+            shutil.rmtree(tmp_path / "lib_mapped", ignore_errors=True)
+            assert list(pool.map(_mapped_kinds, [str(npz)] * 3)) == [want] * 3
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["lib.npz", "lib_mapped"]
