@@ -87,6 +87,7 @@ from .render import (
     pad_settings,
     pad_track,
     render_808,
+    voices_808,
 )
 
 PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44, 46, 49, 51],
@@ -303,11 +304,11 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
     and end glides no note plays yet) is listed under "slides". The
     durations are final here (one voice: a note ends 0.001 beat before the
     next starts, or holds over it to slide), as Glide would turn any other
-    overlap into a slide. Without Glide, a note that Live starts late, as
-    it comes while the voice of the note before at its pitch still sounds
-    in its release (render.late_808), starts that much earlier, its end
-    kept, as a pad's note does (on_time); the note before it then ends
-    0.001 beat before it, as any."""
+    overlap into a slide. A note that Live starts late, as it comes while
+    the voice of the note before at its pitch (with Glide on, the one
+    voice's chain before) still sounds in its release (render.late_808),
+    starts that much earlier, its end kept, as a pad's note does
+    (on_time); the note before it then ends 0.001 beat before it, as any."""
     notes = analysis["notes_808"]
     peaks = np.array([n["peak"] for n in notes]) if notes else np.array([1.0])
     med = float(np.median(peaks)) or 1.0
@@ -361,11 +362,12 @@ def plan_808(analysis: dict, synth: dict | None, stems_dir: str | Path, beats_pe
             glides.append((len(out) - 1, g))
     order = sorted(range(len(out)), key=lambda i: out[i]["start_time"])
     _one_voice(out, order, slid, beats_per_second)
-    if shot is not None and not gliding:  # each note that Live starts late, that much earlier (as on_time a pad's)
+    if shot is not None:  # each note that Live starts late, that much earlier (as on_time a pad's)
         lengths: dict[int, float] = {}
-        ordered = [out[i] for i in order]
-        for nt, late in zip(ordered, late_808(ordered, beats_per_second, lambda p: lengths.setdefault(
-                p, len(transpose(shot, p + shift0)) / SR))):
+        heads = [k for k, i in enumerate(order) if not slid[i]]  # with Glide, each chain's voice starts there
+        chains = [[out[i] for i in order[a:b]] for a, b in zip(heads, heads[1:] + [len(order)])]
+        for nt, late in zip([c[0] for c in chains], late_808(voices_808(chains), beats_per_second, lambda p:
+                            lengths.setdefault(p, len(transpose(shot, p + shift0)) / SR), gliding)):
             if late:  # its end stays
                 step = min(nt["start_time"], round(RETRIGGER_S * beats_per_second, 4))
                 nt["start_time"], nt["duration"] = round(nt["start_time"] - step, 4), round(nt["duration"] + step, 4)

@@ -634,6 +634,33 @@ def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path, monk
     assert len(heard) == 1 and heard[0]["t"] == pytest.approx(0.5, abs=0.01) and np.isfinite(heard[0]["midi"])
 
 
+def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_1_ms_earlier(tmp_path, monkeypatch):
+    """With Glide on (one voice), a note that comes while the chain before
+    still sounds in its release, at any pitch, is planned RETRIGGER_S
+    earlier (Live starts it that much late: render.late_808 mono), its end
+    kept; one that comes after the release, on time."""
+    import soundfile as sf
+
+    from refdissect import live
+    from refdissect.live import plan_808
+    from refdissect.render import RETRIGGER_S
+    monkeypatch.setattr(live, "GLIDE_LEAST", 1)
+    hz = 32.70
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.0, "ms": 80.0, "shape": "lin", "kind": "legato"}
+
+    def last_start(gap: float) -> tuple[float, float]:
+        notes = [{"t": 0.5, "t_attack": 0.505, "end": 1.0, "pitch": 24, "peak": 1.0},
+                 {"t": 1.0, "t_attack": 1.0, "end": 1.5, "pitch": 29, "peak": 1.0, "glide": glide, "flags": ["legato"]},
+                 {"t": 1.5 + gap, "t_attack": 1.505 + gap, "end": 2.0, "pitch": 31, "peak": 1.0}]
+        n = plan_808({"tuning": {"808": 0.0}, "notes_808": notes}, synth, tmp_path / "stems", 2.0)["notes"][-1]
+        return n["start_time"] - 2.0 * gap, n["start_time"] + n["duration"]
+    (soon, soon_end), (later, later_end) = last_start(0.01), last_start(0.2)
+    assert soon == pytest.approx(later - 2.0 * RETRIGGER_S, abs=1e-4) and soon_end == later_end
+
+
 @pytest.mark.slow
 def test_each_start_and_transposition_is_fitted_once(monkeypatch):
     """candidates() fits the template at a start and transposition once:

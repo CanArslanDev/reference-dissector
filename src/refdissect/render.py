@@ -231,7 +231,7 @@ def _release(x: np.ndarray, length: int) -> np.ndarray:
     return y
 
 
-def late_808(notes: list[dict], bps: float, played_s) -> np.ndarray:
+def late_808(notes: list[dict], bps: float, played_s, mono: bool = False) -> np.ndarray:
     """Which of the 808's notes (in time order) Live starts RETRIGGER_S late,
     as it does a pad's hit (late_starts): those that come while the voice of
     the note before at their pitch still sounds, until RELEASE_S past that
@@ -239,16 +239,26 @@ def late_808(notes: list[dict], bps: float, played_s) -> np.ndarray:
     (played_s(pitch), s), whichever comes first. In the live check the
     808's notes after a note of their pitch started 0.94 to 1.05 ms after
     the other notes of their pitch, whose own delay was the filter's
-    (simpler_808 now turns it off)."""
+    (simpler_808 now turns it off). mono (one voice: Glide on): the note
+    before at any pitch, as the one voice is the one it takes over; not
+    measured in Live, which started a note 25 ms after one ended again."""
     late = np.zeros(len(notes), bool)
     by_pitch: dict[int, list[int]] = {}
     for k, nt in enumerate(notes):
-        by_pitch.setdefault(nt["pitch"], []).append(k)
-    for pitch, ks in by_pitch.items():
+        by_pitch.setdefault(0 if mono else nt["pitch"], []).append(k)
+    for ks in by_pitch.values():
         t = np.array([notes[k]["start_time"] / bps for k in ks])
         end = np.array([(notes[k]["start_time"] + notes[k]["duration"]) / bps for k in ks])
-        late[ks] = late_starts(t, np.minimum(end + RELEASE_S, t + played_s(pitch)), shift=False)
+        ring = np.array([played_s(notes[k]["pitch"]) for k in ks])
+        late[ks] = late_starts(t, np.minimum(end + RELEASE_S, t + ring), shift=False)
     return late
+
+
+def voices_808(chains: list[list[dict]]) -> list[dict]:
+    """Each chain (chains_808) as the one note its voice plays: the first
+    note's pitch and start, held to the last note's end."""
+    return [{"pitch": c[0]["pitch"], "start_time": c[0]["start_time"], "velocity": c[0].get("velocity"),
+             "duration": c[-1]["start_time"] + c[-1]["duration"] - c[0]["start_time"]} for c in chains]
 
 
 def _cut(x: np.ndarray, length: int, fade: int) -> np.ndarray:
@@ -400,10 +410,11 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | No
     """The 808 track (n samples, at `gain`): one voice per chain (chains_808),
     each stopped at its last note's end when cut: released as Live's 808
     Simpler releases (_release) with fade None, else faded out along a
-    straight line over `fade` samples. Without Glide (one voice: not
-    measured), a note that comes while the voice of the note before at its
-    pitch still sounds (late_808) fades that voice out over RETRIGGER_S
-    from its note and starts RETRIGGER_S late, as a pad's hit does."""
+    straight line over `fade` samples. A note that comes while the voice
+    of the note before at its pitch still sounds (late_808) fades that
+    voice out over RETRIGGER_S from its note and starts RETRIGGER_S late,
+    as a pad's hit does; with Glide on (one voice), the voice of the chain
+    before at any pitch (the release's overlap: not measured in Live)."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)
     cache: dict[float, np.ndarray] = {}
@@ -415,16 +426,16 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | No
         return cache[shift]
 
     g = gain * 10 ** (s["volume_db"] / 20)
-    chains, late_n = chains_808(track), int(round(RETRIGGER_S * SR))
-    firsts = [chain[0] for chain in chains]
-    late = (late_808(firsts, bps, lambda p: len(played(p)) / SR) if cut and not glide_s(track)
-            else np.zeros(len(chains), bool))
-    faded: dict[int, int] = {}  # a voice, and the note at its pitch that fades it out (its sample)
+    chains, late_n, mono = chains_808(track), int(round(RETRIGGER_S * SR)), glide_s(track) > 0
+    firsts = voices_808(chains)
+    late = late_808(firsts, bps, lambda p: len(played(p)) / SR, mono) if cut else np.zeros(len(chains), bool)
+    faded: dict[int, int] = {}  # a voice, and the note at its pitch (any, mono) that fades it out (its sample)
     last: dict[int, int] = {}
     for k, nt in enumerate(firsts):
+        voice = 0 if mono else nt["pitch"]
         if late[k]:
-            faded[last[nt["pitch"]]] = int(round(nt["start_time"] / bps * SR))
-        last[nt["pitch"]] = k
+            faded[last[voice]] = int(round(nt["start_time"] / bps * SR))
+        last[voice] = k
     for k, chain in enumerate(chains):
         first = chain[0]
         if len(chain) == 1:
