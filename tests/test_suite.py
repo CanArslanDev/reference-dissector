@@ -502,3 +502,29 @@ def test_clean_empties_the_runs_of_other_tags_but_keeps_their_records(tmp_path, 
     assert tags["going"] == {"beats": 0, "bytes": 0, "no_record": ["v1-2"]}
     assert files() == sorted(f for f in before if "/runs/old/" not in f or f.endswith("scores.json"))
     assert suite.clean(tmp_path, ["keep"], delete=True)["old"]["bytes"] == 0
+
+
+def test_a_run_writes_the_library_stores_before_its_jobs_start(tmp_path, monkeypatch):
+    """The stores the jobs map are written once, in the run's own process,
+    before any job: jobs that found one missing at once each wrote it (about
+    620 MB each). Only the libraries the steps load."""
+    from refdissect import library
+    _fake_suite(tmp_path, ["v1-1", "v1-2"])
+    for name in ("lib", "lib_808"):
+        np.savez(tmp_path / f"{name}.npz", audio=np.ones((3, 8), np.float16), spectra=np.ones((3, 4), np.float32))
+    np.savez(tmp_path / "lib_speckle.npz", **{band: np.ones((2, 5), np.float16) for band in library.SPECKLE})
+    monkeypatch.setattr(suite, "separate_beats", lambda *a: 0)
+    seen = []
+
+    def job(args):
+        seen.append(sorted(p.name for p in tmp_path.glob("*_mapped")))
+        return {"beat": Path(args[0]).name, "failed": "stub"}
+    monkeypatch.setattr(suite, "_run_job", job)
+    suite.run(tmp_path, tmp_path / "lib.npz", tmp_path / "lib_808.npz", "t", jobs=1, log=lambda m: None)
+    assert seen == [["lib_808_mapped", "lib_mapped", "lib_speckle_mapped"]] * 2
+    for p in tmp_path.glob("*_mapped"):
+        shutil.rmtree(p)
+    seen.clear()
+    suite.run(tmp_path, tmp_path / "lib.npz", tmp_path / "lib_808.npz", "t", jobs=1, steps=["analyze", "match"],
+              log=lambda m: None)
+    assert seen == [["lib_mapped", "lib_speckle_mapped"]] * 2
