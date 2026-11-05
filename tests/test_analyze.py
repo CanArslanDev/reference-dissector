@@ -33,11 +33,13 @@ def assert_as_before(a, stems):
     assert a["events"] == stems["old_events"]
 
 
+@pytest.mark.slow
 def test_without_the_tracker_analyze_is_as_before(stems, tmp_path, monkeypatch):
     monkeypatch.setattr(beats, "track", lambda *a, **kw: pytest.fail("the tracker ran"))
     assert_as_before(pipeline.analyze(stems["dir"], tmp_path, log=lambda *_: None, tracker=False), stems)
 
 
+@pytest.mark.slow
 def test_a_failing_tracker_falls_back_to_before(stems, tmp_path, monkeypatch):
     monkeypatch.setattr(beats.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
         cmd, 1, "", "RuntimeError: no network"))
@@ -46,6 +48,7 @@ def test_a_failing_tracker_falls_back_to_before(stems, tmp_path, monkeypatch):
     assert any("unavailable" in line for line in logs)
 
 
+@pytest.mark.slow
 def test_tracker_beats_without_a_line_fall_back_to_before(stems, tmp_path, monkeypatch):
     monkeypatch.setattr(beats, "track", lambda paths, **kw: {"beats": [1.0, 2.0], "downbeats": [1.0]})
     logs = []
@@ -53,6 +56,7 @@ def test_tracker_beats_without_a_line_fall_back_to_before(stems, tmp_path, monke
     assert "  no line through the tracker's 2 beats: the grid is fit_grid's" in logs
 
 
+@pytest.mark.slow
 def test_an_unsure_bar_line_is_logged(stems, tmp_path, monkeypatch):
     tracker = tracked(stems["truth"])
     tracker["downbeats"] = [d + 0.44 * (i % 3 == 1) for i, d in enumerate(tracker["downbeats"])]
@@ -63,6 +67,7 @@ def test_an_unsure_bar_line_is_logged(stems, tmp_path, monkeypatch):
     assert any(line.startswith("  the first bar line is unsure (the tracker's bars disagree") for line in logs)
 
 
+@pytest.mark.slow
 def test_a_tempo_change_is_logged(kit, tmp_path, monkeypatch):
     truth = switch(kit, 136, 160, 6)
     d = tmp_path / "stems"
@@ -76,6 +81,7 @@ def test_a_tempo_change_is_logged(kit, tmp_path, monkeypatch):
     assert any(line.startswith("  the tempo changes by x1.17") and "follows the first part" in line for line in logs)
 
 
+@pytest.mark.slow
 def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypatch):
     truth = stems["truth"]
     monkeypatch.setattr(beats, "track", lambda paths, **kw: tracked(truth))
@@ -116,6 +122,7 @@ def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_p
     assert len(calls) == 3
 
 
+@pytest.mark.slow
 def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems, tmp_path, monkeypatch):
     """By default analyze keeps nothing: a script that patches a module and
     runs it must not read back what the unpatched code found (the cache sees

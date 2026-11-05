@@ -75,6 +75,7 @@ def _hashes(folder) -> dict:
             for p in sorted(folder.rglob("*")) if p.is_file()}
 
 
+@pytest.mark.slow
 def test_every_scenario_is_valid_and_matches_its_stems(built):
     for name, (ev, folder) in built.items():
         assert S.check_schema(ev) == [], name

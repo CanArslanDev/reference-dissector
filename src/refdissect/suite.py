@@ -14,6 +14,8 @@ matched, planned and scored, so a change to any step shows up per scenario.
               not wait on the slow ones (fit-808: 50-140 s a beat).
     report()  markdown tables of those means per scenario, with the deltas
               between tags.
+    clean()   the run folders of the tags not kept, emptied but for their
+              records (a dry run unless asked to delete).
 
 A beat folder after a run:
     events.json, mix*, stems_truth/   the truth (scenarios)
@@ -72,6 +74,17 @@ READS = {"melodic": ("analyze",), "match": ("analyze",), "fit-808": ("analyze",)
 OUTPUTS = {"analyze": ("analysis.json", "bass808.json", "templates"), "melodic": ("melodic.json", "basicpitch"),
            "match": ("matches.json",), "fit-808": ("synth808.json", ONE_SHOT, "templates/808.npy"),
            "plan": ("plan.json", "midi")}
+# --subset: named sets of beats for a quick iteration; the final numbers stay on every beat of both models.
+# dev: one beat of 11 scenarios, a family each: the base (v1), tempo (tempo160), meter (meter68), swing
+# (swing66), drum detail (rolls, layers), the 808 (bass_low, glides), tonal stems (melodic, full) and the v1
+# beats rebuilt with truth stems (v1orig). On m2g-vel -> m3a, m3 -> m4 and m4 -> m5 (htdemucs; the -ft pairs
+# alike) every headline number that moved by 0.01 (0.5 dB, ms or cents) or more over the 48 beats moved the
+# same way on it; it weighs each of its scenarios twice as much as the whole suite does, so bass_low's 808
+# changes come out about twice as large (808 written pitch +0.023 -> +0.045 on m2g-vel -> m3a), and a level
+# change under 0.1 dB can read the other way (balance -0.04 -> +0.02 dB on m4 -> m5). Chosen with those pairs
+# in view, and m3's and m3a's runs were gone: those pairs compare its scenarios' means over both seeds.
+SUBSETS = {"dev": ("v1-1", "tempo160-1", "meter68-1", "swing66-1", "rolls-1", "layers-1", "bass_low-1", "glides-1",
+                   "melodic-1", "full-1", "v1orig-1")}
 
 
 # ── Beats ──
@@ -80,10 +93,14 @@ def _meta(beat: Path) -> dict:
     return json.loads((beat / "events.json").read_text(encoding="utf-8"))
 
 
-def beat_dirs(root: str | Path, scenarios=None) -> list[Path]:
+def beat_dirs(root: str | Path, scenarios=None, subset: str | None = None) -> list[Path]:
     """The beat folders under root (those with an events.json) of the given
-    scenarios (all when None), in scenario order, then by seed."""
-    beats = [d for d in Path(root).iterdir() if (d / "events.json").is_file()]
+    scenarios (all when None) and, with subset, of SUBSETS[subset] only, in
+    scenario order, then by seed."""
+    if subset is not None and subset not in SUBSETS:
+        raise ValueError(f"Unknown subset: {subset} (known: {', '.join(SUBSETS)})")
+    beats = [d for d in Path(root).iterdir() if (d / "events.json").is_file()
+             and (subset is None or d.name in SUBSETS[subset])]
     picked = []
     for d in beats:
         ev = _meta(d)
@@ -484,23 +501,39 @@ def _done(record: dict, log) -> None:
     log(f"{record['beat']}: strict F1@20 analysis {_fmt(a)}, plan {_fmt(p)} ({record['seconds']['total']:.0f} s)")
 
 
+def _ready_stores(library, library_808, steps) -> None:
+    """The memory-mapped stores of the libraries the steps load, written or
+    checked here once (library.ready) before the jobs start: 3 jobs that
+    found one missing at once each wrote about 620 MB of it, at up to a
+    1.4 GB footprint, and waited on one another."""
+    from .library import ready
+    for path, step in ((library, "match"), (library_808, "fit-808")):
+        if path and step in steps:
+            ready(path)
+
+
 def run(root: str | Path, library: str | Path, library_808: str | Path | None = None, tag: str = "base",
         model: str = DEFAULT_MODEL, scenarios=None, jobs: int = 3, render: bool = False,
         options: dict | None = None, resume: bool = False, steps=None, reuse: str | None = None,
-        cache: bool = False, log=print) -> dict:
+        cache: bool = False, subset: str | None = None, log=print) -> dict:
     """Separate what is not separated yet (one Demucs process), then
     run_beat over the beats, `jobs` at a time in their own processes (each
-    loads the library once, about 0.5 GB, if match runs), and write the
+    maps the library's arrays, written beside it once before they start,
+    if match runs), and write the
     means per scenario to root/scores-<tag>.json (also returned). resume
     skips beats this tag has scored already (scored); a beat that failed
     runs again. steps, reuse and cache: run_beat's, steps and reuse checked
-    for every beat before any runs (check_steps, reuse_problems)."""
+    for every beat before any runs (check_steps, reuse_problems). subset:
+    the beats of SUBSETS[subset] only (beat_dirs; those root lacks are
+    named in the log)."""
     steps = check_steps(steps, reuse)
     if stale := stale_steps(steps, reuse):
         log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
             f"{', '.join(r for r in steps if any(r in READS.get(s, ()) for s in stale))} runs: they read its outputs")
     root = Path(root).resolve()
-    beats = beat_dirs(root, scenarios)
+    beats = beat_dirs(root, scenarios, subset)
+    if subset and (absent := [b for b in SUBSETS[subset] if not (root / b / "events.json").is_file()]):
+        log(f"subset {subset}: {', '.join(absent)} not under {root}")
     if resume:
         beats = [b for b in beats if not scored(b, tag)]
     t0 = time.perf_counter()
@@ -511,6 +544,8 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
             shown = "; ".join(f"{name}: {', '.join(p)}" for name, p in list(bad.items())[:4])
             raise ValueError(f"runs/{reuse} cannot be reused in {len(bad)} of {len(beats)} beats: {shown}"
                              + (" ..." if len(bad) > 4 else ""))
+    if beats:
+        _ready_stores(library, library_808, steps)
     args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {}, steps,
              reuse, cache) for b in beats]
     if jobs > 1 and len(args) > 1:
@@ -522,8 +557,60 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
             _done(_run_job(a), log)
     summary = aggregate(root, tag)
     summary["last_run"] = {"beats": len(beats), "jobs": jobs, "wall_s": round(time.perf_counter() - t0, 1)}
+    if subset:
+        summary["last_run"]["subset"] = subset
     (root / f"scores-{tag}.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
+
+
+# ── Disk ──
+
+RECORDS = ("scores.json", "run.json")  # what clean() keeps of a run folder: its record, about 20 KB a beat
+
+
+def _size(path: Path) -> int:
+    files = [path] if path.is_file() else [f for f in path.rglob("*") if f.is_file()]
+    return sum(f.stat().st_size for f in files)
+
+
+def clean(root: str | Path, keep, delete: bool = False) -> dict:
+    """The run folders of the tags not in keep emptied but for their record
+    (RECORDS), so scores-<tag>.json can be aggregated again and per-beat
+    scores compared later (the m3 and m3a folders were removed whole, and
+    only their means per scenario were left to compare with); every
+    root/scores-<tag>.json, the stems, the truth and cache/ stay. A folder
+    without a record (a run going on, or one stopped) is left as it is.
+    Without delete nothing goes: a dry run. A tag in keep that root does not
+    hold (no run folder, no scores-<tag>.json) is refused before anything
+    goes: "m5ft" for m5-ft would have emptied m5-ft. Returns, per tag, its
+    beats, the bytes that go (or went) and the folders left without a
+    record. A suite of 48 beats held 1.5 GB of run folders in 5.5 GB
+    (2026-11-04), 4.7 MB a beat under m5."""
+    keep = set(keep)
+    if not keep:
+        raise ValueError("Name the tags to keep (--keep): clean empties the run folders of every other tag")
+    root = Path(root)
+    if unknown := sorted(t for t in keep if not (root / f"scores-{t}.json").is_file()
+                         and not any((b / "runs" / t).is_dir() for b in root.iterdir())):
+        raise ValueError(f"No tag {', '.join(unknown)} under {root} (no run folder, no scores-<tag>.json): "
+                         "a misspelt --keep would leave the tag it meant unprotected")
+    out: dict[str, dict] = {}
+    for work in sorted(root.glob("*/runs/*")):
+        if not work.is_dir() or work.name in keep or not (work.parents[1] / "events.json").is_file():
+            continue
+        tag = out.setdefault(work.name, {"beats": 0, "bytes": 0, "no_record": []})
+        if not any((work / r).is_file() for r in RECORDS):
+            tag["no_record"].append(work.parents[1].name)
+            continue
+        doomed = [p for p in work.iterdir() if p.name not in RECORDS]
+        tag["beats"] += 1
+        tag["bytes"] += sum(_size(p) for p in doomed)
+        for p in doomed if delete else []:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+    return out
 
 
 # ── Means per scenario ──

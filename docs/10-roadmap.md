@@ -47,6 +47,11 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
 - **The plan's meter** (m5). The plan carries the grid's meter and the build sets it: the plan's meter right 0.909 → 0.955, downbeat F 0.892 → 0.924, meter34 built in 3/4.
 - **Speed.** A suite beat takes 112.6 s after separation at 2 jobs, against 141.9 s at m2g (m3a; not a controlled timing): match 49.1 → 28.0 s, analyze 38.7 → 34.4 s, fit-808 50.9 → 46.2 s. The speed changes left every output the same on all 48 beats (and on the 8 htdemucs_ft beats run).
 - **Kept results.** The 808 reader's results and the 808 fits are kept by the `analyze` and `fit-808` commands unless `--no-cache`, and by `suite run` only with `--cache`, under a key of the inputs, the settings, the versions and the package's code as the process loaded it. Read back, analyze takes 8.1 s and fit-808 1.0 s a suite beat; a run records what it read back and leaves it out of its seconds.
+- **A fast development loop** (2026-11-05; item 5 below). Every output the same: on the dev subset's 11 beats, file for file against m5 and m5-ft (`log.txt` aside).
+  - The tests in parallel: 307 s in one process, 94–96 s at `-n 4`; a fast loop without the 48 slow test functions (62 items), 306 tests in 22 s at `-n 4`.
+  - `suite run --subset dev`: 11 beats, one of each family, 260 s at 2 jobs with `--cache` read back, against about 45 minutes for the 48 beats.
+  - The library's arrays memory-mapped and shared by a run's jobs: peak footprint per job 1.7–1.8 → 1.0 GB at 2 jobs.
+  - `suite clean`, and `live-build --bars A-B` for a short live check (not yet run in Live).
 
 ## Targets
 
@@ -137,26 +142,32 @@ Checked on 2026-10-29 by two live checks ([07](07-building-in-live.md#live-behav
 
 ### 5. Speed
 
-Now (m3a, 2 jobs, Apple M4 with Live open): 112.6 s a beat after separation, 45 minutes for the 48 beats (m2g: 141.9 s and 56 minutes, on a quiet machine).
+Now (m3a, 2 jobs, Apple M4 with Live open): 112.6 s a beat after separation, 45 minutes for the 48 beats (m2g: 141.9 s and 56 minutes, on a quiet machine). At one job on 4 beats (2026-11-04): analyze 31.4 s, match 26.5 s, fit-808 46.1 s, 107.7 s a beat.
 - analyze takes 34.4 s (38.7 at m2g, 5.7 in m1). The 808 reader fits each start and transposition once: 21 % of its fits on v1-1 had repeated one already.
 - match takes 28.0 s (49.1 at m2g, 24.4 in m1): a band's template windows are searched together, and a transposed candidate is resampled from the start its window holds. The silent-file check adds 4.7 % with an index built before its floor.
 - fit-808 takes 46.2 s (50.9 at m2g): its band filter, window and time axis are made once. In m1 it was 56.2 of 90.2 s a beat (62 %); now it is 41 %.
-- Done: kept results, read back by the `analyze` and `fit-808` commands and by `suite run --cache` (above).
 
-A probe on 4 m1 beats (v1-1, kick808-1, glides-1, bass_low-2) re-ran `synth808.fit`:
-- differential evolution with popsize 10 instead of 20 took 26.0–35.5 s against 57.0–66.2 s (1.9–2.2× faster), at equal mean loss (0.2673 against 0.2686);
-- 60 generations instead of 150 was 2.2–2.7× faster, at 0.4–1.8 % more loss.
+Done, every output the same:
+- Kept results, read back by the `analyze` and `fit-808` commands and by `suite run --cache` (above).
+- The tests in parallel (pytest-xdist, `--dist worksteal`): the whole suite 307 s in one process, 94–96 s at `-n 4`; the 48 test functions of 2 s or more (62 items) marked `slow`, and the fast loop without them 306 tests in 22 s at `-n 4`. CI runs `-n auto`.
+- The dev subset (`suite run --subset dev`, [03](03-calibration.md#a-dev-subset)): 11 beats, 260–268 s at 2 jobs with `--cache` read back. Every change of 0.01 or more over the 48 beats moved the same way on it, in the one tag pair compared on its own beats that had any (7 of 7, with one move of +0.025 on the subset that the 48 beats did not show) and in four pairs compared on its scenarios' 22 beats (in-sample).
+- The library memory-mapped from `.npy` stores beside each `.npz`: a run's jobs share one copy, and each job peaked at 1.0 GB of physical footprint instead of 1.7–1.8 GB at 2 jobs, at the same wall time ([12](12-replica-mode.md#the-suite)).
+- `suite clean`: the run folders of the tags not kept emptied, their `scores.json` kept.
+- `live-build --bars A-B`: an excerpt of a plan from 0, its stems cut alike, for a live check of seconds of audio instead of a whole recording ([07](07-building-in-live.md#a-short-live-check)).
 
-Not run on the 48 beats yet.
+Measured and left out, because the outputs changed:
+- fit-808's search with popsize 10 or 15, or warm-started from the previous fit: 46.3 → 24.0–35.3 s a beat on the dev subset, but the same fit on 0 of 11 beats (808 note starts up to 0.088 ms, Detune ±1 cent, the 808 fader 0.1–0.2 dB). On 4 m1 beats, popsize 10 had kept the mean loss (0.2673 against 0.2686), and 60 generations instead of 150 cost 0.4–1.8 % more loss.
 
 **Next:**
-- a 48-beat run with popsize 10;
-- a controlled timing of the whole suite (m3a shared the machine with Live, m2g did not);
-- the tests in parallel (pytest-xdist): 356 passing tests take 328 s in one process (8fb09dc);
-- a cache key per step's own modules: with the whole package hashed, any edit makes every kept result stale;
+- `live-build --bars` in Live: the minutes of a short check, and its recording against the excerpt's offline render.
+- CI's time with `-n auto` on ubuntu and macOS (7.4 and 12.6 min in one process); not measured, nothing was pushed.
+- Memory at 4 jobs with Live open, where swap reached 7–9 GB before the library was shared; not tested (2 jobs is this machine's limit).
+- fit-808, now the biggest step of a cold run (46 s), and match, the biggest of a cached one (33 s): faster only with the same outputs.
+- A controlled timing of the whole suite (m3a shared the machine with Live, m2g did not).
+- A cache key per step's own modules: with the whole package hashed, any edit makes every kept result stale.
 - match's own inverse transform per template and block (22 of 61 s profiled on v1-1), and the start of beat_this's and Basic Pitch's uv environments.
 
-**Measured by:** seconds per beat, the fit's loss, and the plan's 808 scores. Target: fit-808 under 30 s a beat, with the mean loss within +1 % and no scenario more than 5 % worse (an estimate).
+**Measured by:** seconds per beat and per step, peak memory per job, and every output byte for byte against the last tag. Target: no output changed; fit-808 under 30 s a beat only on those terms (an estimate).
 
 ### 6. The open issues
 

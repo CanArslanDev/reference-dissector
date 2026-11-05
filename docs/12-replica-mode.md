@@ -82,7 +82,8 @@ uv run python scripts/export_results.py --suite "$S" mine mine-b
 Its options:
 - `--model`: the Demucs model (default htdemucs).
 - `--scenarios a,b`: a subset.
-- `--jobs N`: beats in parallel processes. Each loads the library (about 0.5 GB) when match runs.
+- `--jobs N`: beats in parallel processes. Each maps the library's arrays when match runs, and the jobs share one copy (below).
+- `--subset dev`: 11 beats, one of each family, for iterations with `--cache` ([03](03-calibration.md#a-dev-subset)).
 - `--render`: renders each plan offline for the level scores, then deletes the audio.
 - `--resume`: skips the beats this tag has scored already; a beat that failed runs again.
 - `--steps`: a subset of analyze, melodic, match, fit-808, plan and score. Without `--reuse`, a step whose input no step makes is refused before anything runs.
@@ -91,6 +92,8 @@ Its options:
   - The 808 lane's runs reused m1's chords, built on the old 808 notes. Rebuilt on the new ones, majmin went 0.888 → 0.977 on the four melodic and full beats.
 - `--cache`: keeps the 808 reader's results and the 808 fits in each beat's `cache/`, and reads them back where the stems (or the template), the settings and the package's code are the same. Off by default: every step runs, so a measurement's seconds are the code's. A run with it records what it read back (`cached` in `scores.json`), leaves those steps' seconds, and then the total, out of its means, and its report's tag line names them. When every tag shared each beat's cache, a read-back timed the cache, not the code: fit-808 took 1.6 s read back and 68–70 s run on v1-1 and glides-1.
 - analyze's and match's options pass on unchanged.
+
+**`suite clean DIR --keep a,b`** empties the run folders of the other tags but keeps each `scores.json`, so their beats can still be compared. It is a dry run unless `--yes`, and leaves alone a folder without a record yet, such as a run in progress. A kept tag the suite does not hold (no run folder, no `scores-<tag>.json`) is refused before anything goes.
 
 **`suite report`** writes markdown tables of each headline number, per scenario and per drum role, for every tag, with the change from the first tag to the last.
 
@@ -106,6 +109,22 @@ Its options:
 - m4 and m4-ft ran fit-808, plan and score only, at 4 jobs, no cache: 57.4 s a beat over scenarios (fit-808 56.2 s), 695 and 698 s wall for the 48 beats.
 - m5 and m5-ft ran plan and score only, at 4 jobs, no cache: 5.8 and 4.4 s a beat over scenarios, the render 4.0 and 2.6 s of it (0.5 s at m4; not investigated), 74 and 53 s wall for the 48 beats.
 - `uv run pytest -q`: 356 passed, 3 skipped and 2 expected failures (the pinned B9 cases, [Known limits](#known-limits)) in 328 s in one process (8fb09dc). No test needs the library, Demucs, Live or a model download.
+
+**Time and memory now** (measured 2026-11-04/05 on the same M4, at 06a88b1's code and at the dev-loop changes after it; no other heavy job running):
+- **Steps, one job, 4 beats (v1, glides), no cache.** Analyze 31.4 s, melodic 3.1 s, match 26.5 s, fit-808 46.1 s, plan, render and scores 0.5 s together: 107.7 s a beat, 431.7 s wall, max RSS 1.92 GB.
+- **The same beats, `--cache` read back.** Analyze 7.5 s and fit-808 1.4 s: 38.9 s a beat, 156.9 s wall. Every output file the same, the read-back record aside.
+- **The dev subset, 2 jobs, `--render`.** 702.6 s at 06a88b1, 673.5 s now, with no cache (one run each and the same CPU total: noise, not a speed-up); 260.1 s with `--cache` read back, 672.0 s to fill it ([03](03-calibration.md#a-dev-subset)).
+- **The library is memory-mapped.** `Library.load` maps the audio, spectra and speckles from a store of `.npy` files beside each `.npz` (`library_mapped/`, `library_808_mapped/`, `library_speckle_mapped/`).
+  - `suite run` writes or checks the stores before its jobs start; elsewhere the first load does. Each `.npy` is the `.npz`'s member copied out a block at a time and checked against its CRC-32. A store is used while the `.npz`'s size and CRC-32s are the ones it was written from and each `.npy` keeps the size and mtime it was written with; a store changed, cut short or missing a file since is written again. A file changed in place that keeps its size and mtime is not caught.
+  - Writing the library's and its speckles' stores took 0.69 s at a 98 MB footprint, and the 808 library's 0.11 s; reading the arrays whole to write them had taken 1.74 s and 1.1 GB (1.4 GB after a match). The files are the same bytes either way.
+  - Jobs that find a store missing at once write it one at a time, under a lock on the `.npz`: before, 3 such jobs each wrote it, and 1–2 of them fell back to memory for the run in 4 of 5 trials.
+  - It takes about 650 MB beside the libraries. Where it cannot be written or read, loading falls back to memory as before, with a warning.
+  - The jobs of a run share one copy of these arrays instead of each holding its own.
+  - In a fresh process, loading the library, its speckles and the 808 library took 0.02 s and 85 MB of physical footprint, against 0.09–0.33 s and 706 MB before; 225 MB against 846 MB after the same match, with the same ranking.
+- **Peak memory per job, 2 jobs, dev subset, no cache** (physical footprint, sampled every second): 1,814 and 1,777 MB at 06a88b1, 1,020 and 998 MB now. RSS stays at 1.67–1.68 GB (1.79–1.93 GB before), because it counts the shared mapped pages in each process. Whether this prevents the 7–9 GB of swap seen at 4 jobs with Live open was not tested.
+- **The outputs are the same.** A fresh run of the dev subset equals m5's and m5-ft's on all 11 beats, file for file but `log.txt`, seconds and run records aside; so do PIRAMIT's match, fit-808 and plan, and match on all 48 beats of both models. fit-808 was not run again on all 48 beats. After the store's checks and lock, match, fit-808, plan and score again on the dev subset, with `--reuse m5` and the stores written by the run before its jobs: every output equals m5's but `log.txt` (352 files byte for byte, 33 JSON files apart from the run record), match 33.0 s and fit-808 46.8 s a beat as before, 472 s wall at 2 jobs.
+- **fit-808's search, not changed.** Popsize 10 took the step 46.3 → 24.1 s a beat on the dev subset, popsize 15 35.3 s, and a warm start from the previous fit 24.0 s at popsize 10. None gave the same fit on any of the 11 beats: 808 note starts moved up to 0.088 ms, Detune by ±1 cent and the 808 fader by 0.1–0.2 dB. The search stays at popsize 20 and 150 generations.
+- **pytest** (363 passed, 3 skipped, 2 expected failures): 307 s in one process (310 s at 06a88b1); 94–96 s at `-n 4` with `--dist worksteal` (132 s with xdist's default scheduling); the fast loop, `-m "not slow"`, 303 tests in 22 s at `-n 4`. With the library store's 3 tests: 366 passed in 94 s at `-n 4`, and the fast loop 306 tests in 22 s. The `slow` marker is on 48 test functions, 62 test items with their parameters. CI runs `-n auto`; its time there is not measured.
 
 ## The stages and their files
 
@@ -419,7 +438,7 @@ All measured on the suite (m5 unless named; m4 equals m3 on everything but the p
 
 **Speed and models**
 - **analyze takes 34.4 s a beat** at 2 jobs (m3a; 38.7 s at m2g, 5.7 s in m1). The 808 reader was about 30 s of it at m2g by its lane's measure; the rest is the joint fit and the attack-based discovery, not separated. match takes 28.0 s (49.1 at m2g, 24.4 in m1), fit-808 46.2 s (50.9). melodic went 2.7 → 3.3 s, not investigated.
-- **The seconds are not a controlled comparison.** m3a ran with Live open (load 3.2–6.1), m2g on a quiet machine. The fit's popsize was not changed (a DE popsize of 10 fitted the 808 1.9–2.2× faster at equal mean loss on 4 m1 beats, not run on all 48), and the tests run in one process (no pytest-xdist).
+- **The seconds are not a controlled comparison.** m3a ran with Live open (load 3.2–6.1), m2g on a quiet machine. The fit's popsize was not changed: popsize 10 is about twice as fast but changed the fit on 11 of 11 dev beats ([The suite](#the-suite)).
 - **The caches key on the whole package.** Any edit to any `.py` file makes every kept result stale, so `--cache` helps re-runs at the same code only. Code patched in memory is not seen, nor an edit undone before the next check.
 - **Long input.** In the discovery lane, analyze peaked at 2.27 GB on 192 s of tiled input. That was not measured again after the merge; on PIRAMIT's 126 s it peaks at 2.16 GB (e2a5ab4).
 - **htdemucs_ft is not the default.** Its drums are better (plan 0.868 → 0.898; at m2g +0.039 [+0.017, +0.062], paired over the 48 beats). But its 808 notes are worse (0.936 → 0.924; bass_low 0.949 → 0.338), and so are its snares (0.961 → 0.891).
@@ -432,7 +451,7 @@ In order ([10](10-roadmap.md) has the metrics, targets and gaps):
 2. **The 808 in the plan:** a note's own cents (full, producer), the reader against the estimate on short restarted notes, and the one-shot's head by ear. Its pitch on short, low notes is done (m4).
 3. **The build in Live:** `refdissect live-build` end to end, one `build_tracks` call of a song's size, htdemucs_ft plans, Glide and a build that fails. Suite plans and PIRAMIT's were built, recorded and scored as the plan is scored on 2026-10-29 ([In Live](#in-live)).
 4. **The closed loop:** measure the recording, correct levels, pitch and timing, rebuild, and stop when the distance stops falling.
-5. **Speed:** popsize 10 on the 48 beats, the tests in parallel, and a controlled timing of the whole suite.
+5. **Speed:** a controlled timing of the whole suite, and fit-808 and match faster with the same outputs. The tests run in parallel, the dev subset and the shared library are done ([The suite](#the-suite)).
 6. **The open limits above.**
 
 ## Sources

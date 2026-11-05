@@ -69,6 +69,7 @@ def test_drum_roles_balance():
     assert cut_one_shots(notes, 0.28, 135) == [notes[0]]  # 0.28 s is 0.63 beats at 135
 
 
+@pytest.mark.slow
 def test_space_reads_width_tail_and_bandpass():
     from refdissect.space import band_correlation, fit_bandpass, median_spectrum_db, tail
     rng = np.random.default_rng(1)
