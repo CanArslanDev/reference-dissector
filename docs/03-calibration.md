@@ -144,7 +144,7 @@ v1 has one recipe, and it removes a constant offset per sound before scoring. Th
 
 ### Held-out glide beats
 
-Two sets of beats outside the suite, made for the 808's slides (2026-11-05) and kept local as the suite is. Thresholds are chosen on seed 1 and the dev subset; seed 2 and these sets only report.
+Two sets of beats outside the suite, made for the 808's slides (2026-11-05) and kept local as the suite is. The slide reader's thresholds are chosen on seed 1 and the dev subset, but seed 2's slide beats were seen, with their truth, while the rule was first designed (a per-move feature table labelled from the truth, 111 of its 195 rows from seed 2), so seed 2 is not out of sample for it. These sets only report; B's kit 2 and A carry the out-of-sample numbers.
 - **A**: glides, full and producer at seeds 3–6, built by `suite build` from the suite's inventory (a rebuild of glides-1 and producer-1 came out byte for byte as the suite's). 12 beats, 52 truth legato notes on 9 of them: producer-6 is its only producer beat with slides, as only one producer 808 file has overlapping notes. Its kits and 808 samples are new, and the 808 reader is weak on them for reasons other than slides: analysis 808 note F1@50 0.5425 at m5 (htdemucs_ft 0.6391), glides-5 0.017. Slide gains there are confounded.
 - **B**: the suite's own kits with new draws of the pattern (where the glides fall, producer's files and roots), drawn by a script outside the repository with the scenario code unchanged. glides at 103, 104, 203 and 205; full at 103, 104, 203 and 204; producer at 110 and 205, the hundreds naming the kit (seed 1's or seed 2's). 10 beats, 40 truth legato notes: 18 on kit 1, which shares seed 1's kit and so is partly in-sample, and 22 on kit 2, held out in kit and pattern. Its m5 numbers lie close to the suite's: glides' analysis 808 note F1@50 0.7912 against 0.7911.
 - Both were separated with torch 2.14.1 ([01](01-pipeline.md#separate)): the unpinned worker gave wrong stems. [12](12-replica-mode.md#what-each-stage-measured) gives the g1 round's numbers on them.
@@ -202,7 +202,7 @@ Means over the 22 scenarios, all 48 beats, rendered:
 - `m4-ft`: the same on htdemucs_ft stems;
 - `m5`: m4 with the fixes of the first live check merged (live/build, a4f2358): each pad on one voice and the 808's release and restart in the render and the estimates, a note Live starts late placed 1 ms early, and the plan's meter. plan and score ran at a4f2358 over m4's other outputs;
 - `m5-ft`: the same on htdemucs_ft stems;
-- `g1`: the 808's slides read with `--slides` (feat/808-glides, 2e4a3ef), every step, no cache. Slides are off by default, so the default's numbers stay m5's ([12](12-replica-mode.md#what-each-stage-measured));
+- `g1`: the 808's slides read with `--slides` (feat/808-glides, def2f33), every step, no cache. Slides are off by default, so the default's numbers stay m5's ([12](12-replica-mode.md#what-each-stage-measured));
 - `g1-ft`: the same on htdemucs_ft stems.
 
 Each of these tags ran every step except m3, m3-ft, m4, m4-ft, m5 and m5-ft, as above. m2 and m2-ft measured the first merge (ba7b69d), before m2g's five fixes. m2g-vel and m2g-ft-vel, the baseline of the fixes of 2026-10-29, are m2g's and m2g-ft's plans under Live's velocity law; they differ from m2g and m2g-ft only in the level scores (below). Each tag's means per scenario are in `results/calibration/suite-<tag>.json`.
@@ -339,7 +339,7 @@ The first merge (m2 against m2-ft) and m2g give the same picture. htdemucs stays
 
 Since 2026-10-29 the settled pitch of such a template is read on the notes that reach past it (`settle()`, [01](01-pipeline.md#808-notes-bass808transcribe)). Over all 48 beats, m2g-vel → m3 (htdemucs_ft in brackets): the written note right 0.947 → 0.970 (0.937 → 0.959), bass_low 0.487 → 0.987 (0.065 → 0.559); the settled pitch's median error 6.8 → 5.0 cents (5.8 → 5.1); note F1@50 the same, 0.936 (0.924). In the plan, note F1@50 0.926 → 0.921 and the median pitch error 7.7 → 8.3 cents, on htdemucs_ft the settled pitch within 50 cents 0.958 → 0.935: all of it bass_low-1, whose fitted one-shot the plan played further off ([01](01-pipeline.md#plan)). At m4 the one-shot follows its template's periods ([01](01-pipeline.md#fit-808)): m3 → m4, plan note F1@50 0.921 → 0.934 (0.910 → 0.934), median pitch error 8.3 → 4.5 cents (13.6 → 9.6), settled within 50 cents 0.925 → 0.970 (0.935 → 0.958); bass_low 0.788 → 0.974 (0.229 → 0.513), full 0.890 → 0.851 (0.910 → 0.890).
 
-Legato notes are off by default: none are written, against the truth's 24 on 5 beats. The earlier rule wrote 79, and 6 of them were right. With `--slides` (g1 and g1-ft), legato recall is 0.50 (htdemucs_ft 0.458) and precision 0.67 (0.85) over those 24: 8 of seed 1's 10 on each model (in-sample), 4 (3) of seed 2's 14, and one false legato note on each of 2 (1) beats without a slide. On the held-out glide beats: B's kit 2, 4 (6) of 22; A, 14 (20) of 52.
+Legato notes are off by default: none are written, against the truth's 24 on 5 beats. The earlier rule wrote 79, and 6 of them were right. With `--slides` (g1 and g1-ft), legato recall is 0.50 (htdemucs_ft 0.458) and precision 0.60 (0.65) over those 24: 8 of seed 1's 10 on each model (in-sample), 4 (3) of seed 2's 14 (seen while the rule was designed), and false legato notes on 4 (2) beats without a slide. On the held-out glide beats: B's kit 2, 5 (6) of 22; A, 14 (19) of 52.
 
 **Drum pitch** (plan level): drum_pitch's snare (−0.70 semitones) and hat (+0.25) now play 0 cents off. With whole semitones they were 30 and 25 cents off.
 
@@ -448,4 +448,4 @@ uv run refdissect suite report "$W/work/calibration-v2" --tags base-htdemucs,min
 **Limits:**
 - The beats are synthetic, mastered alike, without per-track processing.
 - Most scenarios have two seeds, so one beat moves a scenario's mean by half its change.
-- Thresholds tuned on these beats are measured on the same beats. The suite has no held-out part of its own: the 808's slides were chosen on seed 1 and reported on seed 2 and on the held-out glide beats (above), which cover glides, full and producer only.
+- Thresholds tuned on these beats are measured on the same beats. The suite has no held-out part of its own: the 808's slides were chosen on seed 1, with seed 2's slide beats seen while the rule was designed, and reported on the held-out glide beats (above), which cover glides, full and producer only.
