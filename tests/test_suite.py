@@ -109,6 +109,7 @@ def truth_basic_pitch(audio, out_dir, presets, files=None):
     return result
 
 
+@pytest.mark.slow
 @needs_ffmpeg
 def test_build_run_and_report(library, tmp_path, monkeypatch, capsys):
     root = tmp_path / "suite"
@@ -185,6 +186,7 @@ def test_steps_need_their_inputs_or_a_reuse():
     assert suite.check_steps(["score"], reuse="base") == ("score",)
 
 
+@pytest.mark.slow
 @needs_ffmpeg
 def test_melodic_scores_and_steps_reused(library, tmp_path, monkeypatch):
     """The melodic scenario with a perfect Basic Pitch: notes and chords
@@ -317,6 +319,7 @@ USERS = "/".join(("", "Users", ""))
 HOME = USERS + "someone"
 
 
+@pytest.mark.slow
 def test_the_export_keeps_means_per_scenario_only(tmp_path):
     ns = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "export_results.py"), run_name="export")
     ns["suite_scores"].__globals__["ROOT"] = tmp_path
@@ -444,3 +447,90 @@ def test_the_song_export_says_how_the_plan_plays(tmp_path):
     assert one_shot["vs_reference"] == {"ncc": 0.88} and out["808"]["synth"]["vs_reference"] == {"ncc": 0.94}
     assert one_shot["pitch_track"] == {"periods": 49, "followed": 9, "until_s": 0.27, "settled": True}
     assert "/Volumes/" not in text and "hat 1" not in text and "808 (synth)" not in text and "611" not in text
+
+
+def _fake_suite(root: Path, names) -> None:
+    for name in names:
+        scenario, seed = name.rsplit("-", 1)
+        (root / name).mkdir(parents=True)
+        (root / name / "events.json").write_text(json.dumps({"scenario": scenario, "seed": int(seed)}))
+
+
+def test_the_dev_subset_is_a_beat_of_each_family(tmp_path, monkeypatch):
+    names = [f"{s}-{k}" for s in suite.ORDER for k in (1, 2)]
+    _fake_suite(tmp_path, names)
+    dev = suite.beat_dirs(tmp_path, subset="dev")
+    assert [d.name for d in dev] == [n for n in names if n in suite.SUBSETS["dev"]]
+    assert len(dev) == 11 and len({d.name.rsplit("-", 1)[0] for d in dev}) == 11
+    assert [d.name for d in suite.beat_dirs(tmp_path, ["glides", "v1"], subset="dev")] == ["v1-1", "glides-1"]
+    with pytest.raises(ValueError, match="Unknown subset"):
+        suite.beat_dirs(tmp_path, subset="nope")
+    got = {}
+
+    def run(*args, **kwargs):
+        got.update(kwargs)
+        return {"overall": {"analysis": {}, "plan": {}}, "beats": 0, "failed": []}
+    monkeypatch.setattr(suite, "run", run)
+    assert main(["suite", "run", str(tmp_path), "--library", "x.npz", "--tag", "t", "--subset", "dev"]) == 0
+    assert got["subset"] == "dev"
+
+
+def test_clean_empties_the_runs_of_other_tags_but_keeps_their_records(tmp_path, capsys):
+    _fake_suite(tmp_path, ["v1-1", "v1-2"])
+    for beat in ("v1-1", "v1-2"):
+        for tag in ("keep", "old"):
+            work = tmp_path / beat / "runs" / tag
+            (work / "templates").mkdir(parents=True)
+            (work / "templates" / "sound_1.npy").write_bytes(b"0" * 1000)
+            (work / "plan.json").write_text("{}")
+            (work / "scores.json").write_text('{"beat": "x"}')
+    going = tmp_path / "v1-2" / "runs" / "going"  # a run that has not written its record yet
+    going.mkdir()
+    (going / "plan.json").write_text("{}")
+    (tmp_path / "scores-old.json").write_text("{}")
+    (tmp_path / "v1-1" / "stems-htdemucs").mkdir()
+
+    def files():
+        return sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    before = files()
+    assert main(["suite", "clean", str(tmp_path), "--keep", "keep"]) == 0  # a dry run
+    assert files() == before and "would go" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="--keep"):
+        suite.clean(tmp_path, [])
+    with pytest.raises(ValueError, match="No tag kep"):  # a misspelt tag kept: refused, nothing goes
+        suite.clean(tmp_path, ["kep"], delete=True)
+    assert files() == before
+    (tmp_path / "scores-gone.json").write_text("{}")  # a tag whose run folders were removed whole
+    assert suite.clean(tmp_path, ["keep", "gone"])["old"]["beats"] == 2
+    (tmp_path / "scores-gone.json").unlink()
+    tags = suite.clean(tmp_path, ["keep"], delete=True)
+    assert tags["old"] == {"beats": 2, "bytes": 2 * 1002, "no_record": []}
+    assert tags["going"] == {"beats": 0, "bytes": 0, "no_record": ["v1-2"]}
+    assert files() == sorted(f for f in before if "/runs/old/" not in f or f.endswith("scores.json"))
+    assert suite.clean(tmp_path, ["keep"], delete=True)["old"]["bytes"] == 0
+
+
+def test_a_run_writes_the_library_stores_before_its_jobs_start(tmp_path, monkeypatch):
+    """The stores the jobs map are written once, in the run's own process,
+    before any job: jobs that found one missing at once each wrote it (about
+    620 MB each). Only the libraries the steps load."""
+    from refdissect import library
+    _fake_suite(tmp_path, ["v1-1", "v1-2"])
+    for name in ("lib", "lib_808"):
+        np.savez(tmp_path / f"{name}.npz", audio=np.ones((3, 8), np.float16), spectra=np.ones((3, 4), np.float32))
+    np.savez(tmp_path / "lib_speckle.npz", **{band: np.ones((2, 5), np.float16) for band in library.SPECKLE})
+    monkeypatch.setattr(suite, "separate_beats", lambda *a: 0)
+    seen = []
+
+    def job(args):
+        seen.append(sorted(p.name for p in tmp_path.glob("*_mapped")))
+        return {"beat": Path(args[0]).name, "failed": "stub"}
+    monkeypatch.setattr(suite, "_run_job", job)
+    suite.run(tmp_path, tmp_path / "lib.npz", tmp_path / "lib_808.npz", "t", jobs=1, log=lambda m: None)
+    assert seen == [["lib_808_mapped", "lib_mapped", "lib_speckle_mapped"]] * 2
+    for p in tmp_path.glob("*_mapped"):
+        shutil.rmtree(p)
+    seen.clear()
+    suite.run(tmp_path, tmp_path / "lib.npz", tmp_path / "lib_808.npz", "t", jobs=1, steps=["analyze", "match"],
+              log=lambda m: None)
+    assert seen == [["lib_mapped", "lib_speckle_mapped"]] * 2

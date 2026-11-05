@@ -62,6 +62,7 @@ def test_estimate_through_a_change_of_level(kit):
     (90, 8, False, (100.0, 180.0), 180),  # x2 refined to 180.004: the range's edge gives 0.5 %
     (50, 12, False, (100.0, 180.0), 100),  # x2 refined to 99.9996
 ])
+@pytest.mark.slow
 def test_the_octave(kit, bpm, bars, half, rng, want):
     truth = drum_beat(kit, bpm, bars)
     grid, info = estimate(truth["audio"], tracked(truth, half=half, every=2 if half else None), rng)
@@ -167,6 +168,7 @@ def test_unsure_meter_is_four_four(kit):
 
 @pytest.mark.parametrize("bpm, swing, hats, want16", [(95, 0.5, 1, 0.5), (95, 0.66, 1, 0.66), (95, 0.58, 1, 0.58),
                                                        (136, 0.66, 1, 0.66), (95, 0.5, 2, None)])
+@pytest.mark.slow
 def test_swing(kit, bpm, swing, hats, want16):
     """From the hats' attacks: onset-strength peaks read 66 % up to 3.6
     points low, the hats on the 8th lines peaking later than the swung ones."""

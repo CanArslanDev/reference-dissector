@@ -120,6 +120,7 @@ def test_drum_attacks_and_notes_found_late_against_them():
     assert B._late([int((t + d) * SR) for t, d in zip(played, np.linspace(0, 0.02, len(played)))], kicks) == 0
 
 
+@pytest.mark.slow
 def test_a_line_with_retriggers_sixteenths_and_kicks():
     """Every note's attack within 20 ms and its pitch within 50 cents (28 of
     28 measured); the 808's own tuning (+11 cents) within 3 (+11.6); the
@@ -131,6 +132,7 @@ def test_a_line_with_retriggers_sixteenths_and_kicks():
     assert {n["pitch"] for n in b["notes"] if abs(n["cents"] - 11.0) < 25} >= {24, 29, 31, 22}
 
 
+@pytest.mark.slow
 def test_a_low_root_with_a_flat_808():
     """A root of 21.8 Hz (F0, under every learned tracker's floor) 20 cents
     flat: the notes (28 of 28 measured), and the tuning within 5 cents
@@ -141,6 +143,7 @@ def test_a_low_root_with_a_flat_808():
     assert abs(b["template"]["tuning_cents"] + 20.0) < 5
 
 
+@pytest.mark.slow
 def test_a_slide_without_an_attack_is_a_legato_note_on_request():
     """A note that slides in over 120 ms from the one before (no attack: the
     sample goes on) is, with slides, a legato note starting within 50 ms of
@@ -321,6 +324,7 @@ def test_a_kick_split_off_the_next_note_at_the_edge_of_the_search():
     assert len(B.kick_splits(*notes(1100.0, 0.995))) == 2 and len(B.kick_splits(*notes(1310.0, 0.5))) == 2
 
 
+@pytest.mark.slow
 def test_sixteenths_at_one_pitch_at_160_bpm():
     """The bar at 160 BPM: its pair of 16th notes a fifth up (94 ms each)
     came out as one note a semitone sharp (24 notes for 28, 20 found within
@@ -331,6 +335,7 @@ def test_sixteenths_at_one_pitch_at_160_bpm():
     assert found(truth, b["notes"]) >= 0.85 and len(b["notes"]) >= 26
 
 
+@pytest.mark.slow
 def test_sparse_reattacks_learn_from_the_kicks():
     """At 170 BPM the envelope re-attacks find 6-10 of the 28 notes (a
     driven 33 Hz tone's notch at a cut is 0.5-2.3 dB), too few to learn a
@@ -342,6 +347,7 @@ def test_sparse_reattacks_learn_from_the_kicks():
     assert found(truth, b["notes"]) >= 0.95 and abs(b["template"]["tuning_cents"] - 11.0) < 3
 
 
+@pytest.mark.slow
 def test_a_line_with_no_long_note_still_has_its_notes():
     """16th notes of 107 ms only (no note rings 200 ms): a template of short
     notes still places every note (attacks within 20 ms); their settled
@@ -352,6 +358,7 @@ def test_a_line_with_no_long_note_still_has_its_notes():
     assert b["notes"] and np.mean([np.min(np.abs(t - m["t_attack"])) <= 0.02 for m in truth]) >= 0.9
 
 
+@pytest.mark.slow
 def test_the_settled_pitch_waits_for_the_drop_to_settle():
     """Long notes of an 808 falling 8 semitones with a 120 ms time
     constant: over 300-600 ms the drop is still 26 cents over its settled
@@ -362,6 +369,7 @@ def test_the_settled_pitch_waits_for_the_drop_to_settle():
     assert abs(b["template"]["tuning_cents"] - 11.0) < 3
 
 
+@pytest.mark.slow
 def test_short_notes_read_their_settled_pitch_past_the_template():
     """bass_low's failure: 110-330 ms notes of an 808 whose drop ends in a
     slow tail (2.5 semitones more, falling with a 150 ms time constant)
@@ -609,6 +617,7 @@ def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path, monk
     assert len(heard) == 1 and heard[0]["t"] == pytest.approx(0.5, abs=0.01) and np.isfinite(heard[0]["midi"])
 
 
+@pytest.mark.slow
 def test_each_start_and_transposition_is_fitted_once(monkeypatch):
     """candidates() fits the template at a start and transposition once:
     neighbouring semitones share fine steps (+75 cents of one is -25 of the

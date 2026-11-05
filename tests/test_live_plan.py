@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -932,3 +933,82 @@ def test_melodic_tracks_in_the_plan(tmp_path):
     assert [w.name for w in written] == ["drums.mid", "808.mid", "other.mid"]
     ons = [m for m in mido.MidiFile(str(written[2])).tracks[0] if m.type == "note_on"]
     assert [m.note for m in ons] == [64, 64] and ons[0].channel == 0
+
+
+def _long_plan(tmp_path, meter=(4, 4)) -> dict:
+    """A plan of 8 bars at 120 BPM (2 beats a second) with its stems on
+    disk: a 24-bit and a float one, 16 s each."""
+    rng = np.random.default_rng(3)
+    for stem, subtype in (("drums", "PCM_24"), ("other", "FLOAT")):
+        sf.write(tmp_path / f"{stem}.wav", rng.uniform(-0.5, 0.5, (16 * SR, 2)), SR, subtype=subtype)
+    note = {"pitch": 36, "duration": 1.0, "velocity": 100}
+    return {"tempo": 120.0, "beats_per_bar": meter[0], "beat_unit": meter[1], "length_beats": 32.0,
+            "tracks": {"drums": {"pads": {"36": {"path": str(tmp_path / "kick.wav"), "transpose": 0}},
+                                 "notes": [{**note, "start_time": t} for t in (0.0, 3.99, 4.0, 7.5, 15.9)]},
+                       "808": {"sample": "x 808 (synth) 0.wav", "transpose": 36,
+                               "notes": [{**note, "pitch": 24, "start_time": 3.5, "duration": 2.0},
+                                         {**note, "pitch": 24, "start_time": 4.25}]},
+                       "melodic": {"other": {"instrument": "Drift", "notes": [{**note, "start_time": 8.0}]}}},
+            "stems": {s: {"path": str(tmp_path / f"{s}.wav"), "mute": s == "drums"} for s in ("drums", "other")},
+            "locators": [["A (1)", 0.0], ["B (2)", 4.0], ["C (5)", 16.0]],
+            "levels": {"headroom_db": 4.0, "drums_track_db": -18.5, "808_track_db": -17.6, "stems_track_db": -4.0}}
+
+
+def test_an_excerpt_starts_its_bars_at_0_with_its_stems_cut_alike(tmp_path):
+    from refdissect.live import excerpt
+    plan = _long_plan(tmp_path)
+    before = json.dumps(plan)
+    ex = excerpt(plan, (2, 4), tmp_path / "ex")
+    assert json.dumps(plan) == before  # the plan itself is left as it was
+    # bars 2-4: beats 4 to 16, 2 to 8 s; a note from before bar 2 is left out, one past bar 4 ends with it
+    assert [(n["start_time"], n["duration"]) for n in ex["tracks"]["drums"]["notes"]] == [
+        (0.0, 1.0), (3.5, 1.0), (pytest.approx(11.9), pytest.approx(0.1))]
+    assert [n["start_time"] for n in ex["tracks"]["808"]["notes"]] == [0.25]
+    assert [n["start_time"] for n in ex["tracks"]["melodic"]["other"]["notes"]] == [4.0]
+    assert ex["length_beats"] == 12.0 and ex["locators"] == [["B (2)", 0.0]]
+    assert ex["excerpt"] == {"bars": [2, 4], "beats": [4.0, 16.0], "seconds": [2.0, 8.0]}
+    for stem in ("drums", "other"):
+        src, cut = sf.SoundFile(tmp_path / f"{stem}.wav"), sf.SoundFile(ex["stems"][stem]["path"])
+        assert Path(cut.name).parent == tmp_path / "ex" and (cut.subtype, cut.samplerate) == (src.subtype, SR)
+        whole = sf.read(src.name, dtype="float64")[0]
+        assert np.array_equal(sf.read(cut.name, dtype="float64")[0], whole[2 * SR:8 * SR])  # sample for sample
+    # the 808, its one-shot, the pads and the levels are the plan's
+    assert {k: v for k, v in ex["tracks"]["808"].items() if k != "notes"} == \
+        {k: v for k, v in plan["tracks"]["808"].items() if k != "notes"}
+    assert ex["tracks"]["drums"]["pads"] == plan["tracks"]["drums"]["pads"] and ex["levels"] == plan["levels"]
+
+
+def test_an_excerpt_counts_bars_of_the_plans_meter_and_checks_them(tmp_path):
+    from refdissect.live import excerpt
+    plan = _long_plan(tmp_path, meter=(3, 4))
+    ex = excerpt(plan, (2, 2), tmp_path / "ex")
+    assert ex["excerpt"]["beats"] == [3.0, 6.0] and [n["start_time"] for n in ex["tracks"]["drums"]["notes"]] == \
+        [pytest.approx(0.99), 1.0]
+    for bars in ((0, 2), (3, 2), (2, 12)):
+        with pytest.raises(ValueError, match="not in the plan"):
+            excerpt(plan, bars, tmp_path / "ex")
+    with pytest.raises(ValueError, match="stems_out"):
+        excerpt(plan, (1, 2))
+
+
+def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
+    """build_spec(plan, bars) is the excerpt's spec, clips as long as it;
+    live-build --bars builds it (ableton-live-mcp faked) with the stems cut
+    beside the plan."""
+    from refdissect.cli import main
+    from refdissect.live import build_spec, excerpt
+    plan = _long_plan(tmp_path)
+    spec = {t["name"]: t for t in build_spec(plan, (2, 4), tmp_path / "ex")}
+    assert spec == {t["name"]: t for t in build_spec(excerpt(plan, (2, 4), tmp_path / "ex"))}
+    assert spec["Drums (library)"]["clips"][0]["length"] == 12.0
+    assert spec["REF drums"]["audio_clips"][0]["file"] == str(tmp_path / "ex" / "drums.wav")
+    work = tmp_path / "work"
+    work.mkdir()
+    (tmp_path / "kick.wav").write_bytes((tmp_path / "drums.wav").read_bytes())
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    calls = _fake_live(monkeypatch)
+    assert main(["live-build", str(work), "--bars", "2-4", "--user-library", str(tmp_path / "lib")]) == 0
+    sent = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
+    assert sent["Drums (library)"]["clips"][0]["length"] == 12.0
+    assert sent["REF drums"]["audio_clips"][0]["file"] == str(work / "excerpt-2-4" / "drums.wav")
+    assert ("set_song_properties", {"tempo": 120.0, "loop": False, "time_signature": "4/4"}) in calls

@@ -255,6 +255,7 @@ def test_a_band_that_ties_five_sounds_names_none(noisy, tmp_path, monkeypatch):
     assert out["matched_in_band"] == "hat" and "tied_band" not in out
 
 
+@pytest.mark.slow
 def test_kick_sources_only_when_asked(noisy, tmp_path):
     """match() reads a kick template from drums + bass and the mix only with
     kick_sources_on: by default matches.json names no source. Here there is

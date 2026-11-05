@@ -1045,7 +1045,69 @@ def simpler_808(t808: dict) -> dict:
     return out
 
 
-def build_spec(plan: dict) -> list[dict]:
+def bar_beats(plan: dict) -> float:
+    """A bar of the plan's meter in its (quarter) beats: 4 in 4/4, 3 in 3/4 and 6/8."""
+    return int(plan.get("beats_per_bar", 4)) * 4 / int(plan.get("beat_unit", 4))
+
+
+def _moved(notes: list[dict], start: float, end: float) -> list[dict]:
+    """The notes that start in [start, end), moved by -start beats, each
+    ending by end."""
+    return [{**n, "start_time": n["start_time"] - start, "duration": min(n["duration"], end - n["start_time"])}
+            for n in notes if start <= n["start_time"] < end]
+
+
+def _trimmed(src: str | Path, dst: Path, seconds: tuple[float, float]) -> None:
+    """src's samples from seconds[0] to seconds[1] (fewer where it ends
+    first) to dst, at its rate and sample format."""
+    import soundfile as sf
+    info = sf.info(str(src))
+    a, b = (min(info.frames, int(round(t * info.samplerate))) for t in seconds)
+    x, rate = sf.read(str(src), start=a, stop=b, dtype="float64", always_2d=True)  # every PCM and float exactly
+    sf.write(str(dst), x, rate, subtype=info.subtype, format=info.format)
+
+
+def excerpt(plan: dict, bars: tuple[int, int], stems_out: str | Path | None = None) -> dict:
+    """Bars a to b of the plan (both in, counted from 1 as Live's ruler
+    shows them: bar a starts at beat (a - 1) x bar_beats) as a plan of its
+    own, for a short live check: Live has no export and records in real
+    time (the two live checks so far took 1 to 1.5 h each), and 8 bars at
+    140 BPM play in 14 s. Its drum, 808 and melodic notes, locators and
+    clips start at 0:
+    the notes that start in those bars move back by bar a's start and end by
+    bar b's end (a note that starts before bar a is left out, also where it
+    sounds into it, and an 808 note that slid from it starts on its own);
+    length_beats is the excerpt's. The stems are cut at the
+    same instants (bar a's start and bar b's end at the plan's tempo) into
+    stems_out, which the plan's stems need, and the excerpt plays those. The
+    808's one-shot, its settings, the pads and the levels are the plan's.
+    excerpt records the bars, beats and seconds it took."""
+    a, b = (int(v) for v in bars)
+    bar = bar_beats(plan)
+    last = math.ceil(float(plan["length_beats"]) / bar - 1e-9)
+    if not 1 <= a <= b <= last:
+        raise ValueError(f"bars {a}-{b} are not in the plan's 1-{last}")
+    start, end = (a - 1) * bar, min(b * bar, float(plan["length_beats"]))
+    seconds = (start * 60 / plan["tempo"], end * 60 / plan["tempo"])
+    out = json.loads(json.dumps(plan))
+    tracks = out["tracks"]
+    for t in [tracks["drums"], tracks["808"], *tracks.get("melodic", {}).values()]:
+        t["notes"] = _moved(t["notes"], start, end)
+    out["length_beats"] = end - start
+    out["locators"] = [[name, beat - start] for name, beat in plan["locators"] if start <= beat < end]
+    if out["stems"]:
+        if stems_out is None:
+            raise ValueError("an excerpt of a plan with stems needs a folder for them, cut to its bars (stems_out)")
+        Path(stems_out).mkdir(parents=True, exist_ok=True)
+        for info in out["stems"].values():
+            dst = Path(stems_out) / Path(info["path"]).name
+            _trimmed(info["path"], dst, seconds)
+            info["path"] = str(dst)
+    out["excerpt"] = {"bars": [a, b], "beats": [start, end], "seconds": [round(v, 6) for v in seconds]}
+    return out
+
+
+def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
     (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound, its file by the name build
@@ -1055,7 +1117,10 @@ def build_spec(plan: dict) -> list[dict]:
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
     transposition (a pad's Transpose and Detune), "Vol < Vel" at the plan's
     vol_vel (VOL_VEL), so velocities play the levels the plan assumes, Snap
-    off (LIVE_OFF), and faders from the plan's levels."""
+    off (LIVE_OFF), and faders from the plan's levels. With bars (a, b),
+    the spec of excerpt(plan, bars, stems_out): bars a to b, from 0."""
+    if bars:
+        plan = excerpt(plan, bars, stems_out)
     levels = plan["levels"]
     t808 = plan["tracks"]["808"]
     spec = []
@@ -1234,7 +1299,7 @@ async def held_samples(call, overview: dict, plan: dict) -> dict:
 
 
 async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, headroom: bool = True,
-                log=print) -> dict:
+                log=print, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> dict:
     """Build the plan in the open Live set with ableton-live-mcp's build_tracks
     (one call for every track, device, setting, clip and note). Refuses unless
     every track in the set is empty; the set's empty tracks are left as they are.
@@ -1251,7 +1316,13 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     (refused) or where the build stopped and which tracks it left in the set
     (failed_build, also logged). Live's time signature goes to the plan's
     meter (meter_of) before the locators, and a locator Live puts elsewhere
-    is deleted and listed under locators_moved (moved_locators)."""
+    is deleted and listed under locators_moved (moved_locators). With
+    bars (a, b), bars a to b of the plan are built, from 0, with the stems
+    cut to them in stems_out (excerpt)."""
+    if bars:
+        plan = excerpt(plan, bars, stems_out)
+        log(f"excerpt: bars {bars[0]}-{bars[1]}, {plan['excerpt']['seconds'][0]:.2f}-"
+            f"{plan['excerpt']['seconds'][1]:.2f} s of the plan, stems cut into {stems_out}")
     try:
         from MCP_Server import extended_tools as et
         from MCP_Server.server import mcp

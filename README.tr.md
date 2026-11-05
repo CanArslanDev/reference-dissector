@@ -80,10 +80,46 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 
 - `melodic`: her tonal kanal için notalar ve akorlar (Basic Pitch).
 - `index-speckle`: sample'ları herhangi bir perdede eşleştirmek için speckle indeksi. `index-library` bunu artık kendisi yazıyor; bu komut daha önce indekslenmiş bir kütüphane içindir.
-- `suite build`, `suite run`, `suite report`: kalibrasyon v2'yi kurar, her etiket (tag) için çalıştırır ve puanlar. `suite run` şunları alır: `--steps`, `--reuse`, `--jobs`, `--render`, `--model`, `--resume`, `--cache`.
+- `suite build`, `suite run`, `suite report`: kalibrasyon v2'yi kurar, her etiket (tag) için çalıştırır ve puanlar. `suite run` şunları alır: `--steps`, `--reuse`, `--jobs`, `--render`, `--model`, `--resume`, `--cache`, `--subset`.
 - `analyze` ve `fit-808`, 808 okuyucusunun sonucunu ve 808 fit'ini çalışma klasörünün `cache/` alt klasöründe saklar. Stem'ler (ya da şablon), ayarlar, numpy, scipy ve soxr sürümleri ve paketin bütün `.py` dosyaları aynıysa sonraki çalıştırma bunları geri okur ve log'a hangi dosyayı okuduğunu yazar. `--no-cache` hepsini yeniden çalıştırır. `suite run` ise `--cache` verilmedikçe hiçbir şey saklamaz; böylece ölçülen süreler kodun kendi süreleridir.
 
+- `suite run --subset dev`: süitin her senaryo ailesinden birer beat alan 11 beat'lik geliştirme alt kümesi; `--cache` ile denemeler için.
+- `suite clean DIR --keep a,b`: tutulmayan etiketlerin çalıştırma klasörlerini boşaltır, her birinin `scores.json`'unu saklar. `--yes` verilmezse yalnızca neyin silineceğini listeler.
+- `live-build --bars A-B`: planın yalnızca A–B ölçülerini, 0'dan başlatarak kurar; stem'ler aynı anlarda kesilir. Kısa bir Live kontrolü içindir; henüz Live'da çalıştırılmadı.
+
 Komutların tamamı README.md'nin "Quick start" bölümünde, ayrıntıları docs/12'de.
+
+## Geliştirme
+
+`uv sync` pytest, pytest-xdist ve ruff'ı kurar. Hiçbir test kütüphaneni, Demucs'u, Live'ı ya da model indirmeyi gerektirmez.
+
+```bash
+uv run pytest -m "not slow" -n auto     # hızlı döngü: -n 4 ile 306 test 22 s
+uv run pytest -n auto                   # bütün testler, her commit'ten önce ve CI'da: -n 4 ile 94 s (tek süreçte 307 s)
+uv run ruff check .
+```
+
+- `slow` işaretli 48 test fonksiyonu (parametreleriyle 62 test), tek süreçte her biri 2 s ya da daha uzun sürdü: 308 s'lik test süresinin 250 s'si. Hızlı döngü bunları atlar; commit'ten önceki kontrol yine bütün testlerdir.
+- `-n` ile boşta kalan bir işçi, meşgul olanın testlerini alıyor (`--dist worksteal`, pyproject'te). -n 4'te bütün testler 132 s'den 94–96 s'ye indi.
+- Üzerinde çalıştığın bir bilgisayarda `-n 4` çekirdek bırakır.
+- Ölçüm 10 çekirdekli Apple M4'te (04–05.11.2026): 366 geçti, 3 atlandı, 2 beklenen hata (tek süreç süresi, kütüphane deposunun 1 s'den kısa süren 3 testinden önce, 363 testle ölçüldü). CI `-n auto` ile çalışıyor; oradaki süresi henüz ölçülmedi.
+
+Boru hattında bir değişiklik denerken önce geliştirme alt kümesinde dene, sonra bütün beat'lerde ölç:
+
+```bash
+uv run refdissect suite run "$S" --library "$W/work/library.npz" --library-808 "$W/work/library_808.npz" \
+    --tag try --subset dev --cache --jobs 2 --render
+uv run refdissect suite report "$S" --tags <alt kümenin temel etiketi>,try
+uv run refdissect suite clean "$S" --keep m5,m5-ft          # kuru çalıştırma; --yes diğer etiketlerin çalıştırma klasörlerini boşaltır
+uv run --extra live refdissect live-build "$W/song/refdissect" --bars 9-16   # kısa bir Live kontrolü
+```
+
+- Geliştirme alt kümesi 11 beat'tir, her senaryo ailesinden bir tane ([03](docs/03-calibration.md#a-dev-subset)). 2 işle (job), beat'lerinin `cache/` klasörü 808 okuyucusunun sonuçlarını ve fit'leri tuttuktan sonra 260–268 s sürdü; doldurmak 672–681 s (cache'siz 673 s). Bütün süit bir model için yaklaşık 45 dakika.
+- Bir alt küme çalıştırmasını aynı alt kümenin bir çalıştırmasıyla karşılaştır. Son sayılar her iki modelde de 48 beat'in tamamında ölçülür.
+- `suite clean` her etiketin `scores.json` dosyasını tutar; temizlenmiş bir etiket yine beat beat karşılaştırılabilir. Süitte olmayan bir etiketi `--keep` ile tutmak istersen reddeder.
+- `live-build --bars A-B` bir planın A'dan B'ye kadar olan ölçülerini 0'dan kurar, stem'ler de aynı yerden kesilir ([07](docs/07-building-in-live.md#a-short-live-check)). Henüz Live'da çalıştırılmadı.
+- Kütüphanenin dizileri bellek eşlemeli (memory-mapped) okunuyor; bir çalıştırmanın işleri tek kopyayı paylaşıyor. Depo, .npz'nin boyutu ve CRC-32'leri ile her .npy'nin boyutu ve değişiklik zamanı yazıldığı gibi kaldıkça kullanılır; değişmiş, eksik ya da kısalmışsa yeniden yazılır. 2 işte her işin en yüksek fiziksel belleği 1,7–1,8 GB'tan 1,0 GB'a indi, süre aynı kaldı ([12](docs/12-replica-mode.md#the-suite)).
+- Bunların hiçbiri bir çıktıyı değiştirmiyor: geliştirme alt kümesinin 11 beat'inde bu kodla yapılan taze bir çalıştırmanın `log.txt` dışındaki her dosyası, süreler ve çalıştırma kayıtları dışında, m5'inkiyle ve m5-ft'ninkiyle aynı.
 
 ## Belgeler
 

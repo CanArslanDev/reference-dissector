@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 
 from refdissect import cache, pipeline
 
@@ -34,6 +35,7 @@ def _copy(tmp_path):
     return copy
 
 
+@pytest.mark.slow
 def test_a_process_whose_code_changed_on_disk_keeps_nothing(tmp_path):
     """The review's case: a process imports synth808, synth808.py is edited
     on disk, and the process fits with a cache. Keyed on the files as they

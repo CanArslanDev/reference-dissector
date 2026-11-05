@@ -88,6 +88,7 @@ BACKBEAT = {"kick": [0, 10], "snare": [8], "hat": [0, 2, 4, 6, 8, 10, 12, 14]}
 BAR = 4 * 60 / 137
 
 
+@pytest.mark.slow
 def test_a_rim_on_swung_16ths_is_found(sounds):
     """A rim only on a swung 16th (62 %, 26 ms late at 137 BPM): the old
     16th slots (+-12 ms) never seeded it."""
@@ -97,6 +98,7 @@ def test_a_rim_on_swung_16ths_is_found(sounds):
     assert sc["rim"]["f1_20"] > 0.95 and abs(sc["rim"]["error_ms"]["median"]) < 2
 
 
+@pytest.mark.slow
 def test_triplet_hats(sounds):
     """Hats on 8th-note triplets over a kick and snare in 4/4."""
     bpm, bars = 120.0, 12
@@ -110,6 +112,7 @@ def test_triplet_hats(sounds):
     assert {k: v["f1_20"] > 0.9 for k, v in sc.items()} == {"hat": True, "kick": True, "snare": True}
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("meter", ["3/4", "6/8"])
 def test_three_four_and_six_eight(sounds, meter):
     """Bars of 12 16ths: kick, snare and hats each found (the old slots,
@@ -123,6 +126,7 @@ def test_three_four_and_six_eight(sounds, meter):
     assert {k: v["f1_20"] > 0.9 for k, v in sc.items()} == {"hat": True, "kick": True, "snare": True}
 
 
+@pytest.mark.slow
 def test_a_rare_perc_and_a_crash_every_8_bars(sounds):
     """Three perc hits off the grid and a crash on every 8th bar line are
     found by the second pass, which groups what no template explains."""
@@ -140,6 +144,7 @@ def test_a_rare_perc_and_a_crash_every_8_bars(sounds):
     assert {found_by[t] for name in ("perc", "crash") for t in sc[name]["templates"]} == {"residual"}
 
 
+@pytest.mark.slow
 def test_a_kick_that_always_sits_on_a_hat_stays_a_kick(sounds):
     """Every kick lands on a hat (and most hats have none): the kick is not
     taken for the hat seen in another band."""
@@ -150,6 +155,7 @@ def test_a_kick_that_always_sits_on_a_hat_stays_a_kick(sounds):
     assert sc["kick"]["f1_20"] > 0.95 and sc["hat"]["f1_20"] > 0.8
 
 
+@pytest.mark.slow
 def test_the_same_hat_in_two_bands_is_one_sound(sounds):
     """A hat with as much in the snare band as in the hat band shows up in
     both; it is one sound, its hits counted once."""
@@ -161,6 +167,7 @@ def test_the_same_hat_in_two_bands_is_one_sound(sounds):
     assert sc["hat2"]["f1_20"] > 0.9
 
 
+@pytest.mark.slow
 def test_a_lead_in_does_not_move_the_attack(sounds, kit):
     """A snare with 20 ms of quiet noise before its attack: its hits are
     timed where it attacks, as the truth times it."""
@@ -173,6 +180,7 @@ def test_a_lead_in_does_not_move_the_attack(sounds, kit):
     assert sc["lead"]["f1_20"] > 0.95 and abs(sc["lead"]["error_ms"]["median"]) < 2
 
 
+@pytest.mark.slow
 def test_a_snare_after_a_ringing_kick_is_timed_on_its_attack(sounds):
     """A snare a 16th after a kick that still rings at 55 Hz: in the full
     band its attack sat on the kick's tail (calibration snares 13-24 ms
@@ -185,6 +193,7 @@ def test_a_snare_after_a_ringing_kick_is_timed_on_its_attack(sounds):
     assert sc["snare"]["f1_20"] > 0.95 and abs(sc["snare"]["error_ms"]["median"]) < 2
 
 
+@pytest.mark.slow
 def test_a_kick_whose_body_comes_late_is_timed_on_its_click(sounds):
     """htdemucs leaves a kick's click in the drum stem and its body 26 ms
     later: the kick starts at the click, though the low band rises late."""
@@ -211,6 +220,7 @@ def test_places_follow_the_song_not_the_straight_grid():
     assert where[-1] == -1
 
 
+@pytest.mark.slow
 def test_a_tonal_snares_ring_is_not_its_hits(sounds):
     """A snare with a 190 Hz body (70 ms decay), a pickup one 32nd before
     each one (140 BPM): the snare template matched its own ring 37-158 ms
@@ -239,6 +249,7 @@ def sine_kick(hz: float = 50.0, ms: float = 400, decay_ms: float = 150, drop: fl
 
 @pytest.mark.parametrize("bpm, steps", [(140, {"sine": [3, 11], "snare": [8], "hat": [0, 2, 4, 6, 8, 10, 12, 14]}),
                                         (90, {"sine": [0, 7, 10], "snare": [4, 12]})])
+@pytest.mark.slow
 def test_a_kick_without_a_click_is_found(sounds, bpm, steps):
     """A clickless kick between 8th hats, or with no hats at all: nothing
     rises in its hat band, as for a kick's body after its click, but
@@ -269,6 +280,7 @@ def test_a_view_goes_with_its_main():
     assert unlocked(x, [main, view, louder]) == [louder]
 
 
+@pytest.mark.slow
 def test_lead_ins_of_different_lengths(sounds):
     """As on the suite's leadin beats: quiet noise (-60 dB) before every
     sound, 11 ms before the kick, 20 before the snare, 28 before the hats,
