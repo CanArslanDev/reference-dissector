@@ -39,7 +39,7 @@
  "refdissect": [
   {
    "version": "0.1.0",
-   "commit": "2e4a3ef",
+   "commit": "def2f33",
    "dirty": false
   }
  ],
@@ -51,7 +51,7 @@
  "last_run": {
   "beats": 48,
   "jobs": 2,
-  "wall_s": 2659.0
+  "wall_s": 2670.6
  },
  "separation": {
   "model": "htdemucs",
@@ -203,18 +203,18 @@
     "v1_f1": 0.971
    },
    "seconds": {
-    "analyze": 36.435,
-    "fit_808": 47.045,
-    "library_load": 0.05,
-    "match": 30.685,
-    "melodic": 3.805,
-    "plan": 0.24,
-    "prepare": 0.01,
-    "render": 0.11,
+    "analyze": 39.1,
+    "fit_808": 48.65,
+    "library_load": 0.045,
+    "match": 31.54,
+    "melodic": 3.855,
+    "plan": 0.255,
+    "prepare": 0.02,
+    "render": 0.115,
     "score_analysis": 0.01,
-    "score_plan": 0.265,
+    "score_plan": 0.275,
     "separate": 2.295,
-    "total": 118.655
+    "total": 123.865
    }
   },
   "tempo72": {
@@ -349,18 +349,18 @@
     "v1_f1": 0.9608
    },
    "seconds": {
-    "analyze": 33.48,
-    "fit_808": 37.475,
+    "analyze": 33.95,
+    "fit_808": 37.77,
     "library_load": 0.0,
-    "match": 29.925,
-    "melodic": 2.4,
-    "plan": 0.22,
-    "prepare": 0.0,
+    "match": 30.405,
+    "melodic": 2.51,
+    "plan": 0.225,
+    "prepare": 0.01,
     "render": 0.105,
     "score_analysis": 0.01,
-    "score_plan": 0.24,
+    "score_plan": 0.245,
     "separate": 2.195,
-    "total": 103.855
+    "total": 105.23
    }
   },
   "tempo95": {
@@ -495,18 +495,18 @@
     "v1_f1": 0.9429
    },
    "seconds": {
-    "analyze": 26.355,
-    "fit_808": 47.435,
+    "analyze": 26.34,
+    "fit_808": 47.72,
     "library_load": 0.0,
-    "match": 25.78,
-    "melodic": 2.06,
+    "match": 25.935,
+    "melodic": 2.085,
     "plan": 0.18,
-    "prepare": 0.0,
+    "prepare": 0.01,
     "render": 0.085,
     "score_analysis": 0.01,
-    "score_plan": 0.19,
+    "score_plan": 0.2,
     "separate": 1.525,
-    "total": 102.095
+    "total": 102.565
    }
   },
   "tempo160": {
@@ -642,18 +642,18 @@
     "v1_f1": 0.8572
    },
    "seconds": {
-    "analyze": 36.105,
-    "fit_808": 46.56,
+    "analyze": 36.005,
+    "fit_808": 47.485,
     "library_load": 0.0,
-    "match": 29.535,
-    "melodic": 2.205,
+    "match": 29.58,
+    "melodic": 2.17,
     "plan": 0.225,
-    "prepare": 0.0,
-    "render": 0.105,
-    "score_analysis": 0.015,
-    "score_plan": 0.22,
+    "prepare": 0.015,
+    "render": 0.11,
+    "score_analysis": 0.01,
+    "score_plan": 0.235,
     "separate": 1.86,
-    "total": 114.97
+    "total": 115.835
    }
   },
   "meter34": {
@@ -788,18 +788,18 @@
     "v1_f1": 0.9686
    },
    "seconds": {
-    "analyze": 23.05,
-    "fit_808": 46.935,
+    "analyze": 22.98,
+    "fit_808": 47.3,
     "library_load": 0.0,
-    "match": 24.36,
-    "melodic": 2.105,
+    "match": 23.905,
+    "melodic": 2.115,
     "plan": 0.185,
-    "prepare": 0.0,
+    "prepare": 0.01,
     "render": 0.08,
     "score_analysis": 0.01,
     "score_plan": 0.21,
     "separate": 1.54,
-    "total": 96.935
+    "total": 96.795
    }
   },
   "meter68": {
@@ -815,7 +815,8 @@
     "808.error_p90_ms": 14.33,
     "808.f1_20": 0.8839,
     "808.f1_50": 0.9776,
-    "808.legato_est": 0.0,
+    "808.legato_est": 0.5,
+    "808.legato_precision": 0.0,
     "808.legato_truth": 0.0,
     "808.note_f1_20": 0.869,
     "808.note_f1_50": 0.9627,
@@ -934,18 +935,18 @@
     "v1_f1": 0.9555
    },
    "seconds": {
-    "analyze": 24.355,
-    "fit_808": 46.65,
+    "analyze": 24.275,
+    "fit_808": 47.065,
     "library_load": 0.0,
-    "match": 26.06,
-    "melodic": 2.115,
+    "match": 26.145,
+    "melodic": 2.105,
     "plan": 0.17,
-    "prepare": 0.0,
-    "render": 0.085,
+    "prepare": 0.01,
+    "render": 0.08,
     "score_analysis": 0.01,
-    "score_plan": 0.2,
+    "score_plan": 0.205,
     "separate": 1.53,
-    "total": 99.645
+    "total": 100.065
    }
   },
   "swing58": {
@@ -1081,18 +1082,18 @@
     "v1_f1": 0.9507
    },
    "seconds": {
-    "analyze": 34.895,
-    "fit_808": 49.38,
+    "analyze": 34.975,
+    "fit_808": 49.82,
     "library_load": 0.0,
-    "match": 25.28,
-    "melodic": 2.49,
-    "plan": 0.255,
-    "prepare": 0.0,
+    "match": 25.275,
+    "melodic": 2.61,
+    "plan": 0.26,
+    "prepare": 0.01,
     "render": 0.12,
     "score_analysis": 0.01,
-    "score_plan": 0.255,
+    "score_plan": 0.265,
     "separate": 2.2,
-    "total": 112.685
+    "total": 113.345
    }
   },
   "swing66": {
@@ -1102,17 +1103,17 @@
     2
    ],
    "analysis": {
-    "808.cents_median": -0.4,
-    "808.cents_median_abs": 4.95,
-    "808.error_median_ms": -2.295,
-    "808.error_p90_ms": 2.96,
+    "808.cents_median": -0.45,
+    "808.cents_median_abs": 4.9,
+    "808.error_median_ms": -2.28,
+    "808.error_p90_ms": 2.97,
     "808.f1_20": 0.925,
-    "808.f1_50": 0.9344,
+    "808.f1_50": 0.9437,
     "808.legato_est": 0.5,
     "808.legato_precision": 0.0,
     "808.legato_truth": 0.0,
     "808.note_f1_20": 0.8881,
-    "808.note_f1_50": 0.8973,
+    "808.note_f1_50": 0.9067,
     "808.settled_cents_median_abs": 4.85,
     "808.settled_within_50": 0.9711,
     "808.v1_f1": 0.9065,
@@ -1155,14 +1156,14 @@
    "plan": {
     "808.cents_median": -1.05,
     "808.cents_median_abs": 2.05,
-    "808.error_median_ms": -2.295,
-    "808.error_p90_ms": 2.95,
+    "808.error_median_ms": -2.28,
+    "808.error_p90_ms": 2.97,
     "808.f1_20": 0.925,
-    "808.f1_50": 0.9344,
+    "808.f1_50": 0.9437,
     "808.legato_est": 0.0,
     "808.legato_truth": 0.0,
     "808.note_f1_20": 0.8881,
-    "808.note_f1_50": 0.8973,
+    "808.note_f1_50": 0.9067,
     "808.settled_cents_median_abs": 3.15,
     "808.settled_within_50": 0.9711,
     "808.v1_f1": 0.9065,
@@ -1196,7 +1197,7 @@
     "drums.v1_f1": 0.9691,
     "levels.808.balance_db": 3.845,
     "levels.808.level_db": -2.26,
-    "levels.808.spread_p90_db": 2.13,
+    "levels.808.spread_p90_db": 2.14,
     "levels.808.vs_kit_db": -1.43,
     "levels.balance_abs_db": 0.27,
     "levels.hat.balance_db": 0.105,
@@ -1229,18 +1230,18 @@
     "v1_f1": 0.9566
    },
    "seconds": {
-    "analyze": 36.435,
-    "fit_808": 44.76,
+    "analyze": 36.1,
+    "fit_808": 45.02,
     "library_load": 0.0,
-    "match": 32.485,
-    "melodic": 2.315,
+    "match": 32.83,
+    "melodic": 2.51,
     "plan": 0.235,
-    "prepare": 0.0,
+    "prepare": 0.01,
     "render": 0.105,
-    "score_analysis": 0.02,
-    "score_plan": 0.265,
+    "score_analysis": 0.01,
+    "score_plan": 0.275,
     "separate": 2.185,
-    "total": 116.62
+    "total": 117.095
    }
   },
   "rolls": {
@@ -1375,18 +1376,18 @@
     "v1_f1": 0.7968
    },
    "seconds": {
-    "analyze": 36.305,
-    "fit_808": 46.895,
+    "analyze": 36.3,
+    "fit_808": 48.3,
     "library_load": 0.0,
-    "match": 32.36,
-    "melodic": 2.32,
+    "match": 32.73,
+    "melodic": 2.345,
     "plan": 0.325,
-    "prepare": 0.0,
+    "prepare": 0.02,
     "render": 0.17,
     "score_analysis": 0.02,
-    "score_plan": 0.45,
+    "score_plan": 0.465,
     "separate": 2.21,
-    "total": 118.845
+    "total": 120.675
    }
   },
   "layers": {
@@ -1527,18 +1528,18 @@
     "v1_f1": 0.6099
    },
    "seconds": {
-    "analyze": 30.335,
-    "fit_808": 47.005,
+    "analyze": 30.19,
+    "fit_808": 47.46,
     "library_load": 0.0,
-    "match": 27.14,
-    "melodic": 2.445,
-    "plan": 0.225,
-    "prepare": 0.0,
+    "match": 27.325,
+    "melodic": 2.475,
+    "plan": 0.22,
+    "prepare": 0.01,
     "render": 0.105,
     "score_analysis": 0.01,
-    "score_plan": 0.24,
+    "score_plan": 0.27,
     "separate": 2.2,
-    "total": 107.505
+    "total": 108.065
    }
   },
   "kick808": {
@@ -1673,18 +1674,18 @@
     "v1_f1": 0.9825
    },
    "seconds": {
-    "analyze": 37.37,
-    "fit_808": 47.455,
+    "analyze": 37.31,
+    "fit_808": 47.51,
     "library_load": 0.0,
-    "match": 25.35,
-    "melodic": 2.335,
+    "match": 25.63,
+    "melodic": 2.495,
     "plan": 0.24,
-    "prepare": 0.0,
-    "render": 0.115,
+    "prepare": 0.015,
+    "render": 0.11,
     "score_analysis": 0.01,
-    "score_plan": 0.26,
+    "score_plan": 0.265,
     "separate": 2.19,
-    "total": 113.135
+    "total": 113.585
    }
   },
   "bass_low": {
@@ -1695,18 +1696,19 @@
    ],
    "analysis": {
     "808.cents_median": -3.1,
-    "808.cents_median_abs": 18.3,
-    "808.error_median_ms": 0.56,
-    "808.error_p90_ms": 0.98,
-    "808.f1_20": 0.9968,
+    "808.cents_median_abs": 18.4,
+    "808.error_median_ms": 0.57,
+    "808.error_p90_ms": 1.005,
+    "808.f1_20": 0.9936,
     "808.f1_50": 1.0,
-    "808.legato_est": 0.0,
+    "808.legato_est": 0.5,
+    "808.legato_precision": 0.0,
     "808.legato_truth": 0.0,
-    "808.note_f1_20": 0.9487,
+    "808.note_f1_20": 0.9455,
     "808.note_f1_50": 0.9487,
     "808.settled_cents_median_abs": 29.55,
     "808.settled_within_50": 0.8109,
-    "808.v1_f1": 0.997,
+    "808.v1_f1": 0.9935,
     "808.written_equal": 0.9872,
     "drums.extra": 2.0,
     "drums.f1_20": 0.7372,
@@ -1739,23 +1741,23 @@
     "rhythm.meter_equal": 1.0,
     "rhythm.octave_x1": 1.0,
     "rhythm.tempo_error_abs": 0.0001,
-    "strict_f1_20": 0.7891,
-    "v1_f1": 0.8809
+    "strict_f1_20": 0.7884,
+    "v1_f1": 0.8802
    },
    "plan": {
     "808.cents_median": 2.95,
     "808.cents_median_abs": 17.05,
-    "808.error_median_ms": 0.55,
-    "808.error_p90_ms": 0.98,
-    "808.f1_20": 0.9968,
+    "808.error_median_ms": 0.56,
+    "808.error_p90_ms": 1.0,
+    "808.f1_20": 0.9936,
     "808.f1_50": 1.0,
     "808.legato_est": 0.0,
     "808.legato_truth": 0.0,
-    "808.note_f1_20": 0.9744,
+    "808.note_f1_20": 0.9711,
     "808.note_f1_50": 0.9744,
     "808.settled_cents_median_abs": 28.35,
     "808.settled_within_50": 0.9872,
-    "808.v1_f1": 0.997,
+    "808.v1_f1": 0.9935,
     "808.written_equal": 0.9872,
     "drums.extra": 0.0,
     "drums.f1_20": 0.7357,
@@ -1815,22 +1817,22 @@
     "rhythm.meter_equal": 1.0,
     "rhythm.octave_x1": 1.0,
     "rhythm.tempo_error_abs": 0.0001,
-    "strict_f1_20": 0.7878,
-    "v1_f1": 0.8722
+    "strict_f1_20": 0.7872,
+    "v1_f1": 0.8715
    },
    "seconds": {
-    "analyze": 38.005,
-    "fit_808": 40.26,
+    "analyze": 37.86,
+    "fit_808": 40.33,
     "library_load": 0.0,
-    "match": 27.665,
-    "melodic": 2.315,
+    "match": 27.92,
+    "melodic": 2.49,
     "plan": 0.29,
-    "prepare": 0.0,
-    "render": 0.11,
+    "prepare": 0.01,
+    "render": 0.115,
     "score_analysis": 0.01,
     "score_plan": 0.24,
     "separate": 2.225,
-    "total": 108.895
+    "total": 109.265
    }
   },
   "glides": {
@@ -1844,17 +1846,17 @@
     "808.cents_median_abs": 5.7,
     "808.error_median_ms": 0.72,
     "808.error_p90_ms": 17.945,
-    "808.f1_20": 0.8554,
-    "808.f1_50": 0.9606,
+    "808.f1_20": 0.8681,
+    "808.f1_50": 0.965,
     "808.legato_est": 7.0,
     "808.legato_precision": 0.75,
     "808.legato_recall": 0.625,
     "808.legato_truth": 8.0,
-    "808.note_f1_20": 0.7853,
-    "808.note_f1_50": 0.8469,
+    "808.note_f1_20": 0.7979,
+    "808.note_f1_50": 0.851,
     "808.settled_cents_median_abs": 3.9,
     "808.settled_within_50": 0.8892,
-    "808.v1_f1": 0.8645,
+    "808.v1_f1": 0.8685,
     "808.written_equal": 0.8892,
     "drums.extra": 2.5,
     "drums.f1_20": 0.9704,
@@ -1887,25 +1889,25 @@
     "rhythm.meter_equal": 1.0,
     "rhythm.octave_x1": 1.0,
     "rhythm.tempo_error_abs": 0.0001,
-    "strict_f1_20": 0.9474,
-    "v1_f1": 0.9474
+    "strict_f1_20": 0.95,
+    "v1_f1": 0.9482
    },
    "plan": {
     "808.cents_median": 0.75,
-    "808.cents_median_abs": 3.2,
-    "808.error_median_ms": 0.72,
-    "808.error_p90_ms": 17.935,
-    "808.f1_20": 0.8554,
-    "808.f1_50": 0.9606,
+    "808.cents_median_abs": 3.25,
+    "808.error_median_ms": 0.73,
+    "808.error_p90_ms": 17.945,
+    "808.f1_20": 0.8681,
+    "808.f1_50": 0.965,
     "808.legato_est": 7.0,
     "808.legato_precision": 0.75,
     "808.legato_recall": 0.625,
     "808.legato_truth": 8.0,
-    "808.note_f1_20": 0.7767,
-    "808.note_f1_50": 0.8293,
+    "808.note_f1_20": 0.7893,
+    "808.note_f1_50": 0.8423,
     "808.settled_cents_median_abs": 1.45,
     "808.settled_within_50": 0.8892,
-    "808.v1_f1": 0.8645,
+    "808.v1_f1": 0.8685,
     "808.written_equal": 0.8892,
     "drums.extra": 0.0,
     "drums.f1_20": 0.9704,
@@ -1934,29 +1936,29 @@
     "drums.snare.f1_50": 1.0,
     "drums.snare.v1_f1": 1.0,
     "drums.v1_f1": 0.9682,
-    "levels.808.balance_db": 1.83,
+    "levels.808.balance_db": 1.78,
     "levels.808.level_db": -3.08,
     "levels.808.spread_p90_db": 2.055,
     "levels.808.vs_kit_db": -2.125,
-    "levels.balance_abs_db": 0.29,
+    "levels.balance_abs_db": 0.24,
     "levels.hat.balance_db": 0.155,
-    "levels.hat.level_db": -4.755,
+    "levels.hat.level_db": -4.705,
     "levels.hat.spread_p90_db": 4.49,
-    "levels.hat.vs_kit_db": -0.51,
-    "levels.kick.balance_db": -1.08,
+    "levels.hat.vs_kit_db": -0.46,
+    "levels.kick.balance_db": -1.13,
     "levels.kick.level_db": -5.99,
     "levels.kick.spread_p90_db": 5.53,
     "levels.kick.vs_kit_db": -1.745,
     "levels.kit.bass_db": -0.955,
     "levels.kit.drums_db": -4.245,
-    "levels.open_hat.balance_db": 0.135,
+    "levels.open_hat.balance_db": 0.085,
     "levels.open_hat.level_db": -4.775,
     "levels.open_hat.spread_p90_db": 0.25,
     "levels.open_hat.vs_kit_db": -0.53,
     "levels.snare.balance_db": -0.12,
-    "levels.snare.level_db": -5.03,
+    "levels.snare.level_db": -4.98,
     "levels.snare.spread_p90_db": 1.26,
-    "levels.snare.vs_kit_db": -0.785,
+    "levels.snare.vs_kit_db": -0.735,
     "levels.vs_kit_abs_db": 1.18,
     "rhythm.beat_f": 1.0,
     "rhythm.downbeat_error_ms_abs": 0.0,
@@ -1965,22 +1967,22 @@
     "rhythm.meter_equal": 1.0,
     "rhythm.octave_x1": 1.0,
     "rhythm.tempo_error_abs": 0.0001,
-    "strict_f1_20": 0.9474,
-    "v1_f1": 0.9474
+    "strict_f1_20": 0.95,
+    "v1_f1": 0.9482
    },
    "seconds": {
-    "analyze": 30.105,
-    "fit_808": 47.035,
+    "analyze": 30.23,
+    "fit_808": 47.7,
     "library_load": 0.0,
-    "match": 25.135,
-    "melodic": 2.74,
-    "plan": 0.25,
-    "prepare": 0.0,
-    "render": 0.12,
+    "match": 25.21,
+    "melodic": 2.645,
+    "plan": 0.22,
+    "prepare": 0.01,
+    "render": 0.115,
     "score_analysis": 0.01,
     "score_plan": 0.26,
     "separate": 2.195,
-    "total": 105.655
+    "total": 106.4
    }
   },
   "drum_pitch": {
@@ -2115,18 +2117,18 @@
     "v1_f1": 0.9528
    },
    "seconds": {
-    "analyze": 30.475,
-    "fit_808": 46.745,
+    "analyze": 30.295,
+    "fit_808": 47.185,
     "library_load": 0.0,
-    "match": 32.105,
-    "melodic": 2.54,
+    "match": 32.325,
+    "melodic": 2.31,
     "plan": 0.23,
-    "prepare": 0.0,
+    "prepare": 0.01,
     "render": 0.11,
     "score_analysis": 0.01,
-    "score_plan": 0.275,
+    "score_plan": 0.285,
     "separate": 2.2,
-    "total": 112.49
+    "total": 112.76
    }
   },
   "leadin": {
@@ -2261,18 +2263,18 @@
     "v1_f1": 0.9979
    },
    "seconds": {
-    "analyze": 36.14,
-    "fit_808": 47.645,
+    "analyze": 36.01,
+    "fit_808": 47.22,
     "library_load": 0.0,
-    "match": 32.085,
-    "melodic": 2.95,
+    "match": 32.26,
+    "melodic": 2.27,
     "plan": 0.225,
-    "prepare": 0.0,
-    "render": 0.105,
+    "prepare": 0.01,
+    "render": 0.1,
     "score_analysis": 0.01,
-    "score_plan": 0.26,
+    "score_plan": 0.255,
     "separate": 2.205,
-    "total": 119.42
+    "total": 118.36
    }
   },
   "rare": {
@@ -2455,18 +2457,18 @@
     "v1_f1": 0.7017
    },
    "seconds": {
-    "analyze": 37.03,
-    "fit_808": 47.02,
+    "analyze": 36.855,
+    "fit_808": 47.225,
     "library_load": 0.0,
-    "match": 37.24,
-    "melodic": 2.37,
-    "plan": 0.28,
-    "prepare": 0.0,
-    "render": 0.13,
+    "match": 37.345,
+    "melodic": 2.33,
+    "plan": 0.285,
+    "prepare": 0.01,
+    "render": 0.125,
     "score_analysis": 0.01,
-    "score_plan": 0.325,
+    "score_plan": 0.335,
     "separate": 2.22,
-    "total": 124.405
+    "total": 124.52
    }
   },
   "flams": {
@@ -2601,18 +2603,18 @@
     "v1_f1": 0.8417
    },
    "seconds": {
-    "analyze": 35.695,
-    "fit_808": 47.175,
+    "analyze": 35.525,
+    "fit_808": 48.16,
     "library_load": 0.0,
-    "match": 27.24,
-    "melodic": 2.31,
-    "plan": 0.24,
-    "prepare": 0.0,
-    "render": 0.11,
+    "match": 27.455,
+    "melodic": 2.29,
+    "plan": 0.245,
+    "prepare": 0.01,
+    "render": 0.105,
     "score_analysis": 0.01,
-    "score_plan": 0.24,
+    "score_plan": 0.25,
     "separate": 2.215,
-    "total": 113.02
+    "total": 114.05
    }
   },
   "dynamics": {
@@ -2747,18 +2749,18 @@
     "v1_f1": 0.9284
    },
    "seconds": {
-    "analyze": 35.46,
-    "fit_808": 53.78,
+    "analyze": 35.4,
+    "fit_808": 54.03,
     "library_load": 0.0,
     "match": 29.84,
-    "melodic": 2.405,
+    "melodic": 2.61,
     "plan": 0.25,
-    "prepare": 0.0,
-    "render": 0.115,
+    "prepare": 0.01,
+    "render": 0.12,
     "score_analysis": 0.01,
-    "score_plan": 0.26,
+    "score_plan": 0.27,
     "separate": 2.225,
-    "total": 122.12
+    "total": 122.54
    }
   },
   "melodic": {
@@ -2902,18 +2904,18 @@
     "v1_f1": 0.9058
    },
    "seconds": {
-    "analyze": 26.255,
-    "fit_808": 46.855,
+    "analyze": 26.245,
+    "fit_808": 47.31,
     "library_load": 0.0,
-    "match": 20.13,
-    "melodic": 2.595,
+    "match": 20.285,
+    "melodic": 2.53,
     "plan": 0.26,
-    "prepare": 0.0,
-    "render": 0.12,
-    "score_analysis": 0.02,
+    "prepare": 0.01,
+    "render": 0.11,
+    "score_analysis": 0.025,
     "score_plan": 0.27,
     "separate": 2.23,
-    "total": 96.505
+    "total": 97.045
    }
   },
   "producer": {
@@ -3064,18 +3066,18 @@
     "v1_f1": 0.7266
    },
    "seconds": {
-    "analyze": 39.52,
-    "fit_808": 38.775,
+    "analyze": 39.105,
+    "fit_808": 38.76,
     "library_load": 0.0,
     "match": 39.295,
-    "melodic": 2.365,
-    "plan": 0.345,
-    "prepare": 0.0,
+    "melodic": 2.36,
+    "plan": 0.34,
+    "prepare": 0.01,
     "render": 0.16,
-    "score_analysis": 0.015,
-    "score_plan": 0.43,
+    "score_analysis": 0.02,
+    "score_plan": 0.44,
     "separate": 2.05,
-    "total": 120.905
+    "total": 120.49
    }
   },
   "full": {
@@ -3229,18 +3231,18 @@
     "v1_f1": 0.6259
    },
    "seconds": {
-    "analyze": 32.13,
-    "fit_808": 47.245,
+    "analyze": 32.09,
+    "fit_808": 47.11,
     "library_load": 0.0,
-    "match": 23.33,
-    "melodic": 2.345,
+    "match": 23.54,
+    "melodic": 2.33,
     "plan": 0.325,
-    "prepare": 0.0,
+    "prepare": 0.01,
     "render": 0.16,
     "score_analysis": 0.02,
-    "score_plan": 0.405,
+    "score_plan": 0.41,
     "separate": 2.21,
-    "total": 105.96
+    "total": 105.995
    }
   },
   "v1orig": {
@@ -3393,39 +3395,39 @@
     "v1_f1": 0.8723
    },
    "seconds": {
-    "analyze": 34.4317,
-    "fit_808": 47.2,
+    "analyze": 34.3317,
+    "fit_808": 47.4633,
     "library_load": 0.0,
-    "match": 17.8183,
-    "melodic": 2.31,
-    "plan": 0.2233,
-    "prepare": 0.0,
-    "render": 0.15,
-    "score_analysis": 0.0167,
-    "score_plan": 0.2417,
+    "match": 17.8533,
+    "melodic": 2.5233,
+    "plan": 0.2217,
+    "prepare": 0.01,
+    "render": 0.1017,
+    "score_analysis": 0.01,
+    "score_plan": 0.2317,
     "separate": 2.215,
-    "total": 102.3917
+    "total": 102.7467
    }
   }
  },
  "overall": {
   "scenarios": 22,
   "analysis": {
-   "808.cents_median": -2.2826,
-   "808.cents_median_abs": 5.9939,
-   "808.error_median_ms": 1.3593,
-   "808.error_p90_ms": 8.0265,
-   "808.f1_20": 0.9351,
-   "808.f1_50": 0.9706,
-   "808.legato_est": 0.4091,
-   "808.legato_precision": 0.4375,
+   "808.cents_median": -2.2849,
+   "808.cents_median_abs": 5.9962,
+   "808.error_median_ms": 1.3605,
+   "808.error_p90_ms": 8.0281,
+   "808.f1_20": 0.9355,
+   "808.f1_50": 0.9713,
+   "808.legato_est": 0.4545,
+   "808.legato_precision": 0.2917,
    "808.legato_recall": 0.375,
    "808.legato_truth": 0.5455,
-   "808.note_f1_20": 0.9118,
-   "808.note_f1_50": 0.9385,
+   "808.note_f1_20": 0.9122,
+   "808.note_f1_50": 0.9391,
    "808.settled_cents_median_abs": 4.9568,
    "808.settled_within_50": 0.9636,
-   "808.v1_f1": 0.9391,
+   "808.v1_f1": 0.9392,
    "808.written_equal": 0.9712,
    "chords.majmin": 0.9766,
    "chords.mirex": 0.955,
@@ -3489,25 +3491,25 @@
    "rhythm.octave_x1": 0.9091,
    "rhythm.swing_ratio_error": -0.0403,
    "rhythm.tempo_error_abs": 0.0607,
-   "strict_f1_20": 0.8884,
+   "strict_f1_20": 0.8885,
    "v1_f1": 0.8922
   },
   "plan": {
    "808.cents_median": -1.3235,
-   "808.cents_median_abs": 4.3742,
-   "808.error_median_ms": 1.3556,
-   "808.error_p90_ms": 8.0244,
-   "808.f1_20": 0.9347,
-   "808.f1_50": 0.9706,
+   "808.cents_median_abs": 4.3765,
+   "808.error_median_ms": 1.3572,
+   "808.error_p90_ms": 8.0267,
+   "808.f1_20": 0.9351,
+   "808.f1_50": 0.9713,
    "808.legato_est": 0.3182,
    "808.legato_precision": 0.75,
    "808.legato_recall": 0.2083,
    "808.legato_truth": 0.5455,
-   "808.note_f1_20": 0.9104,
-   "808.note_f1_50": 0.9367,
+   "808.note_f1_20": 0.9108,
+   "808.note_f1_50": 0.9377,
    "808.settled_cents_median_abs": 3.6606,
    "808.settled_within_50": 0.9712,
-   "808.v1_f1": 0.9391,
+   "808.v1_f1": 0.9392,
    "808.written_equal": 0.9712,
    "drums.clap.error_median_ms": -0.575,
    "drums.clap.error_p90_ms": 0.605,
@@ -3559,11 +3561,11 @@
    "drums.tom.f1_50": 0.5,
    "drums.tom.v1_f1": 0.5,
    "drums.v1_f1": 0.8707,
-   "levels.808.balance_db": 2.5185,
+   "levels.808.balance_db": 2.5162,
    "levels.808.level_db": -2.8249,
-   "levels.808.spread_p90_db": 1.5005,
+   "levels.808.spread_p90_db": 1.5009,
    "levels.808.vs_kit_db": -1.8632,
-   "levels.balance_abs_db": 0.5111,
+   "levels.balance_abs_db": 0.5088,
    "levels.clap.balance_db": 0.7325,
    "levels.clap.level_db": -2.925,
    "levels.clap.spread_p90_db": 1.6825,
@@ -3573,16 +3575,16 @@
    "levels.crash.spread_p90_db": 0.42,
    "levels.crash.vs_kit_db": -0.05,
    "levels.hat.balance_db": -1.0573,
-   "levels.hat.level_db": -6.3743,
+   "levels.hat.level_db": -6.372,
    "levels.hat.spread_p90_db": 3.8398,
-   "levels.hat.vs_kit_db": -0.9053,
-   "levels.kick.balance_db": -0.8019,
+   "levels.hat.vs_kit_db": -0.903,
+   "levels.kick.balance_db": -0.8041,
    "levels.kick.level_db": -6.4568,
    "levels.kick.spread_p90_db": 3.8276,
    "levels.kick.vs_kit_db": -0.8414,
    "levels.kit.bass_db": -0.9617,
    "levels.kit.drums_db": -5.5174,
-   "levels.open_hat.balance_db": -0.0249,
+   "levels.open_hat.balance_db": -0.0272,
    "levels.open_hat.level_db": -5.4022,
    "levels.open_hat.spread_p90_db": 0.4592,
    "levels.open_hat.vs_kit_db": 0.1316,
@@ -3591,9 +3593,9 @@
    "levels.rim.spread_p90_db": 1.75,
    "levels.rim.vs_kit_db": 0.84,
    "levels.snare.balance_db": -0.1207,
-   "levels.snare.level_db": -5.5434,
+   "levels.snare.level_db": -5.5411,
    "levels.snare.spread_p90_db": 0.9627,
-   "levels.snare.vs_kit_db": 0.0231,
+   "levels.snare.vs_kit_db": 0.0253,
    "levels.tom.balance_db": -0.04,
    "levels.tom.level_db": -4.76,
    "levels.tom.spread_p90_db": 1.96,
@@ -3608,22 +3610,22 @@
    "rhythm.meter_equal": 0.9545,
    "rhythm.octave_x1": 0.9091,
    "rhythm.tempo_error_abs": 0.0607,
-   "strict_f1_20": 0.8757,
+   "strict_f1_20": 0.8758,
    "v1_f1": 0.8784
   },
   "seconds": {
-   "analyze": 33.1985,
-   "fit_808": 46.2423,
-   "library_load": 0.0023,
-   "match": 28.2202,
-   "melodic": 2.4473,
-   "plan": 0.2463,
-   "prepare": 0.0005,
-   "render": 0.117,
-   "score_analysis": 0.0126,
-   "score_plan": 0.2728,
+   "analyze": 33.2487,
+   "fit_808": 46.6633,
+   "library_load": 0.002,
+   "match": 28.3922,
+   "melodic": 2.4529,
+   "plan": 0.246,
+   "prepare": 0.0114,
+   "render": 0.1139,
+   "score_analysis": 0.012,
+   "score_plan": 0.2798,
    "separate": 2.0964,
-   "total": 110.7596
+   "total": 111.4223
   }
  }
 }
