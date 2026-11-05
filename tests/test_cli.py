@@ -45,3 +45,25 @@ def test_the_commands_keep_by_default_and_the_suite_only_when_asked(monkeypatch)
     for flags, cache in (([], False), (["--cache"], True), (["--no-cache"], False)):
         main(["suite", "run", "d", "--library", "l", "--tag", "t", *flags])
         assert seen["suite"]["cache"] is cache, flags
+
+
+def test_analyze_and_the_suite_pass_slides_on_request(monkeypatch):
+    """--slides turns the 808's legato notes on (bass808.glides); without
+    it analyze is called as before."""
+    from refdissect import pipeline
+    seen = {}
+    monkeypatch.setattr(pipeline, "analyze", lambda *a, **kw: seen.update(kw=kw))
+    main(["analyze", "stems", "--work", "w", "--slides"])
+    assert seen["kw"]["slides"] is True
+    main(["analyze", "stems", "--work", "w"])
+    assert "slides" not in seen["kw"]
+    from refdissect import suite
+
+    def run(*a, **kw):
+        seen.update(options=a[8])
+        return {"beats": 0, "failed": [], "overall": {"analysis": {}, "plan": {}}}
+    monkeypatch.setattr(suite, "run", run)
+    main(["suite", "run", "d", "--library", "l", "--tag", "t", "--slides"])
+    assert seen["options"]["analyze"]["slides"] is True
+    main(["suite", "run", "d", "--library", "l", "--tag", "t"])
+    assert "slides" not in seen["options"]["analyze"]

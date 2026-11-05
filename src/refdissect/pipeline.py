@@ -67,14 +67,17 @@ def _load(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print) -> tuple[dict, str | None]:
+def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print,
+                slides: bool = False) -> tuple[dict, str | None]:
     """bass808.transcribe, kept in cache under what decides it (cache.key:
-    the two stems' samples, the versions and the package's code) and read
-    back, its log lines too, when those are the same: the reader is 20-40 s
-    of a suite beat's analyze. Returns its result (through JSON, read back
-    or not: what bass808.json holds) and the file it was read back from, or
-    None when it ran."""
-    path = Path(cache) / f"808-{key((bass, drums), {})}.json" if cache else None
+    the two stems' samples, the versions, the package's code and slides
+    where on) and read back, its log lines too, when those are the same:
+    the reader is 20-40 s of a suite beat's analyze. Returns its result
+    (through JSON, read back or not: what bass808.json holds) and the file
+    it was read back from, or None when it ran. slides: legato notes
+    (bass808.glides)."""
+    opts = {"slides": True} if slides else {}
+    path = Path(cache) / f"808-{key((bass, drums), opts)}.json" if cache else None
     found = kept(path, log)
     if found and isinstance(found.get("bass808"), dict) and isinstance(found.get("log"), list):
         log(f"808 reader: read back from {path}; its log when it ran:")
@@ -86,18 +89,20 @@ def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=pri
     def both(msg) -> None:
         lines.append(str(msg))
         log(msg)
-    out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both), default=float))
+    out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both, **opts), default=float))
     keep(path, {"bass808": out, "log": lines}, log)
     return out, None
 
 
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
-            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = False) -> dict:
+            meter: str | None = None, tracker: bool = True, cache: str | Path | bool = False,
+            slides: bool = False) -> dict:
     """tracker=False (or a tracker that cannot run) fits the grid as before:
     fit_grid in bpm_range, first grid beat as phase. cache: the folder the
     808 reader's results are kept in and read back from (_transcribe; True:
     work/cache, as the command has it; by default none). One read back is
-    named in source.cached."""
+    named in source.cached. slides: the 808's legato notes too
+    (bass808.glides; off by default), named in source.slides."""
     stems_dir, work = Path(stems_dir), Path(work)
     drums, bass = read(stems_dir / "drums.wav"), read(stems_dir / "bass.wav")
     duration = len(drums) / SR
@@ -157,7 +162,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log)
+    b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log, slides)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]
@@ -182,6 +187,8 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                 "templates": out_templates, "events": events, "layers": found.info, "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
+    if slides:
+        analysis["source"]["slides"] = True
     if read_back:  # not read by this run: what the run that kept it read (same stems, code and versions)
         analysis["source"]["cached"] = {"808_reader": read_back}
     _save(work / "analysis.json", analysis)

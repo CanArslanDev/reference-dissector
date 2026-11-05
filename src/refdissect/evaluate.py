@@ -45,7 +45,9 @@ from .render import (
     read_at,
     resolve,
     settings_808,
+    takes_over,
     velocity_gain,
+    voices_808,
 )
 
 SCHEMA = "refdissect.events/1"
@@ -382,7 +384,8 @@ def _plan_808(plan: dict, root, velocity_curve, sounds: dict, missing: list) -> 
         return lengths[shift]
 
     chains = chains_808(t808)
-    late = late_808([c[0] for c in chains], bps, played_s) if not glide_s(t808) else np.zeros(len(chains), bool)
+    gliding = glide_s(t808) > 0
+    late = late_808(voices_808(chains), bps, played_s, gliding) if takes_over(gliding) else np.zeros(len(chains), bool)
     bass = []
     for c, chain in enumerate(chains):
         first = chain[0]
@@ -433,7 +436,8 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     written): the one-shot transposed by (pitch - 60) + transpose +
     detune_cents/100 semitones, attack read in the 808 band, ending at the
     note end, RETRIGGER_S later where the voice of the note before at its
-    pitch still sounds (render.late_808; flagged "retrigger"). It settles
+    pitch still sounds (render.late_808, under Glide only where
+    render.GLIDE_TAKEOVER; flagged "retrigger"). It settles
     at root_midi + cents/100 + that shift
     (midi_settled; render.pitch_808: pitch plus the 808's tuning and
     heard_cents with tune_808's Transpose and Detune; a plan without cents
