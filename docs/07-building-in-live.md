@@ -219,8 +219,26 @@ Kicks played within 0.004 dB of `render.py` and the 808 within 0.022 dB; snares 
 - **The plan carries its meter**, which the build sets before the locators; a locator Live still moves is deleted, not kept where Live put it.
 - **On the suite** (plan and score again, m4 → m5, htdemucs_ft in brackets; [12](12-replica-mode.md#what-each-stage-measured) has the rest): distance from a perfect kit 1.247 → 1.198 dB [1.231 → 1.152], balance 0.552 → 0.512 dB [0.497 → 0.476]; the plan's meter right 0.909 → 0.955 and its downbeat F 0.892 → 0.924; every F1 the same. m4's own plans, played as Live plays them, would sit at 1.259 [1.242] and 0.566 [0.506] dB.
 
+## A short live check
+
+Live has no export API and the Trial cannot export, so a live check records in real time: the two checks so far took about 1 to 1.5 h each. `refdissect live-build work --bars A-B` builds bars A to B of the plan only, counted from 1 on Live's ruler in the plan's meter.
+- The excerpt starts at 0. Its drum, 808 and melodic notes that start in those bars move back by bar A's start and end by bar B's end. Its locators move alike, and its clips last the excerpt.
+- The stems are cut, sample for sample in their own format, at the same instants (bar A's start and bar B's end at the plan's tempo). They go into `excerpt-A-B/` beside the plan, or `--stems-out`.
+- The 808's one-shot and settings, the pads and the levels are the plan's.
+- A note that starts before bar A is left out, also where it still sounds into the excerpt. An 808 note that slid from it starts on its own.
+- Bars count on Live's ruler from beat 0, not from the grid's bar lines: the plan carries no grid phase, and adding one would change plans.
+
+8 bars at 140 BPM play in 14 s (computed). How many minutes a whole short check takes in Live, with the build, the recording and the scoring, is not measured: the Live stage of 2026-11-05 could not connect to ableton-live-mcp and made no call.
+
+Checked offline on full-1's m5 plan (bars 5–12, 32 beats, 14.116 s; Live not called):
+- `render.py`'s drum hits in the excerpt are the whole plan's, hit for hit.
+- Bar 5 falls 0.21 samples off the sample grid, so some hits land one sample apart from the whole render's span.
+- The 808 differs in its first 0.5 s, where notes from before bar 5 still ring; after that its samples differ by under 0.01.
+- Tested with a synthetic plan and ableton-live-mcp faked.
+
 ## Not verified in Live
 
+- **`live-build --bars`.** Not yet run in Live: whether an excerpt's recording scores as its offline render does, as the whole plans did, and how long a short check takes.
 - **`refdissect live-build` end to end.** Both checks found Live serving 8 clients and sent the build's calls through their own session. The package's read-back, locator deletion and failure messages ran as the same commands, not as its code.
 - **One `build_tracks` call of PIRAMIT's size**, which went as 5, and **a build that stops half way**: no build of the second check failed, so the failure message has not been seen.
 - **How long the browser takes** to find a pad's content name: not timed.
