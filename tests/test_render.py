@@ -177,14 +177,40 @@ def test_an_808_note_after_one_of_its_pitch_restarts_its_voice_1_ms_late(tmp_pat
     assert [round(n["t"], 4) for n in est] == [0.0, 0.501, 1.0] and [n["flags"] for n in est] == [[], ["retrigger"], []]
 
 
-def test_with_glide_one_voice_takes_over_the_release_of_any_pitch(tmp_path):
-    """With Glide on the 808 plays one voice: a note of another pitch that
-    comes while the chain before still sounds in its release fades it out
-    over 1 ms from its note and starts 1 ms late, as a note of its pitch
-    does without Glide, where two voices summed through the release
-    before; the slid note in the chain starts nothing (one sample read on).
-    Not measured in Live."""
+GLIDE_CHAIN = {"root_midi": 24, "transpose": 36, "voices": 1, "glide_mode": "Glide", "glide_time_ms": 60.0,
+               "notes": [note(24, 0.0, duration=0.52), note(29, 0.5, duration=0.48), note(31, 1.0, duration=0.5)]}
+
+
+def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_on_time_by_default(tmp_path):
+    """By default (render.GLIDE_TAKEOVER off: Live has not measured a note
+    in a held chain's release under Glide), a note of another pitch that
+    comes 10 ms after a chain of two ends starts on time, as it would
+    alone, in the render and in the estimate from the plan; the slid note
+    in the chain starts nothing. (A chain's render stops at its last
+    note's end: render.py does not model its release under Glide.)"""
+    t = np.arange(2 * SR) / SR
+    sine = 0.8 * np.sin(2 * np.pi * 32.703 * t)
+    t808 = dict(GLIDE_CHAIN, sample_path=wav(tmp_path, "808.wav", sine))
+    x = rendered(tmp_path / "r", render_plan(plan({}, [], t808), tmp_path / "r", "flat"), "808")
+    alone = dict(t808, notes=[note(31, 1.0, duration=0.5)])
+    y = rendered(tmp_path / "a", render_plan(plan({}, [], alone), tmp_path / "a", "flat"), "808")
+    a = int(0.5 * SR)
+    assert np.allclose(x[a:a + SR // 5], y[a:a + SR // 5], atol=1e-6) and np.abs(x[a - SR // 50:a]).max() > 0.3
+    est = estimate_from_plan(plan({}, [], t808))["bass808"]
+    assert [round(n["t"], 4) for n in est] == [0.0, 0.25, 0.5]
+    assert [n["flags"] for n in est] == [[], ["legato"], []]
+
+
+def test_with_glide_one_voice_takes_over_the_release_of_any_pitch(tmp_path, monkeypatch):
+    """With render.GLIDE_TAKEOVER on, the 808 plays one voice under Glide:
+    a note of another pitch that comes while the chain before still sounds
+    in its release fades it out over 1 ms from its note and starts 1 ms
+    late, as a note of its pitch does without Glide, where two voices sum
+    through the release by default; the slid note in the chain starts
+    nothing (one sample read on). Not measured in Live."""
+    from refdissect import render
     from refdissect.render import RETRIGGER_S
+    monkeypatch.setattr(render, "GLIDE_TAKEOVER", True)
     t = np.arange(2 * SR) / SR
     sine = 0.8 * np.sin(2 * np.pi * 32.703 * t)
     t808 = {"sample_path": wav(tmp_path, "808.wav", sine), "root_midi": 24, "transpose": 36, "voices": 1,
