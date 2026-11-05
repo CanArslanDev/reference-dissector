@@ -580,15 +580,22 @@ def clean(root: str | Path, keep, delete: bool = False) -> dict:
     only their means per scenario were left to compare with); every
     root/scores-<tag>.json, the stems, the truth and cache/ stay. A folder
     without a record (a run going on, or one stopped) is left as it is.
-    Without delete nothing goes: a dry run. Returns, per tag, its beats,
-    the bytes that go (or went) and the folders left without a record. A
-    suite of 48 beats held 1.5 GB of run folders in 5.5 GB (2026-11-04),
-    4.7 MB a beat under m5."""
+    Without delete nothing goes: a dry run. A tag in keep that root does not
+    hold (no run folder, no scores-<tag>.json) is refused before anything
+    goes: "m5ft" for m5-ft would have emptied m5-ft. Returns, per tag, its
+    beats, the bytes that go (or went) and the folders left without a
+    record. A suite of 48 beats held 1.5 GB of run folders in 5.5 GB
+    (2026-11-04), 4.7 MB a beat under m5."""
     keep = set(keep)
     if not keep:
         raise ValueError("Name the tags to keep (--keep): clean empties the run folders of every other tag")
+    root = Path(root)
+    if unknown := sorted(t for t in keep if not (root / f"scores-{t}.json").is_file()
+                         and not any((b / "runs" / t).is_dir() for b in root.iterdir())):
+        raise ValueError(f"No tag {', '.join(unknown)} under {root} (no run folder, no scores-<tag>.json): "
+                         "a misspelt --keep would leave the tag it meant unprotected")
     out: dict[str, dict] = {}
-    for work in sorted(Path(root).glob("*/runs/*")):
+    for work in sorted(root.glob("*/runs/*")):
         if not work.is_dir() or work.name in keep or not (work.parents[1] / "events.json").is_file():
             continue
         tag = out.setdefault(work.name, {"beats": 0, "bytes": 0, "no_record": []})

@@ -497,6 +497,12 @@ def test_clean_empties_the_runs_of_other_tags_but_keeps_their_records(tmp_path, 
     assert files() == before and "would go" in capsys.readouterr().out
     with pytest.raises(ValueError, match="--keep"):
         suite.clean(tmp_path, [])
+    with pytest.raises(ValueError, match="No tag kep"):  # a misspelt tag kept: refused, nothing goes
+        suite.clean(tmp_path, ["kep"], delete=True)
+    assert files() == before
+    (tmp_path / "scores-gone.json").write_text("{}")  # a tag whose run folders were removed whole
+    assert suite.clean(tmp_path, ["keep", "gone"])["old"]["beats"] == 2
+    (tmp_path / "scores-gone.json").unlink()
     tags = suite.clean(tmp_path, ["keep"], delete=True)
     assert tags["old"] == {"beats": 2, "bytes": 2 * 1002, "no_record": []}
     assert tags["going"] == {"beats": 0, "bytes": 0, "no_record": ["v1-2"]}
