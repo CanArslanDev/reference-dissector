@@ -162,6 +162,23 @@ def test_a_slide_without_an_attack_is_a_legato_note_on_request():
     assert not any("legato" in n["flags"] for n in plain) and len(plain) <= len(truth)
 
 
+@pytest.mark.slow
+def test_a_slide_inside_a_held_note_starts_where_its_ramp_starts():
+    """A 200 ms slide down a minor third that segment() finds no note for
+    (the note before seems held on): with slides, a legato note at the
+    pitch it slides to, starting where the ramp starts (least squares over
+    the periods: within 10 ms, where the old rule's crossing came 24-43 ms
+    late on the suite) and gliding about as long as it does. The old rule
+    made none here."""
+    bass, drums, truth = line([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], cents=-14.0, slide_ms=200.0)
+    legato = [n for n in B.transcribe(bass, drums, slides=True)["notes"] if "legato" in n["flags"]]
+    pairs = [(m, n) for m in truth if m["legato"] for n in legato
+             if abs(n["t"] - m["t"]) <= 0.05 and abs(n["midi_settled"] - m["midi"]) < 0.5]
+    assert len(pairs) >= 3 and len(legato) <= 4
+    assert np.median([abs(n["t"] - m["t"]) for m, n in pairs]) <= 0.01
+    assert all(abs(n["glide"]["ms"] - 200.0) <= 30.0 for _, n in pairs)
+
+
 def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
     """A note found where nothing attacks inside a held note: a legato note
     where the period-by-period pitch has moved a semitone or more; the held
