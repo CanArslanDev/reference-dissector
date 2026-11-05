@@ -226,14 +226,14 @@ Live has no export API and the Trial cannot export, so a live check records in r
 - The stems are cut, sample for sample in their own format, at the same instants (bar A's start and bar B's end at the plan's tempo). They go into `excerpt-A-B/` beside the plan, or `--stems-out`.
 - The 808's one-shot and settings, the pads and the levels are the plan's.
 - A note that starts before bar A is left out, also where it still sounds into the excerpt. An 808 note that slid from it starts on its own.
-- Bars count on Live's ruler from beat 0, not from the grid's bar lines: the plan carries no grid phase, and adding one would change plans.
+- Bars count on Live's ruler from beat 0, not from the grid's bar lines. The plan has no field for the grid's phase, but its locators carry the first bar line (full-1's m5 plan has them at beats 0.92 and 64.92), so an excerpt can start mid-bar in the music. Counting bars from the phase would change plans.
 
 8 bars at 140 BPM play in 14 s (computed). How many minutes a whole short check takes in Live, with the build, the recording and the scoring, is not measured: the Live stage of 2026-11-05 could not connect to ableton-live-mcp and made no call.
 
-Checked offline on full-1's m5 plan (bars 5–12, 32 beats, 14.116 s; Live not called):
-- `render.py`'s drum hits in the excerpt are the whole plan's, hit for hit.
-- Bar 5 falls 0.21 samples off the sample grid, so some hits land one sample apart from the whole render's span.
-- The 808 differs in its first 0.5 s, where notes from before bar 5 still ring; after that its samples differ by under 0.01.
+Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 beats, 14.116 s) against the same span of the whole plan's render (2026-11-05, logged; Live not called; amplitudes as a fraction of full scale):
+- The excerpt's 98 drum hits are the whole render's 98 in those bars, with the same pads, velocities and gains.
+- Bar 5 starts at 7.0579413 s, 311,255.21 samples at 44.1 kHz, so 24 hits start one sample apart from the whole render's span and 73 at the same sample. The first starts 45 samples (1 ms) earlier in the excerpt: in the whole plan its pad was still playing a hit from before bar 5, and a retrigger starts 1 ms late. 12 hits end on another sample.
+- After the first 0.5 s, where sounds from before bar 5 still ring in the whole render, the difference holds 22 dB less energy than the excerpt's drums and 45 dB less than its 808. Each track's energy is the same within 0.0001 dB. The largest single-sample difference is 0.20 on the drums and 0.22 on the 808, which peak at 0.32 and 0.26.
 - Tested with a synthetic plan and ableton-live-mcp faked.
 
 ## Not verified in Live

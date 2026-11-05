@@ -47,8 +47,8 @@ Numbers are means over its 22 scenarios on htdemucs stems, "analysis / plan" as 
 - **The plan's meter** (m5). The plan carries the grid's meter and the build sets it: the plan's meter right 0.909 → 0.955, downbeat F 0.892 → 0.924, meter34 built in 3/4.
 - **Speed.** A suite beat takes 112.6 s after separation at 2 jobs, against 141.9 s at m2g (m3a; not a controlled timing): match 49.1 → 28.0 s, analyze 38.7 → 34.4 s, fit-808 50.9 → 46.2 s. The speed changes left every output the same on all 48 beats (and on the 8 htdemucs_ft beats run).
 - **Kept results.** The 808 reader's results and the 808 fits are kept by the `analyze` and `fit-808` commands unless `--no-cache`, and by `suite run` only with `--cache`, under a key of the inputs, the settings, the versions and the package's code as the process loaded it. Read back, analyze takes 8.1 s and fit-808 1.0 s a suite beat; a run records what it read back and leaves it out of its seconds.
-- **A fast development loop** (2026-11-05; item 5 below). Every output the same: on the dev subset's 11 beats, file for file against m5 and m5-ft.
-  - The tests in parallel: 307 s in one process, 94–96 s at `-n 4`; a fast loop without the 48 slow tests, 303 tests in 22 s at `-n 4`.
+- **A fast development loop** (2026-11-05; item 5 below). Every output the same: on the dev subset's 11 beats, file for file against m5 and m5-ft (`log.txt` aside).
+  - The tests in parallel: 307 s in one process, 94–96 s at `-n 4`; a fast loop without the 48 slow test functions (62 items), 306 tests in 22 s at `-n 4`.
   - `suite run --subset dev`: 11 beats, one of each family, 260 s at 2 jobs with `--cache` read back, against about 45 minutes for the 48 beats.
   - The library's arrays memory-mapped and shared by a run's jobs: peak footprint per job 1.7–1.8 → 1.0 GB at 2 jobs.
   - `suite clean`, and `live-build --bars A-B` for a short live check (not yet run in Live).
@@ -149,8 +149,8 @@ Now (m3a, 2 jobs, Apple M4 with Live open): 112.6 s a beat after separation, 45 
 
 Done, every output the same:
 - Kept results, read back by the `analyze` and `fit-808` commands and by `suite run --cache` (above).
-- The tests in parallel (pytest-xdist, `--dist worksteal`): the whole suite 307 s in one process, 94–96 s at `-n 4`; the 48 tests of 2 s or more marked `slow`, and the fast loop without them 303 tests in 22 s at `-n 4`. CI runs `-n auto`.
-- The dev subset (`suite run --subset dev`, [03](03-calibration.md#a-dev-subset)): 11 beats, 260–268 s at 2 jobs with `--cache` read back. Every change of 0.01 or more over the 48 beats on five tag pairs moved the same way on it (in-sample).
+- The tests in parallel (pytest-xdist, `--dist worksteal`): the whole suite 307 s in one process, 94–96 s at `-n 4`; the 48 test functions of 2 s or more (62 items) marked `slow`, and the fast loop without them 306 tests in 22 s at `-n 4`. CI runs `-n auto`.
+- The dev subset (`suite run --subset dev`, [03](03-calibration.md#a-dev-subset)): 11 beats, 260–268 s at 2 jobs with `--cache` read back. Every change of 0.01 or more over the 48 beats moved the same way on it, in the one tag pair compared on its own beats that had any (7 of 7, with one move of +0.025 on the subset that the 48 beats did not show) and in four pairs compared on its scenarios' 22 beats (in-sample).
 - The library memory-mapped from `.npy` stores beside each `.npz`: a run's jobs share one copy, and each job peaked at 1.0 GB of physical footprint instead of 1.7–1.8 GB at 2 jobs, at the same wall time ([12](12-replica-mode.md#the-suite)).
 - `suite clean`: the run folders of the tags not kept emptied, their `scores.json` kept.
 - `live-build --bars A-B`: an excerpt of a plan from 0, its stems cut alike, for a live check of seconds of audio instead of a whole recording ([07](07-building-in-live.md#a-short-live-check)).

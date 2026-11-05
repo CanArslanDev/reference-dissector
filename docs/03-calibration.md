@@ -395,15 +395,19 @@ It is for iterations with `--cache`. The final numbers stay on all 48 beats of b
 - `--cache`, read back: 260.1 s, 45.2 s a beat (analyze 8.3 s, fit-808 1.4 s, match 32.5 s).
 - The fill run's outputs equal the no-cache run's; the read-back run's differ only in the read-back records (`analysis.json` `source.cached`, `synth808.json` `fit.cached`).
 
-**How it tracks the whole suite**, on the 30 headline numbers of the report (overall means):
+**How it tracks the whole suite**, on the 30 headline numbers of the report (overall means). "Beats" compares the subset's own 11 beats; "proxy" compares its 11 scenarios' means over both seeds (22 beats), where a tag's run folders had been removed:
 
-| pair | moved by 0.01 (0.5 dB, ms or cents) or more over the 48 beats | same sign on the subset |
-|---|---|---|
-| m2g-vel → m3a | 7 | 7 |
-| m3 → m4 | 4 | 4 |
-| m4 → m5 | 0 | – |
-| m2g-ft-vel → m3a-ft | 5 | 5 |
-| m3-ft → m4-ft | 4 | 4 |
+| pair | compared on | moved by 0.01 (0.5 dB, ms or cents) or more over the 48 beats | same sign on the subset | moved on the subset only |
+|---|---|---|---|---|
+| m2g-vel → m4 | beats | 7 | 7 | 1 |
+| m2g-vel → m3a | proxy | 7 | 7 | 0 |
+| m3 → m4 | proxy | 4 | 4 | 0 |
+| m4 → m5 | beats | 0 | – | 0 |
+| m2g-ft-vel → m3a-ft | proxy | 5 | 5 | 0 |
+| m3-ft → m4-ft | proxy | 4 | 4 | 0 |
+| m4-ft → m5-ft | beats | 0 | – | 0 |
+
+The one pair with changes compared on the subset's own beats, m2g-vel → m4, agreed 7 of 7, and moved one number that the whole suite did not: the plan's 808 note F1@50, +0.0084 over the 48 beats and +0.0252 on the subset. The other pairs with changes are 22-beat proxies. m4 → m5 and m4-ft → m5-ft changed nothing over 0.01, so they say nothing about tracking.
 
 Examples (all 48 → subset):
 - m2g-vel → m3a: plan drums F1@20 +0.256 → +0.220; 808 written pitch +0.023 → +0.045; level distance from a perfect kit +0.55 → +0.41 dB.
@@ -412,12 +416,12 @@ Examples (all 48 → subset):
 Limits:
 - The subset weighs each of its scenarios twice as much as the whole suite does, so a change carried by one scenario (bass_low's 808 pitch) comes out about twice as large.
 - A change under 0.1 dB can read the other way (balance −0.04 → +0.02 dB on m4 → m5).
-- m3's and m3a's run folders had been removed, so the pairs that touch them compare the subset's scenarios' means over both seeds; m4 → m5 compares its beats.
+- m3's and m3a's run folders had been removed, so the pairs that touch them are proxies (above).
 - The set was chosen with these pairs in view, so the agreement is in-sample. A first pick (tempo72, meter34, drum_pitch, no bass_low) missed m2g-vel → m3a's 808 pitch changes.
 
-**Outputs.** At this code, a fresh run of the subset (no cache) equals m5 and m5-ft on all 11 beats: 352 files byte for byte in each model, and 33 JSON files apart from seconds, the run record and the run folder's name in paths. No file is missing or extra.
+**Outputs.** At this code, a fresh run of the subset (no cache) equals m5 and m5-ft on all 11 beats, every output file but `log.txt`: 352 files byte for byte in each model, and 33 JSON files apart from seconds, the run record and the run folder's name in paths. No file is missing or extra. `log.txt` differs on all 11 beats, since m5 reused m4's steps and logged that.
 
-**`suite clean DIR --keep a,b`** empties the run folders of the other tags but keeps each `scores.json`, so their beats can still be compared later. It is a dry run unless `--yes`, and it leaves alone a folder without a record yet, such as a run in progress. A dry run keeping m5, m5-ft and one other tag listed 1,172 MB in 12 tags, in 1.1 s; the suite's run folders held 1.5 GB of its 5.5 GB (4.7 MB a beat under m5).
+**`suite clean DIR --keep a,b`** empties the run folders of the other tags but keeps each `scores.json`, so their beats can still be compared later. It is a dry run unless `--yes`, and it leaves alone a folder without a record yet, such as a run in progress. A kept tag with no run folder and no `scores-<tag>.json` is refused before anything goes: a misspelt `--keep m5ft` listed m5-ft's folders to go. A dry run keeping m5, m5-ft and one other tag listed 1,172 MB in 12 tags, in 1.1 s; the suite's run folders held 1.5 GB of its 5.5 GB (4.7 MB a beat under m5).
 
 ### Running it
 
