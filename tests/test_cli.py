@@ -57,3 +57,13 @@ def test_analyze_and_the_suite_pass_slides_on_request(monkeypatch):
     assert seen["kw"]["slides"] is True
     main(["analyze", "stems", "--work", "w"])
     assert "slides" not in seen["kw"]
+    from refdissect import suite
+
+    def run(*a, **kw):
+        seen.update(options=a[8])
+        return {"beats": 0, "failed": [], "overall": {"analysis": {}, "plan": {}}}
+    monkeypatch.setattr(suite, "run", run)
+    main(["suite", "run", "d", "--library", "l", "--tag", "t", "--slides"])
+    assert seen["options"]["analyze"]["slides"] is True
+    main(["suite", "run", "d", "--library", "l", "--tag", "t"])
+    assert "slides" not in seen["options"]["analyze"]
