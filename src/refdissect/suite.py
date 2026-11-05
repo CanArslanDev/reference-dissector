@@ -501,13 +501,25 @@ def _done(record: dict, log) -> None:
     log(f"{record['beat']}: strict F1@20 analysis {_fmt(a)}, plan {_fmt(p)} ({record['seconds']['total']:.0f} s)")
 
 
+def _ready_stores(library, library_808, steps) -> None:
+    """The memory-mapped stores of the libraries the steps load, written or
+    checked here once (library.ready) before the jobs start: 3 jobs that
+    found one missing at once each wrote about 620 MB of it, at up to a
+    1.4 GB footprint, and waited on one another."""
+    from .library import ready
+    for path, step in ((library, "match"), (library_808, "fit-808")):
+        if path and step in steps:
+            ready(path)
+
+
 def run(root: str | Path, library: str | Path, library_808: str | Path | None = None, tag: str = "base",
         model: str = DEFAULT_MODEL, scenarios=None, jobs: int = 3, render: bool = False,
         options: dict | None = None, resume: bool = False, steps=None, reuse: str | None = None,
         cache: bool = False, subset: str | None = None, log=print) -> dict:
     """Separate what is not separated yet (one Demucs process), then
     run_beat over the beats, `jobs` at a time in their own processes (each
-    loads the library once, about 0.5 GB, if match runs), and write the
+    maps the library's arrays, written beside it once before they start,
+    if match runs), and write the
     means per scenario to root/scores-<tag>.json (also returned). resume
     skips beats this tag has scored already (scored); a beat that failed
     runs again. steps, reuse and cache: run_beat's, steps and reuse checked
@@ -532,6 +544,8 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
             shown = "; ".join(f"{name}: {', '.join(p)}" for name, p in list(bad.items())[:4])
             raise ValueError(f"runs/{reuse} cannot be reused in {len(bad)} of {len(beats)} beats: {shown}"
                              + (" ..." if len(bad) > 4 else ""))
+    if beats:
+        _ready_stores(library, library_808, steps)
     args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {}, steps,
              reuse, cache) for b in beats]
     if jobs > 1 and len(args) > 1:
