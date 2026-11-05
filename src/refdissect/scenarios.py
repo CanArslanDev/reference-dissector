@@ -905,7 +905,10 @@ def play_808(beat: Beat, bass: list[dict]) -> None:
     at the next attacked note or its own end, whichever comes first. A
     voice's pitch, per sample, is its transposition (the glide curve when it
     has one) plus the sample's own drop where the voice is reading the
-    sample (f0_curve)."""
+    sample (f0_curve). A legato note that starts after its voice has read
+    past the sample sounds nothing and is left out of the truth (a 4-note
+    chain read faster than the sample lasts wrote one that ended 148 ms
+    before it started), and the note before it ends where the voice does."""
     s = beat.sounds["808"]
     chains: list[list[dict]] = []
     for b in sorted(bass, key=lambda b: b["p"]):
@@ -930,9 +933,12 @@ def play_808(beat: Beat, bass: list[dict]) -> None:
         y = _cut(full, length)
         beat.add("808", y, a, chain[0]["gain"])
         attack = a + round(attack_time(y, "808") * SR)
-        bounds = [beat.clock.sample(b["p"], b["dt"]) for b in chain[1:]] + [a + _end(full, length)]
+        silent = a + _end(full, length)  # where the voice has read past the sample (or is cut)
+        bounds = [min(beat.clock.sample(b["p"], b["dt"]), silent) for b in chain[1:]] + [silent]
         for k, (b, stop) in enumerate(zip(chain, bounds)):
             start = beat.clock.sample(b["p"], b["dt"]) if k else a
+            if k and start >= silent:  # the chain had read past the sample before this note: nothing plays
+                break
             heard = sounding(functools.partial(_at, pitch, start - a), (stop - start) / SR)
             beat.bass808.append(_bass_event(beat, b, start, None if k else attack, stop, s.level * b["gain"],
                                             heard, chain[k - 1]["semis"] if k else None))
