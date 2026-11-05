@@ -158,7 +158,7 @@ uv run refdissect calibrate "$W/work/inventory.json" --library "$W/work/library.
 S="$W/work/calibration-v2"
 uv run refdissect suite build "$W/work/inventory.json" --out "$S" --v1-truth "$V1_TRUTH"
 uv run refdissect suite run "$S" --library "$W/work/library.npz" --library-808 "$W/work/library_808.npz" \
-    --tag mine --jobs 2 --render                           # --model htdemucs_ft, --scenarios a,b, --resume, --cache
+    --tag mine --jobs 2 --render                           # --model htdemucs_ft, --scenarios a,b, --resume, --cache, --subset dev
 uv run refdissect suite run "$S" --library "$W/work/library.npz" --library-808 "$W/work/library_808.npz" \
     --tag mine-b --steps analyze,match,plan,score --reuse mine --jobs 2 --render
 uv run refdissect suite report "$S" --tags mine,mine-b --out "$W/work/mine-b.md"
@@ -169,6 +169,38 @@ Every step writes JSON next to its inputs, so you can read what it decided befor
 - `scripts/export_results.py` turns a work folder into the shareable `results/` and `figures/`: no audio, and no file names from a personal library.
 - `scripts/export_results.py --suite DIR TAG` publishes a suite tag's means per scenario, and nothing else.
 - `--v1-truth` takes the six v1 beats rebuilt with truth stems. No command here makes them: without them the suite has the 42 scenario beats. [12](docs/12-replica-mode.md) has every suite option.
+
+## Development
+
+`uv sync` installs pytest, pytest-xdist and ruff. No test needs your library, Demucs, Live or a model download.
+
+```bash
+uv run pytest -m "not slow" -n auto     # the fast loop: 303 tests in 22 s at -n 4
+uv run pytest -n auto                   # the whole suite, before every commit and in CI: 96 s at -n 4 (307 s in one process)
+uv run ruff check .
+```
+
+- The 48 tests marked `slow` took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
+- With `-n`, an idle worker takes tests from a busy one (`--dist worksteal`, set in pyproject). At -n 4 that cut the whole suite from 132 s to 94–96 s.
+- On a machine you are working on, `-n 4` leaves cores free.
+- Measured on a 10-core Apple M4 (2026-11-04/05): 363 passed, 3 skipped, 2 expected failures. CI runs `-n auto`; its time there is not measured yet.
+
+For pipeline changes, iterate on the suite's dev subset, then measure on every beat:
+
+```bash
+uv run refdissect suite run "$S" --library "$W/work/library.npz" --library-808 "$W/work/library_808.npz" \
+    --tag try --subset dev --cache --jobs 2 --render
+uv run refdissect suite report "$S" --tags <the dev subset's base tag>,try
+uv run refdissect suite clean "$S" --keep m5,m5-ft          # a dry run; --yes empties the other tags' run folders
+uv run --extra live refdissect live-build "$W/song/refdissect" --bars 9-16   # a short live check
+```
+
+- The dev subset is 11 beats, one of each scenario family ([03](docs/03-calibration.md#a-dev-subset)). At 2 jobs it took 260–268 s once its beats' `cache/` held the 808 reader's results and the fits, and 672–681 s to fill it (673 s with no cache). The whole suite takes about 45 minutes a model.
+- Compare a subset run with a run of the same subset. The final numbers stay on all 48 beats of both models.
+- `suite clean` keeps every tag's `scores.json`, so a cleaned tag can still be compared beat by beat.
+- `live-build --bars A-B` builds bars A to B of a plan from 0, with the stems cut alike ([07](docs/07-building-in-live.md#a-short-live-check)). It has not been run in Live yet.
+- The library's arrays are memory-mapped, so the jobs of a run share one copy. At 2 jobs each job's peak physical footprint fell from 1.7–1.8 GB to 1.0 GB, at the same wall time ([12](docs/12-replica-mode.md#the-suite)).
+- None of this changes an output: on the dev subset's 11 beats, every file of a fresh run at this code equals m5's and m5-ft's, seconds and run records aside.
 
 ## Documentation
 
