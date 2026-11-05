@@ -23,3 +23,11 @@ def test_separator_command_and_its_output(tmp_path, monkeypatch):
     monkeypatch.setattr(sep, "command", lambda *a, **k: fails)
     with pytest.raises(RuntimeError, match="boom"):
         sep.separate("a.wav", tmp_path)
+
+
+def test_the_worker_pins_torch():
+    """torch 2.15.0 (what an unpinned environment resolved) gave wrong MPS
+    stems; the pinned 2.14.1 gives the stored ones."""
+    cmd = sep.command([("a.wav", "out")])
+    pins = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--with"]
+    assert "torch==2.14.1" in pins and "demucs==4.1.0" in pins
