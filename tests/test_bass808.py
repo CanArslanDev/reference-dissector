@@ -20,17 +20,18 @@ def kick(seconds: float = 0.12) -> np.ndarray:
 
 
 def line(notes, root_hz: float = 32.70, cents: float = 0.0, bpm: float = 140.0, bars: int = 4, leak: float = 0.15,
-         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0
-         ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0,
+         decay_s: float = 1.5) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """A bass stem, a drum stem and the truth of `bars` bars of notes (16th
     step, length in 16ths, semitones over the root, and "legato" for a note
     that slides in from the one before over slide_ms without starting the
     sample again), the 808 settling at root_hz + cents and starting `drop`
     semitones over it (and `tail` more semitones falling with a time
-    constant of 150 ms, as real 808s' drops end); a kick on every other
-    attacked note, leaking into the bass stem at `leak`."""
+    constant of 150 ms, as real 808s' drops end), decaying over decay_s;
+    a kick on every other attacked note, leaking into the bass stem at
+    `leak`."""
     f = root_hz * 2 ** (cents / 1200)
-    sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, 1.5, 3, 2.0, 0.05, 0.3), 2.5)
+    sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, decay_s, 3, 2.0, 0.05, 0.3), 2.5)
     if tail:
         t = np.arange(len(sample)) / SR
         sample = np.interp(np.cumsum(2 ** (tail * np.exp(-t / 0.15) / 12)), np.arange(len(sample)), sample)
@@ -177,6 +178,83 @@ def test_a_slide_inside_a_held_note_starts_where_its_ramp_starts():
     assert len(pairs) >= 3 and len(legato) <= 4
     assert np.median([abs(n["t"] - m["t"]) for m, n in pairs]) <= 0.01
     assert all(abs(n["glide"]["ms"] - 200.0) <= 30.0 for _, n in pairs)
+
+
+def legato_read(notes, kick_on_slides: bool = False, **kw) -> tuple[int, int, int]:
+    """(the truth's legato notes, legato notes made with slides, those
+    right: within 50 ms of a truth legato note and half a semitone of its
+    pitch) on a synthetic line; kick_on_slides puts a kick (drum stem and
+    leak) on each slide's start too."""
+    bass, drums, truth = line(notes, **kw)
+    if kick_on_slides:
+        k = kick()
+        for m in truth:
+            if m["legato"]:
+                a = int(round(m["t"] * SR))
+                drums[a:a + len(k)] += k[:len(drums) - a]
+                bass[a:a + len(k)] += 0.15 * k[:len(bass) - a]
+    legato = [n for n in B.transcribe(bass, drums, slides=True)["notes"] if "legato" in n["flags"]]
+    slides = [m for m in truth if m["legato"]]
+    right = [m for m in slides if any(abs(n["t"] - m["t"]) <= 0.05 and abs(n["midi_settled"] - m["midi"]) < 0.5
+                                      for n in legato)]
+    return len(slides), len(legato), len(right)
+
+
+UNREAD = "not read yet: a note segment() fits (0.9 or more) 41-51 ms into the slide counts as its attack (SLIDE_FIT_S)"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("notes, kw", [
+    ([(0, 6, 0), (6, 6, 3, "legato"), (12, 4, 0)], {"cents": -14.0}),
+    ([(0, 6, 0), (6, 6, 7, "legato"), (12, 4, 0)], {"cents": -14.0}),
+    ([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], {"bpm": 72.0, "bars": 2, "cents": -14.0}),
+    ([(0, 6, 0), (6, 6, 5, "legato"), (12, 4, 0)], {"bpm": 160.0}),
+    pytest.param([(0, 6, 0), (6, 6, 12, "legato"), (12, 4, 0)], {"cents": -14.0},
+                 marks=pytest.mark.xfail(strict=True, reason=UNREAD)),
+    pytest.param([(0, 1, 0), (1, 3, 5, "legato"), (4, 4, 0), (8, 8, 3)], {"bpm": 160.0, "slide_ms": 60.0},
+                 marks=pytest.mark.xfail(strict=True, reason=UNREAD)),
+], ids=["up 3 st", "up 7 st", "72 bpm", "160 bpm", "up an octave", "a 16th then a slide at 160 bpm"])
+def test_slides_up_and_at_any_tempo_are_read(notes, kw):
+    """A template fit of 0.9 or more alone is no attack inside a run
+    (_own_attack): segment() cuts a slide into notes that fit at
+    0.91-0.98, and each was a run of its own, so no slide up and none at
+    72 or 160 BPM was read (0 of 4; 1 of 4 for the 16th at 160), against 3-4
+    of 4 down. The template's drop taken out over a run only falls: a
+    template that learnt the start of a slide up in its tail read the hold
+    after it 0.6 semitone flat. Now 3 or more of 4 (2 of 2 at 72 BPM), and
+    no other legato note; an octave up and a slide after a 16th at 160 BPM
+    still read 1 of 4 (xfail)."""
+    truth, made, right = legato_read(notes, **{"slide_ms": 120.0, **kw})
+    assert right >= min(truth, 3) and made <= truth
+
+
+@pytest.mark.slow
+def test_slides_with_a_kick_on_each_and_a_chain_of_two():
+    """A kick (in the drum stem and leaking into the bass stem) on each
+    slide's start is no attack of the 808's own: the slides are legato
+    notes. A note that slides twice is a chain of two legato notes, the
+    second gliding from the first."""
+    truth, made, right = legato_read([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], kick_on_slides=True,
+                                     cents=-14.0, slide_ms=200.0)
+    assert truth == 4 and right >= 3 and made == right
+    truth, made, right = legato_read([(0, 4, 0), (4, 4, 5, "legato"), (8, 4, 7, "legato"), (12, 4, 0)],
+                                     cents=-14.0, slide_ms=100.0)
+    assert truth == 8 and right >= 6 and made == right
+
+
+@pytest.mark.slow
+def test_a_retrigger_whose_band_rises_is_no_slide(monkeypatch):
+    """Notes a fourth apart, each starting the sample again with no pitch
+    drop of its own (no restart to see) but at its full level: no legato
+    note. The 808 band rises SLIDE_RISE_DB or more where the pitch moves,
+    which alone keeps them out (SLIDE_FIT_S, the fitted note at the move,
+    out of reach); without either test each retrigger would be one."""
+    notes = [(0, 6, 0), (6, 6, 5), (12, 4, 0)]
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] == 0
+    monkeypatch.setattr(B, "SLIDE_FIT_S", (1.0, 1.0))
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] == 0
+    monkeypatch.setattr(B, "SLIDE_RISE_DB", 99.0)
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] >= 2
 
 
 def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():

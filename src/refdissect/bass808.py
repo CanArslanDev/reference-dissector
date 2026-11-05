@@ -103,6 +103,12 @@ HOLD_ST, HOLD_S, BETWEEN_S, OVER_ST, SNAP_ST, TOUCH_S = 0.35, 0.04, 0.1, 0.5, 0.
 # glides(): a slide's 808 band rises less than this (dB, rise_db over 15 ms against the 40 ms before, from 80 ms
 # before its start to 40 ms after): the suite's seed-1 slides (glides-1, full-1; both models) rise 1.9 dB at most
 SLIDE_RISE_DB = 2.5
+# glides(): a move with a note that fits the template (NCC ATTACKED_NCC or more) starting this close to it (seconds
+# from its start) is that note's attack, not a slide. Chosen on seed 1: with a fit alone no attack inside a run,
+# seed 1's beats without a slide got 2 [3] legato notes at retriggers whose fitted note starts 23 ms before to 58 ms
+# after the move (swing58-1, v1orig-1, tempo160-1), and none with it; it also keeps a synthetic octave slide up and
+# a slide after a 16th at 160 BPM unread (segment() fits a note 41-51 ms into each)
+SLIDE_FIT_S = (-0.03, 0.06)
 # the 808 rests where its band's RMS over 25 ms stays REST_DB or more under a note's peak (that RMS's highest
 # point over the note's first 200 ms) for REST_S seconds or more: inside the suite's 5,448 truth notes (both
 # models, 50 ms in to 10 ms before the end) it never fell more than 26.8 dB under the note's peak, and PIRAMIT's
@@ -1122,9 +1128,11 @@ def legato(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, k
     semitone) of the slides the period track shows. Without it (the
     default) none is made: on the suite's 48 beats, read on the stored
     stems, glides() found 8 of the 10 slides of seed 1 on each model (none
-    wrong, starts 3.4 and 4.4 ms from the truth's, median), but 4 of 14
-    [3 of 14] on seed 2, 4 [1] wrong there, and 2 [1] legato notes on
-    seed 2's beats without a slide (swing66-2, tempo160-2 [bass_low-2])."""
+    wrong, starts 3.4 and 4.8 ms from the truth's, median; in-sample), but
+    4 of 14 [3 of 14] on seed 2, 4 [2] wrong there, and 4 [4] legato notes
+    on seed 2's beats without a slide (bass_low-2, meter68-2, swing66-2,
+    tempo160-2 [bass_low-2, swing66-2]). Seed 2's slide beats were seen,
+    with their truth, while the rule was first designed."""
     env = rms_envelope(lo, 25.0)
     quiet = 10 ** (-silent_db / 20)
     e = envelope(lo)
@@ -1215,23 +1223,36 @@ def _repitch(lo: np.ndarray, tpl: Template, n: dict, apart: float = 0.5) -> None
     n.update(midi_settled=round(tpl.midi + c / 100, 4), transposition=c, t_attack=round(n["t"] + lead - PRE / SR, 5))
 
 
-def _own_attack(n: dict, feet: np.ndarray, lo: np.ndarray, tpl: Template, attacked_ncc: float) -> bool:
+def _rises(e: np.ndarray, s: float) -> bool:
+    """Whether the 808 band's envelope e rises SLIDE_RISE_DB or more near s
+    (80 ms before to 40 ms after), as where the sample starts again: a
+    legato slide goes on at the level it had."""
+    return max(rise_db(e, int(round((s + dt) * SR)), 15.0, 40.0, 5.0) for dt in np.arange(-0.08, 0.041, 0.005)) \
+        >= SLIDE_RISE_DB
+
+
+def _own_attack(n: dict, feet: np.ndarray, lo: np.ndarray, tpl: Template, e: np.ndarray, attacked_ncc: float) -> bool:
     """Whether a note has an attack of its own, a drum attack aside: an
-    envelope foot within 20 ms, the template's attack and drop matching
-    (NCC at least attacked_ncc), or the sample's drop starting again
-    (_restarts)."""
+    envelope foot within 20 ms, the sample's drop starting again
+    (_restarts), or the template's attack and drop matching (NCC at least
+    attacked_ncc) where the band rises too (_rises). A fit alone is no
+    attack: segment() cuts a slide into notes whose fit reads 0.91-0.98,
+    and with the fit alone each was a run of its own, so no slide up a
+    minor third, a fifth or an octave was read on synthetic lines (none of
+    4 each), none at 72 BPM and none at 160 BPM, against 3-4 of 4 down.
+    A retrigger the fit alone told apart is left to glides()' SLIDE_FIT_S."""
     foot = len(feet) and float(np.min(np.abs(feet - n["t"]))) <= 0.02
-    return bool(foot or n.get("ncc", 1.0) >= attacked_ncc or _restarts(lo, tpl, n))
+    return bool(foot or _restarts(lo, tpl, n, 0.07) or (n.get("ncc", 1.0) >= attacked_ncc and _rises(e, n["t"])))
 
 
-def _stretches(notes: list[dict], feet: np.ndarray, lo: np.ndarray, tpl: Template, attacked_ncc: float,
-               touch: float = TOUCH_S) -> list[list[int]]:
+def _stretches(notes: list[dict], feet: np.ndarray, lo: np.ndarray, tpl: Template, e: np.ndarray,
+               attacked_ncc: float, touch: float = TOUCH_S) -> list[list[int]]:
     """The notes in runs that one voice may have played: a note and the
     notes after it that start within `touch` of the one before's end with
     no attack of their own (_own_attack: a kick alone may lie on a slide)."""
     out, cur = [], [0]
     for k in range(1, len(notes)):
-        if notes[k]["t"] - notes[k - 1]["end"] <= touch and not _own_attack(notes[k], feet, lo, tpl, attacked_ncc):
+        if notes[k]["t"] - notes[k - 1]["end"] <= touch and not _own_attack(notes[k], feet, lo, tpl, e, attacked_ncc):
             cur.append(k)
         else:
             out.append(cur)
@@ -1274,7 +1295,10 @@ def _moves(run: list[dict], lo: np.ndarray, tpl: Template, step: float, after: f
            attacked_ncc: float = ATTACKED_NCC) -> list[dict]:
     """Where the pitch moves inside a run of notes (_stretches): from one
     hold of the period track (_holds, HOLD_S or more; the first note's own
-    drop taken out, or where its template fit is under attacked_ncc, left
+    drop taken out, as it only falls: a template that learnt the start of
+    a slide up in its tail rose 0.6 semitone there, held on past its end,
+    and read the hold after an octave slide 0.6 semitone flat; or where
+    its template fit is under attacked_ncc, left
     out up to where it falls under 0.3 semitone or `after` seconds in,
     whichever is sooner: a drop taken out where the stem shows none made
     holds that moved a semitone over 110 ms) to the next at least `step` semitones away, passing
@@ -1282,11 +1306,12 @@ def _moves(run: list[dict], lo: np.ndarray, tpl: Template, step: float, after: f
     others being part of the move. Per move: its start and seconds
     (_ramp, over both holds), and the pitch before it and after it (the
     periods' median from the hold's start to the ramp, and from 20 ms after
-    the ramp to the hold's end)."""
+    the ramp to the hold's end), the hold before's start (since) and the
+    hold after's end (until)."""
     a = run[0]["t"]
     hz = 440 * 2 ** ((max(n["midi_settled"] for n in run) - 69) / 12)
     t, m = _track(lo, a, run[-1]["end"], 1.3 * hz, skip_s=0.0)
-    drop = np.maximum(0.0, _drop(tpl, run[0], t))
+    drop = np.minimum.accumulate(np.maximum(0.0, _drop(tpl, run[0], t)))  # the sample's own drop only falls
     if run[0].get("ncc", 1.0) < attacked_ncc:  # no sign of the template's drop: skip it, take nothing out
         keep = t >= (min(after, float(t[np.flatnonzero(drop > 0.3)[-1]])) if np.any(drop > 0.3) else 0.0)
         t, m = a + t[keep], m[keep]
@@ -1307,7 +1332,7 @@ def _moves(run: list[dict], lo: np.ndarray, tpl: Template, step: float, after: f
         w = slice(i1, j2)
         s, d = _ramp(t[w], m[w], before, after, t[(i1 + j1) // 2], t[i2])
         pre, post = (t >= t[i1]) & (t < s), (t >= s + d + 0.02) & (t <= t[j2 - 1])
-        out.append({"t": s, "s": d, "since": float(t[i1]),
+        out.append({"t": s, "s": d, "since": float(t[i1]), "until": float(t[j2 - 1]),
                     "from": float(np.median(m[pre])) if pre.sum() >= 2 else before,
                     "to": float(np.median(m[post])) if post.sum() >= 2 else after})
     return out
@@ -1322,26 +1347,30 @@ def glides(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, a
     with no attack (_moves). The move becomes a legato note from where it
     starts, at the template's whole transposition nearest the hold after it
     (SNAP_ST or nearer), gliding over the move's length, where the hold
-    before it is the note before's pitch (within HOLD_ST), the move leaves
-    that note `after` seconds or more after it starts, and the legato note
-    lasts `shortest` or more; the notes in the run from 60 ms before the
-    move to 30 ms after its end (found mid-slide, with a kick at most) go
-    with it. A slide is not guessed from where a note was found or how its
-    pitch was read: it is a continuous path between two settled pitches
-    with no attack of the sample's own."""
+    before it is the note before's pitch (within HOLD_ST; the note on
+    which that hold starts takes its whole transposition where it was read
+    across the slide, and a legato note's glide with it), the move leaves
+    that note `after` seconds or more after it starts, the band does not
+    rise near its start (_rises), no note that fits the template starts at
+    it (SLIDE_FIT_S), and the legato note lasts `shortest` or
+    more; the notes in the run from 60 ms before the move to 30 ms after
+    its end, or to 20 ms before the end of the hold after it (found
+    mid-slide or on that hold at a pitch read wrong, with a kick at most),
+    go with it. On synthetic lines a note found 35 ms before a slide at 72
+    BPM, at the pitch slid to, took the place of the note before (with 20
+    ms, as the code had it: no legato note), and notes found on the hold
+    after a slide up stayed notes of their own, 0.97-1.05 semitones flat
+    (12 notes read as 21). A slide is not guessed from where a note was
+    found or how its pitch was read: it is a continuous path between two
+    settled pitches with no attack of the sample's own."""
     feet = np.asarray(feet, dtype=float)
     e = envelope(lo)
-
-    def rises(s: float) -> bool:  # the band rises near s as where the sample starts again
-        return max(rise_db(e, int(round((s + dt) * SR)), 15.0, 40.0, 5.0) for dt in np.arange(-0.08, 0.041, 0.005)) \
-            >= SLIDE_RISE_DB
-
     out: list[dict] = []
-    for idx in _stretches(notes, feet, lo, tpl, attacked_ncc):
+    for idx in _stretches(notes, feet, lo, tpl, e, attacked_ncc):
         run = [dict(notes[k]) for k in idx]
         for mv in _moves(run, lo, tpl, step, after, attacked_ncc):
             s, d = mv["t"], mv["s"]
-            k = max((j for j, n in enumerate(run) if n["t"] < s - 0.02), default=None)
+            k = max((j for j, n in enumerate(run) if n["t"] < s - 0.06), default=None)
             if k is None or s - run[k]["t"] < after:
                 continue
             prev, to = run[k], tpl.midi + round(mv["to"] - tpl.midi)
@@ -1351,13 +1380,17 @@ def glides(notes: list[dict], lo: np.ndarray, tpl: Template, feet: np.ndarray, a
                     or abs(to - prev["midi_settled"]) < step or abs(mv["to"] - to) > SNAP_ST \
                     or abs(to - tpl.midi) > reach:
                 continue
-            gone = [j for j in range(k + 1, len(run)) if run[j]["t"] <= s + d + 0.03]
+            gone = [j for j in range(k + 1, len(run)) if run[j]["t"] <= max(s + d + 0.03, mv["until"] - 0.02)]
             end = run[gone[-1] + 1]["t"] if gone and gone[-1] + 1 < len(run) else \
                 run[k + 1]["t"] if not gone and k + 1 < len(run) else max(run[j]["end"] for j in [k] + gone)
-            if end - s < shortest or end <= s + d or rises(s):
+            if end - s < shortest or end <= s + d or _rises(e, s) or any(  # a rise, or a fitted note: an attack
+                    SLIDE_FIT_S[0] <= run[j]["t"] - s <= SLIDE_FIT_S[1] and run[j].get("ncc", 1.0) >= attacked_ncc
+                    for j in range(k + 1, len(run))):
                 continue
             if abs(whole - prev["midi_settled"]) > HOLD_ST:  # read across the slide it holds: the hold's pitch
                 prev.update(midi_settled=round(whole, 4), transposition=round(100 * (whole - tpl.midi), 1))
+                if prev.get("glide"):  # a legato note slides to the pitch it holds
+                    prev["glide"] = {**prev["glide"], "to_midi": round(whole, 4)}
             glide = {"from_midi": prev["midi_settled"], "to_midi": round(to, 4), "t": round(s, 5),
                      "ms": round(max(1000 * d, 20.0), 1), "shape": "lin", "kind": "legato"}
             prev["end"] = round(s, 5)
@@ -1407,18 +1440,22 @@ def _attacked(n: dict, feet: np.ndarray, kicks: np.ndarray, attacked_ncc: float)
     return bool(foot or kick or n.get("ncc", 1.0) >= attacked_ncc)
 
 
-def _restarts(lo: np.ndarray, tpl: Template, n: dict) -> bool:
+def _restarts(lo: np.ndarray, tpl: Template, n: dict, span: float = 0.06) -> bool:
     """Whether the note's pitch starts high again as the template's drop
     does (from 10 to 40 ms in, at least half the template's own excess
-    there, where that is a semitone or more): a retrigger restarts the
-    sample, a legato slide does not."""
+    there, where that is a semitone or more), its periods read over the
+    note's first `span` seconds: a retrigger restarts the sample, a legato
+    slide does not. _track reads no period over 60 ms or less, so with
+    span 0.06 (legato()'s call, which the default's notes were measured
+    with) it never finds a restart on a note that long; glides() reads
+    70 ms."""
     from .scenarios import drop
     rate = 2 ** ((n["midi_settled"] - tpl.midi) / 12)
     expected = float(np.median(drop(tpl.curve, np.linspace(0.01, 0.04, 7) * rate)))
     if expected < 100:
         return False
     hz = 440 * 2 ** ((n["midi_settled"] + expected / 100 - 69) / 12)
-    t, midi = _track(lo, n["t"], min(n["end"], n["t"] + 0.06), 1.3 * hz, skip_s=0.01)
+    t, midi = _track(lo, n["t"], min(n["end"], n["t"] + span), 1.3 * hz, skip_s=0.01)
     early = midi[t <= 0.04]
     return bool(len(early)) and float(np.median(early) - n["midi_settled"]) * 100 >= 0.5 * expected
 
