@@ -122,6 +122,25 @@ def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_p
     assert len(calls) == 3
 
 
+def test_the_808_reader_with_slides_is_kept_apart(tmp_path, monkeypatch):
+    """With slides, the reader is asked for them and its result is kept
+    under a key of its own: a result without them is not read back."""
+    from refdissect import pipeline
+
+    asked = []
+
+    def reader(bass, drums, log=None, slides=False):
+        asked.append(slides)
+        return {"template": None, "notes": [{"t": 0.5, "flags": ["legato"] if slides else []}]}
+    monkeypatch.setattr(pipeline.bass808, "transcribe", reader)
+    bass, drums = np.ones(100, np.float32), np.zeros(100, np.float32)
+    plain, _ = pipeline._transcribe(bass, drums, tmp_path, lambda m: None)
+    slid, read_back = pipeline._transcribe(bass, drums, tmp_path, lambda m: None, slides=True)
+    assert asked == [False, True] and read_back is None and slid["notes"][0]["flags"] == ["legato"]
+    assert pipeline._transcribe(bass, drums, tmp_path, lambda m: None, slides=True)[1] is not None
+    assert len(list(tmp_path.glob("808-*.json"))) == 2 and plain["notes"][0]["flags"] == []
+
+
 @pytest.mark.slow
 def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems, tmp_path, monkeypatch):
     """By default analyze keeps nothing: a script that patches a module and

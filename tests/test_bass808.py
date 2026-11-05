@@ -20,17 +20,18 @@ def kick(seconds: float = 0.12) -> np.ndarray:
 
 
 def line(notes, root_hz: float = 32.70, cents: float = 0.0, bpm: float = 140.0, bars: int = 4, leak: float = 0.15,
-         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0
-         ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+         drop: float = 5.0, glide_ms: float = 50.0, slide_ms: float = 90.0, seed: int = 1, tail: float = 0.0,
+         decay_s: float = 1.5) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """A bass stem, a drum stem and the truth of `bars` bars of notes (16th
     step, length in 16ths, semitones over the root, and "legato" for a note
     that slides in from the one before over slide_ms without starting the
     sample again), the 808 settling at root_hz + cents and starting `drop`
     semitones over it (and `tail` more semitones falling with a time
-    constant of 150 ms, as real 808s' drops end); a kick on every other
-    attacked note, leaking into the bass stem at `leak`."""
+    constant of 150 ms, as real 808s' drops end), decaying over decay_s;
+    a kick on every other attacked note, leaking into the bass stem at
+    `leak`."""
     f = root_hz * 2 ** (cents / 1200)
-    sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, 1.5, 3, 2.0, 0.05, 0.3), 2.5)
+    sample = voice(Params(f, f * 2 ** (drop / 12), glide_ms, decay_s, 3, 2.0, 0.05, 0.3), 2.5)
     if tail:
         t = np.arange(len(sample)) / SR
         sample = np.interp(np.cumsum(2 ** (tail * np.exp(-t / 0.15) / 12)), np.arange(len(sample)), sample)
@@ -160,6 +161,100 @@ def test_a_slide_without_an_attack_is_a_legato_note_on_request():
     assert all(n["t"] == n["t_attack"] and n["glide"]["shape"] == "lin" for n in legato)
     plain = B.transcribe(bass, drums)["notes"]
     assert not any("legato" in n["flags"] for n in plain) and len(plain) <= len(truth)
+
+
+@pytest.mark.slow
+def test_a_slide_inside_a_held_note_starts_where_its_ramp_starts():
+    """A 200 ms slide down a minor third that segment() finds no note for
+    (the note before seems held on): with slides, a legato note at the
+    pitch it slides to, starting where the ramp starts (least squares over
+    the periods: within 10 ms, where the old rule's crossing came 24-43 ms
+    late on the suite) and gliding about as long as it does. The old rule
+    made none here."""
+    bass, drums, truth = line([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], cents=-14.0, slide_ms=200.0)
+    legato = [n for n in B.transcribe(bass, drums, slides=True)["notes"] if "legato" in n["flags"]]
+    pairs = [(m, n) for m in truth if m["legato"] for n in legato
+             if abs(n["t"] - m["t"]) <= 0.05 and abs(n["midi_settled"] - m["midi"]) < 0.5]
+    assert len(pairs) >= 3 and len(legato) <= 4
+    assert np.median([abs(n["t"] - m["t"]) for m, n in pairs]) <= 0.01
+    assert all(abs(n["glide"]["ms"] - 200.0) <= 30.0 for _, n in pairs)
+
+
+def legato_read(notes, kick_on_slides: bool = False, **kw) -> tuple[int, int, int]:
+    """(the truth's legato notes, legato notes made with slides, those
+    right: within 50 ms of a truth legato note and half a semitone of its
+    pitch) on a synthetic line; kick_on_slides puts a kick (drum stem and
+    leak) on each slide's start too."""
+    bass, drums, truth = line(notes, **kw)
+    if kick_on_slides:
+        k = kick()
+        for m in truth:
+            if m["legato"]:
+                a = int(round(m["t"] * SR))
+                drums[a:a + len(k)] += k[:len(drums) - a]
+                bass[a:a + len(k)] += 0.15 * k[:len(bass) - a]
+    legato = [n for n in B.transcribe(bass, drums, slides=True)["notes"] if "legato" in n["flags"]]
+    slides = [m for m in truth if m["legato"]]
+    right = [m for m in slides if any(abs(n["t"] - m["t"]) <= 0.05 and abs(n["midi_settled"] - m["midi"]) < 0.5
+                                      for n in legato)]
+    return len(slides), len(legato), len(right)
+
+
+UNREAD = "not read yet: a note segment() fits (0.9 or more) 41-51 ms into the slide counts as its attack (SLIDE_FIT_S)"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("notes, kw", [
+    ([(0, 6, 0), (6, 6, 3, "legato"), (12, 4, 0)], {"cents": -14.0}),
+    ([(0, 6, 0), (6, 6, 7, "legato"), (12, 4, 0)], {"cents": -14.0}),
+    ([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], {"bpm": 72.0, "bars": 2, "cents": -14.0}),
+    ([(0, 6, 0), (6, 6, 5, "legato"), (12, 4, 0)], {"bpm": 160.0}),
+    pytest.param([(0, 6, 0), (6, 6, 12, "legato"), (12, 4, 0)], {"cents": -14.0},
+                 marks=pytest.mark.xfail(strict=True, reason=UNREAD)),
+    pytest.param([(0, 1, 0), (1, 3, 5, "legato"), (4, 4, 0), (8, 8, 3)], {"bpm": 160.0, "slide_ms": 60.0},
+                 marks=pytest.mark.xfail(strict=True, reason=UNREAD)),
+], ids=["up 3 st", "up 7 st", "72 bpm", "160 bpm", "up an octave", "a 16th then a slide at 160 bpm"])
+def test_slides_up_and_at_any_tempo_are_read(notes, kw):
+    """A template fit of 0.9 or more alone is no attack inside a run
+    (_own_attack): segment() cuts a slide into notes that fit at
+    0.91-0.98, and each was a run of its own, so no slide up and none at
+    72 or 160 BPM was read (0 of 4; 1 of 4 for the 16th at 160), against 3-4
+    of 4 down. The template's drop taken out over a run only falls: a
+    template that learnt the start of a slide up in its tail read the hold
+    after it 0.6 semitone flat. Now 3 or more of 4 (2 of 2 at 72 BPM), and
+    no other legato note; an octave up and a slide after a 16th at 160 BPM
+    still read 1 of 4 (xfail)."""
+    truth, made, right = legato_read(notes, **{"slide_ms": 120.0, **kw})
+    assert right >= min(truth, 3) and made <= truth
+
+
+@pytest.mark.slow
+def test_slides_with_a_kick_on_each_and_a_chain_of_two():
+    """A kick (in the drum stem and leaking into the bass stem) on each
+    slide's start is no attack of the 808's own: the slides are legato
+    notes. A note that slides twice is a chain of two legato notes, the
+    second gliding from the first."""
+    truth, made, right = legato_read([(0, 6, 0), (6, 6, -3, "legato"), (12, 4, 0)], kick_on_slides=True,
+                                     cents=-14.0, slide_ms=200.0)
+    assert truth == 4 and right >= 3 and made == right
+    truth, made, right = legato_read([(0, 4, 0), (4, 4, 5, "legato"), (8, 4, 7, "legato"), (12, 4, 0)],
+                                     cents=-14.0, slide_ms=100.0)
+    assert truth == 8 and right >= 6 and made == right
+
+
+@pytest.mark.slow
+def test_a_retrigger_whose_band_rises_is_no_slide(monkeypatch):
+    """Notes a fourth apart, each starting the sample again with no pitch
+    drop of its own (no restart to see) but at its full level: no legato
+    note. The 808 band rises SLIDE_RISE_DB or more where the pitch moves,
+    which alone keeps them out (SLIDE_FIT_S, the fitted note at the move,
+    out of reach); without either test each retrigger would be one."""
+    notes = [(0, 6, 0), (6, 6, 5), (12, 4, 0)]
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] == 0
+    monkeypatch.setattr(B, "SLIDE_FIT_S", (1.0, 1.0))
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] == 0
+    monkeypatch.setattr(B, "SLIDE_RISE_DB", 99.0)
+    assert legato_read(notes, drop=0.0, decay_s=0.8)[1] >= 2
 
 
 def test_legato_keeps_a_slide_and_merges_a_drift_or_a_short_reading():
@@ -615,6 +710,51 @@ def test_a_legato_note_after_the_one_shot_has_ended_plays_nothing(tmp_path, monk
     assert len(plan["tracks"]["808"]["notes"]) == 2
     heard = estimate_from_plan(plan)["bass808"]
     assert len(heard) == 1 and heard[0]["t"] == pytest.approx(0.5, abs=0.01) and np.isfinite(heard[0]["midi"])
+
+
+def glide_plan_last(tmp_path, gap: float) -> tuple[float, float]:
+    """(start less 2 beats a second times gap, end) in beats of the last of
+    three 808 notes plan_808 writes with Glide on: a note, a legato note
+    held to 1.5 s, and a note `gap` seconds after it (live.GLIDE_LEAST
+    patched to 1 by the caller)."""
+    import soundfile as sf
+
+    from refdissect.live import plan_808
+    hz = 32.70
+    shot = tmp_path / "808 (synth).wav"
+    sf.write(shot, voice(Params(hz, hz, 10, 3.0, 4, 1.0, 0.0, 0.3), 3.0), SR, subtype="FLOAT")
+    synth = {"root_midi": 24, "pitch_hz": hz, "file": str(shot), "file_name": shot.name}
+    glide = {"from_midi": 24.0, "to_midi": 29.0, "t": 1.0, "ms": 80.0, "shape": "lin", "kind": "legato"}
+    notes = [{"t": 0.5, "t_attack": 0.505, "end": 1.0, "pitch": 24, "peak": 1.0},
+             {"t": 1.0, "t_attack": 1.0, "end": 1.5, "pitch": 29, "peak": 1.0, "glide": glide, "flags": ["legato"]},
+             {"t": 1.5 + gap, "t_attack": 1.505 + gap, "end": 2.0, "pitch": 31, "peak": 1.0}]
+    n = plan_808({"tuning": {"808": 0.0}, "notes_808": notes}, synth, tmp_path / "stems", 2.0)["notes"][-1]
+    return n["start_time"] - 2.0 * gap, n["start_time"] + n["duration"]
+
+
+def test_with_glide_a_note_in_the_release_of_the_chain_before_is_planned_on_time_by_default(tmp_path, monkeypatch):
+    """By default (render.GLIDE_TAKEOVER off: not measured in Live), a note
+    that comes while the chain before still sounds in its release under
+    Glide is planned where it attacks, as one that comes after the
+    release: no RETRIGGER_S earlier."""
+    from refdissect import live
+    monkeypatch.setattr(live, "GLIDE_LEAST", 1)
+    (soon, soon_end), (later, later_end) = glide_plan_last(tmp_path, 0.01), glide_plan_last(tmp_path, 0.2)
+    assert soon == pytest.approx(later, abs=1e-4) and soon_end == later_end
+
+
+def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_1_ms_earlier(tmp_path, monkeypatch):
+    """With render.GLIDE_TAKEOVER on (one voice under Glide), a note that
+    comes while the chain before still sounds in its release, at any
+    pitch, is planned RETRIGGER_S earlier (Live would start it that much
+    late: render.late_808 mono), its end kept; one that comes after the
+    release, on time."""
+    from refdissect import live, render
+    from refdissect.render import RETRIGGER_S
+    monkeypatch.setattr(live, "GLIDE_LEAST", 1)
+    monkeypatch.setattr(render, "GLIDE_TAKEOVER", True)
+    (soon, soon_end), (later, later_end) = glide_plan_last(tmp_path, 0.01), glide_plan_last(tmp_path, 0.2)
+    assert soon == pytest.approx(later - 2.0 * RETRIGGER_S, abs=1e-4) and soon_end == later_end
 
 
 @pytest.mark.slow

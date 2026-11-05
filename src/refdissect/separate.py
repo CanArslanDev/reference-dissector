@@ -6,7 +6,13 @@ same stems every time on one device. Two runs of a 30 s v1 beat gave
 byte-identical stems on MPS with htdemucs and with htdemucs_ft; seeds 0 and 1
 gave drums 20.0 and 20.3 dB SDR apart. separation.json next to the stems says
 how they were made (model, seed, shifts, device, package versions, the
-input's hash)."""
+input's hash).
+
+torch is pinned: unpinned, the environment resolved torch 2.15.0, whose
+MPS stems are wrong (the bass goes to "other": the bass stem's correlation
+with the true bass stem -0.01 to 0.06 on 22 new suite beats, against
+0.98 for the stored stems), while with 2.14.1 a suite beat separates
+byte-identical to its stored stems."""
 
 from __future__ import annotations
 
@@ -18,7 +24,7 @@ from collections import deque
 from pathlib import Path
 
 WORKER = Path(__file__).with_name("workers") / "separate_worker.py"
-PACKAGES = ("demucs==4.1.0", "soundfile>=0.12", "scipy>=1.11")
+PACKAGES = ("demucs==4.1.0", "torch==2.14.1", "soundfile>=0.12", "scipy>=1.11")
 DEFAULT_MODEL = "htdemucs"
 
 
