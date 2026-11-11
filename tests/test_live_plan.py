@@ -654,7 +654,8 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
          extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0,
-         stem_gain: float = 1.0, sounding: list | None = None):
+         stem_gain: float = 1.0, sounding: list | None = None, hat_file_gain: float = 1.0,
+         scale_files: bool = True):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
     stem holds 1 - kick_in_bass and the bass stem the rest, as htdemucs
@@ -666,7 +667,9 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     the hat alone (the stems still hold the kick); click: a click of noise
     over the kick's body, at that gain (a bright kick); stem_gain: the
     stems that much louder; sounding: more audio in the drum stem,
-    [(samples, time (s), gain)]."""
+    [(samples, time (s), gain)]; hat_file_gain: the hat's file that much
+    louder than the stems hold it (over 1.11, over full scale);
+    scale_files: make_plan's."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
     t = np.arange(int(0.3 * SR)) / SR
@@ -674,9 +677,10 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     if click:
         kick = kick + click * np.random.default_rng(5).standard_normal(len(t)) * np.exp(-t / 0.004)
         kick *= 0.9 / np.max(np.abs(kick))
-    hat = 0.9 * np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.03)
+    hat = np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.03)
+    hat *= 0.9 / np.max(np.abs(hat))
     sf.write(tmp_path / "kick.wav", kick, SR, subtype="FLOAT")
-    sf.write(tmp_path / "hat.wav", hat, SR, subtype="FLOAT")
+    sf.write(tmp_path / "hat.wav", hat_file_gain * hat, SR, subtype="FLOAT")
     drums, bass = np.zeros(4 * SR), np.zeros(4 * SR)
     for k in range(4):
         drums[k * SR:k * SR + len(t)] += 0.5 * (1 - kick_in_bass) * kick
@@ -715,7 +719,56 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
                                                 "live")
     sf.write(tmp_path / "drums.wav", stem_gain * drums, SR, subtype="FLOAT")
     sf.write(tmp_path / "bass.wav", stem_gain * bass, SR, subtype="FLOAT")
-    return make_plan(analysis, matches, synth, tmp_path, min_hits=1)
+    return make_plan(analysis, matches, synth, tmp_path, min_hits=1, scale_files=scale_files)
+
+
+def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
+    """The hat's file at +17.15 dBFS (the library's loudest entry peaks at
+    +19.4): the plan gives its pad file_db -17.15, the scale that brings it
+    to full scale, and plays it that much lower: the levels give its pad
+    the Volume of a file at full scale (0.9 dB under the hat's at 0.9) and
+    the hat plays as loud as from that file, 20 dB under the kick, as the
+    stems hold it. The build copies the file scaled so, a float WAV at full
+    scale named with the gain. Without scale_files the levels made up for
+    the file under a Volume 17.15 dB lower, the same sound with peaks of
+    +17.15 dBFS ahead of it."""
+    from refdissect.live import build_spec, file_db, pad_copy, pad_sample
+    from refdissect.render import render_plan
+    for k in "abc":
+        (tmp_path / k).mkdir()
+    plain = _kit(tmp_path / "a")
+    hot = _kit(tmp_path / "b", hat_file_gain=8.0)  # the hat's file at 0.9 x 8: +17.15 dBFS
+    unscaled = _kit(tmp_path / "c", hat_file_gain=8.0, scale_files=False)
+    pads, hats = hot["tracks"]["drums"]["pads"], tmp_path / "b" / "hat.wav"
+    assert file_db(hats) == pads["42"]["file_db"] == -17.15 and file_db(tmp_path / "a" / "hat.wav") == 0.0
+    assert "file_db" not in pads["36"] and "file_db" not in plain["tracks"]["drums"]["pads"]["42"]
+    assert "file_db" not in unscaled["tracks"]["drums"]["pads"]["42"]
+    volumes = [p["tracks"]["drums"]["pads"]["42"]["volume_db"] for p in (plain, hot, unscaled)]
+    assert volumes[1] == pytest.approx(volumes[0] - 0.9, abs=0.1)
+    assert volumes[2] == pytest.approx(volumes[1] - 17.15, abs=0.1)
+    assert hot["levels"] == plain["levels"] == unscaled["levels"]
+    renders = [sf.read(tmp_path / k / "r" / render_plan(p, tmp_path / k / "r", n_samples=4 * SR)["drums"])[0]
+               for k, p in (("a", plain), ("b", hot), ("c", unscaled))]
+    for r in renders[1:]:  # the same within the Volumes' 0.1 dB step
+        assert np.max(np.abs(r - renders[0])) < 0.012 * np.max(np.abs(renders[0]))
+    copy = pad_copy(pads["42"], tmp_path / "lib")
+    x = sf.read(copy, dtype="float32")[0]
+    assert copy.name == pad_sample(hats, pads["42"]["file_db"]) and copy.name.endswith(" -17.15dB.wav")
+    assert 0.998 < np.max(np.abs(x)) <= 1.0 and sf.info(copy).subtype == "FLOAT"
+    assert pad_copy(pads["36"], tmp_path / "lib").name == pad_sample(tmp_path / "b" / "kick.wav")
+    rack = {t["name"]: t for t in build_spec(hot)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert rack["42"]["sample"] == copy.name and rack["36"]["sample"] == pad_sample(tmp_path / "b" / "kick.wav")
+
+    import asyncio
+
+    from refdissect.live import held_samples
+    held_by = {"36": tmp_path / "lib" / "Samples" / "AbletonMCP Generated" / rack["36"]["sample"], "42": copy}
+
+    async def call(tool, path, properties):  # Live holds each pad's copy
+        return json.dumps({"file_path": str(held_by[path.split(" drum_pads ")[1].split()[0]])})
+    overview = {"tracks": [{"name": "Drums (library)", "index": 0}]}
+    held = asyncio.run(held_samples(call, overview, hot, tmp_path / "lib"))
+    assert held["36"]["same"] and held["42"]["same"] and held["42"]["plan"] == str(hats)
 
 
 def _volume(spec_pad: dict) -> float:
@@ -859,7 +912,8 @@ def test_a_sound_heard_mostly_with_a_louder_one_is_read_where_it_is_alone(tmp_pa
     from refdissect.audio import attack_time
     t = np.arange(int(0.3 * SR)) / SR
     noise = np.random.default_rng(7).standard_normal((2, len(t)))
-    ohat, snare = 0.9 * noise[0] * np.exp(-t / 0.1), 0.9 * noise[1] * np.exp(-t / 0.05)
+    ohat, snare = noise[0] * np.exp(-t / 0.1), noise[1] * np.exp(-t / 0.05)
+    ohat, snare = 0.9 * ohat / np.max(np.abs(ohat)), 0.9 * snare / np.max(np.abs(snare))
     sf.write(tmp_path / "ohat.wav", ohat, SR, subtype="FLOAT")
     sf.write(tmp_path / "snare.wav", snare, SR, subtype="FLOAT")
     a_ohat, a_snare = attack_time(ohat, "hat"), attack_time(snare, "snare")
