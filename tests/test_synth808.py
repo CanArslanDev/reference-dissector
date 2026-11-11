@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from refdissect.audio import SR
-from refdissect.synth808 import Params, compare, fit, laid_out, one_shot, voice
+from refdissect.synth808 import NAMES, Params, compare, fit, laid_out, one_shot, voice
 
 
 def _zero_crossing_hz(x):
@@ -457,3 +457,43 @@ def test_fit_808_lays_its_one_shot_out_where_its_template_attacks(tmp_path, monk
     out = pipeline.fit_808(work, log=lambda *a: None)
     assert out["pitch_track"]["attack_ms"] == pytest.approx(1000 * onset_attack, abs=0.5)
     assert attack_time(sf.read(out["file"], dtype="float32")[0], "808") == pytest.approx(onset_attack, abs=5e-4)
+
+
+def test_the_plain_voice_is_unchanged_and_the_grittier_one_adds_harmonics():
+    """skew and grit at 0 give the eight-number voice to the bit; grit lifts
+    harmonics 6-12 by the weight of its term, skew the even harmonics; a
+    plain voice's to_dict keeps its eight numbers."""
+    from dataclasses import replace
+
+    from refdissect.describe import harmonics
+    plain = voice(TRUE, 1.0)
+    t = np.arange(len(plain)) / SR
+    f = TRUE.f_end_hz + (TRUE.f_start_hz - TRUE.f_end_hz) * np.exp(-t / (TRUE.glide_ms / 1000))
+    amp = (1 - np.exp(-t / (TRUE.attack_ms / 1000))) * np.exp(-t / TRUE.decay_s)
+    y = np.tanh(TRUE.drive * (amp * np.sin(TRUE.phase + 2 * np.pi * np.cumsum(f) / SR) + TRUE.asym))
+    y -= np.tanh(TRUE.drive * TRUE.asym)
+    assert np.array_equal(plain, (y / np.max(np.abs(y))).astype(np.float32))
+    assert set(TRUE.to_dict()) == set(NAMES[:8]) and not TRUE.gritty
+    soft = replace(TRUE, drive=0.3, asym=0.0)
+    h = harmonics(voice(soft, 1.0), 41.2)
+    gritty = harmonics(voice(replace(soft, grit=0.01), 1.0), 41.2)
+    assert np.all(gritty[4:] > h[4:] + 10)  # the 6th at -40 dB, the 12th at -46
+    assert abs(gritty[4] + 40) < 1.5 and abs(gritty[10] + 46) < 1.5
+    even = harmonics(voice(replace(TRUE, asym=0.0, skew=0.3), 1.0), 41.2)[[0, 2]]
+    assert np.all(even > harmonics(voice(replace(TRUE, asym=0.0), 1.0), 41.2)[[0, 2]] + 10)
+    assert replace(TRUE, grit=0.01).to_dict()["grit"] == 0.01
+
+
+@pytest.mark.slow
+def test_a_grit_fit_finds_the_upper_harmonics():
+    from dataclasses import replace
+
+    gritty = replace(TRUE, skew=0.2, grit=0.02)
+    reference = laid_out(gritty, int(0.6 * SR))
+    plain, _ = fit(reference, 41.2, maxiter=25, popsize=10, seed=0)
+    p, info = fit(reference, 41.2, maxiter=25, popsize=10, seed=0, grit=True)
+    assert p.gritty and info["plain"] == plain.to_dict()
+    # the pitch, the drop and the phase stay the plain fit's
+    assert all(getattr(p, k) == getattr(plain, k) for k in ("f_end_hz", "f_start_hz", "glide_ms", "phase"))
+    before = compare(reference, laid_out(plain, len(reference)), 41.2)["harmonics_6_12_db"]
+    assert compare(reference, laid_out(p, len(reference)), 41.2)["harmonics_6_12_db"] < min(3.0, before)
