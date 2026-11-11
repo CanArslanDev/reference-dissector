@@ -320,7 +320,8 @@ def _suite_parser(sub) -> None:
                         "fails before running when one is missing")
     s.add_argument("--cache", action=argparse.BooleanOptionalAction, default=False,
                    help="keep the 808 reader's results and the fits in each beat's cache/ and read them back where "
-                        "the stems or the template, the settings and the package's code are the same (default off: "
+                        "the stems or the template, the settings and the code of the step (its module and every module "
+                        "it imports) are the same (default off: "
                         "every step runs, and its seconds are the code's)")
     _analyze_options(s)
     _match_options(s)
