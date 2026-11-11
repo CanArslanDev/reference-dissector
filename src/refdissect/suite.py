@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import __version__, evaluate, pipeline
+from . import __version__, evaluate, pipeline, served
 from . import scenarios as S
 from .render import render_plan
 from .separate import DEFAULT_MODEL, separate_many
@@ -548,13 +548,20 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
         _ready_stores(library, library_808, steps)
     args = [(b, tag, model, str(library), str(library_808) if library_808 else None, render, options or {}, steps,
              reuse, cache) for b in beats]
+    # each job keeps beat_this's and Basic Pitch's workers running from one beat to the next (served.py)
     if jobs > 1 and len(args) > 1:
-        with ProcessPoolExecutor(min(jobs, len(args)), mp_context=multiprocessing.get_context("spawn")) as pool:
+        with ProcessPoolExecutor(min(jobs, len(args)), mp_context=multiprocessing.get_context("spawn"),
+                                 initializer=served.keep, initargs=(True,)) as pool:
             for future in as_completed([pool.submit(_run_job, a) for a in args]):
                 _done(future.result(), log)
     else:
-        for a in args:
-            _done(_run_job(a), log)
+        kept = served.kept()
+        served.keep(True)
+        try:
+            for a in args:
+                _done(_run_job(a), log)
+        finally:
+            served.keep(kept)
     summary = aggregate(root, tag)
     summary["last_run"] = {"beats": len(beats), "jobs": jobs, "wall_s": round(time.perf_counter() - t0, 1)}
     if subset:
