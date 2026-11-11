@@ -170,7 +170,7 @@ uv run refdissect suite report "$S" --tags mine,mine-b --out "$W/work/mine-b.md"
 ```
 
 Every step writes JSON next to its inputs, so you can read what it decided before the next step uses it.
-- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and every `.py` file of the package as the process loaded it. The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
+- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and the `.py` files of the step as the process loaded them: the module that makes the result and every module of the package it imports (an edit elsewhere, to `live.py` say, keeps them). The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
 - `scripts/export_results.py` turns a work folder into the shareable `results/` and `figures/`: no audio, and no file names from a personal library.
 - `scripts/export_results.py --suite DIR TAG` publishes a suite tag's means per scenario, and nothing else.
 - `--v1-truth` takes the six v1 beats rebuilt with truth stems. No command here makes them: without them the suite has the 42 scenario beats. [12](docs/12-replica-mode.md) has every suite option.
@@ -262,7 +262,8 @@ src/refdissect/
   calibrate.py   calibration v1: synthetic beats and their scoring
   figures.py     spectrograms side by side, the calibration plot
   pipeline.py    the steps, each writing JSON
-  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and the code
+  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and their step's code
+  served.py      beat_this's and Basic Pitch's workers kept running between a suite job's beats
   cli.py         refdissect
   workers/       the Demucs, beat_this and Basic Pitch workers
 results/         measured numbers (calibration v1, the suite's means per scenario, PIRAMIT) - no audio
