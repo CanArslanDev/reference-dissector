@@ -91,6 +91,7 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 - `suite run --subset dev`: süitin her senaryo ailesinden birer beat alan 11 beat'lik geliştirme alt kümesi; `--cache` ile denemeler için.
 - `suite clean DIR --keep a,b`: tutulmayan etiketlerin çalıştırma klasörlerini boşaltır, her birinin `scores.json`'unu saklar. `--yes` verilmezse yalnızca neyin silineceğini listeler.
 - `live-build --bars A-B`: planın yalnızca A–B ölçülerini, 0'dan başlatarak kurar; stem'ler aynı anlarda kesilir. Kısa bir Live kontrolü içindir; henüz Live'da çalıştırılmadı.
+- `candidates WORK --out DIR --n 6 --seed 1 --section A`: planın istatistiklerinden yeni 8 ölçülük beat'ler çeker. İstatistikler şunlar: tempo, ölçü, swing, her davul rolünün yeri, hat roll'ları, 808'in yeri, perde aralığı, kaydırmaları (slide) ve akorlar. Referansın notalarını kopyalamaz: bir aday referansın ölçülerine fazla benzerse (`--max-copy`) yeniden çekilir. Her adayı `render.py` ile çalar (akorlar düz bir pad'le). 808'i ve akorları referansın kick eğrisine göre bastırır (ducking). Her adayı `compare` ile referansın aynı ölçüleriyle karşılaştırır, sonra hepsini numaralı bir dinleme turuna koyar. Aynı seed aynı adayları verir ([11](docs/11-style-beat-lessons.md#5-sketches-drawn-from-the-plan-candidates)).
 
 Komutların tamamı README.md'nin "Quick start" bölümünde, ayrıntıları docs/12'de.
 

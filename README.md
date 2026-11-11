@@ -154,6 +154,8 @@ uv run refdissect compare "$W/song/stems" "$W/song/rebuild_stems" --out "$W/song
 uv run refdissect listening-round ref.wav cand1.wav cand2.wav --question "Which chords?" --out "$W/song/round1"
 uv run refdissect space "$W/song/stems/other.wav" --spans 40-56 100-116
 uv run refdissect mix-gains "$W/song/recorded" --targets targets.json
+uv run refdissect candidates "$W/song/refdissect" --out "$W/song/sketches" --n 6 --seed 1 --section A
+#   new 8-bar beats drawn from the plan's statistics, rendered, compared and put into one listening round
 
 # calibration v1: six synthetic beats from your own library, scored
 uv run refdissect calibrate "$W/work/inventory.json" --library "$W/work/library.npz" \
@@ -221,7 +223,7 @@ uv run --extra live refdissect live-build "$W/song/refdissect" --bars 9-16   # a
 | [08 – Pitfalls](docs/08-pitfalls.md) | Every mistake made here and how it showed up |
 | [09 – Data and copyright](docs/09-data-and-copyright.md) | What is published, what stays local, and why |
 | [10 – Roadmap](docs/10-roadmap.md) | What replica mode finished, the targets and their gaps, and what comes next |
-| [11 – A new beat in a song's style](docs/11-style-beat-lessons.md) | Two rejected beats: the groove, effect and same-pipeline checks they led to, and what each step cost |
+| [11 – A new beat in a song's style](docs/11-style-beat-lessons.md) | Two rejected beats: the groove, effect and same-pipeline checks they led to, what each step cost, and 8-bar sketches drawn from a plan (`candidates`) |
 | [12 – Replica mode](docs/12-replica-mode.md) | Rebuilding a reference 1:1: running it, the stages and their files, what each measured, and what is not verified in Live |
 
 Türkçe özet: [README.tr.md](README.tr.md)
