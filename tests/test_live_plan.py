@@ -654,7 +654,7 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,
          extra: dict | None = None, hat_only: bool = False, duck_db: float = 0.0, click: float = 0.0,
-         stem_gain: float = 1.0, sounding: list | None = None, hat_file_gain: float = 1.0,
+         stem_gain: float = 1.0, sounding: list | None = None, hat_file_gain: float = 1.0, kick_file_gain: float = 1.0,
          scale_files: bool = True):
     """A kick (120 Hz) and a hat file at one peak level, and stems that hold
     the hat 20 dB under the kick: of the kick's amplitude (0.5) the drum
@@ -668,7 +668,8 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
     over the kick's body, at that gain (a bright kick); stem_gain: the
     stems that much louder; sounding: more audio in the drum stem,
     [(samples, time (s), gain)]; hat_file_gain: the hat's file that much
-    louder than the stems hold it (over 1.11, over full scale);
+    louder than the stems hold it (over 1.11, over full scale), and
+    kick_file_gain the kick's (over 1.14);
     scale_files: make_plan's."""
     from refdissect.audio import attack_time, transpose
     from refdissect.render import render_808
@@ -679,7 +680,7 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
         kick *= 0.9 / np.max(np.abs(kick))
     hat = np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.03)
     hat *= 0.9 / np.max(np.abs(hat))
-    sf.write(tmp_path / "kick.wav", kick, SR, subtype="FLOAT")
+    sf.write(tmp_path / "kick.wav", kick_file_gain * kick, SR, subtype="FLOAT")
     sf.write(tmp_path / "hat.wav", hat_file_gain * hat, SR, subtype="FLOAT")
     drums, bass = np.zeros(4 * SR), np.zeros(4 * SR)
     for k in range(4):
@@ -725,32 +726,41 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
 def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
     """The hat's file at +17.15 dBFS (the library's loudest entry peaks at
     +19.4): the plan gives its pad file_db -17.2, the scale that brings it
-    to full scale, and plays it that much lower: the levels give its pad
-    the Volume of a file at full scale (0.9 dB under the hat's at 0.9) and
-    the hat plays as loud as from that file, 20 dB under the kick, as the
-    stems hold it. The build copies the file scaled so, a float WAV at full
-    scale named with the gain. Without scale_files the levels made up for
-    the file under a Volume 17.2 dB lower, the same sound with peaks of
-    +17.15 dBFS ahead of it."""
+    to full scale (in the Volume's 0.1 dB steps), and plays it that much
+    lower, its Volume 17.2 dB higher: the plan sounds as without the scale,
+    the hat 20 dB under the kick as the stems hold it, but no pad carries
+    peaks over full scale ahead of the drum fader. With the kick's file
+    over full scale too, the loudest pad (+10.9 dBFS), what its Volume
+    cannot take, over 0 dB, the drum fader takes, every other pad's Volume
+    as much lower. The build copies each file scaled so, a float WAV at
+    full scale named with the gain."""
     from refdissect.live import build_spec, file_db, pad_copy, pad_sample
     from refdissect.render import render_plan
-    for k in "abc":
+    for k in "abcd":
         (tmp_path / k).mkdir()
-    plain = _kit(tmp_path / "a")
+    unscaled = _kit(tmp_path / "a", hat_file_gain=8.0, scale_files=False)
     hot = _kit(tmp_path / "b", hat_file_gain=8.0)  # the hat's file at 0.9 x 8: +17.15 dBFS
-    unscaled = _kit(tmp_path / "c", hat_file_gain=8.0, scale_files=False)
+    both_off = _kit(tmp_path / "c", hat_file_gain=8.0, kick_file_gain=4.0, scale_files=False)
+    both = _kit(tmp_path / "d", hat_file_gain=8.0, kick_file_gain=4.0)  # the kick's at 0.88 x 4: +10.9 dBFS
     pads, hats = hot["tracks"]["drums"]["pads"], tmp_path / "b" / "hat.wav"
-    assert file_db(hats) == pads["42"]["file_db"] == -17.2 and file_db(tmp_path / "a" / "hat.wav") == 0.0
-    assert "file_db" not in pads["36"] and "file_db" not in plain["tracks"]["drums"]["pads"]["42"]
-    assert "file_db" not in unscaled["tracks"]["drums"]["pads"]["42"]
-    volumes = [p["tracks"]["drums"]["pads"]["42"]["volume_db"] for p in (plain, hot, unscaled)]
-    assert volumes[1] == pytest.approx(volumes[0] - 0.9, abs=0.1)
-    assert volumes[2] == pytest.approx(volumes[1] - 17.2, abs=1e-9)  # whole 0.1 dB steps
-    assert hot["levels"] == plain["levels"] == unscaled["levels"]
+    assert file_db(hats) == pads["42"]["file_db"] == -17.2 and file_db(tmp_path / "b" / "kick.wav") == 0.0
+    assert "file_db" not in pads["36"] and "file_db" not in unscaled["tracks"]["drums"]["pads"]["42"]
+    off = unscaled["tracks"]["drums"]["pads"]
+    assert pads["42"]["volume_db"] == round(off["42"]["volume_db"] + 17.2, 1)
+    assert pads["36"]["volume_db"] == off["36"]["volume_db"] and hot["levels"] == unscaled["levels"]
+    kick, top = both["tracks"]["drums"]["pads"]["36"], both_off["tracks"]["drums"]["pads"]
+    assert top["36"]["volume_db"] == 0.0 and kick["file_db"] == file_db(tmp_path / "d" / "kick.wav") == -11.0
+    assert kick["volume_db"] == 0.0
+    assert both["levels"]["drums_track_db"] == round(both_off["levels"]["drums_track_db"] + 11.0, 1)
+    for a, b in ((unscaled, hot), (both_off, both)):  # each pad's fader + Volume + file_db as before
+        for k, p in b["tracks"]["drums"]["pads"].items():
+            q = a["tracks"]["drums"]["pads"][k]
+            assert b["levels"]["drums_track_db"] + p["volume_db"] + p.get("file_db", 0.0) == pytest.approx(
+                a["levels"]["drums_track_db"] + q["volume_db"], abs=1e-9)
     renders = [sf.read(tmp_path / k / "r" / render_plan(p, tmp_path / k / "r", n_samples=4 * SR)["drums"])[0]
-               for k, p in (("a", plain), ("b", hot), ("c", unscaled))]
-    for r in renders[1:]:  # the same within the Volumes' 0.1 dB step
-        assert np.max(np.abs(r - renders[0])) < 0.012 * np.max(np.abs(renders[0]))
+               for k, p in zip("abcd", (unscaled, hot, both_off, both))]
+    for a, b in ((0, 1), (2, 3)):
+        assert np.max(np.abs(renders[b] - renders[a])) < 1e-5 * np.max(np.abs(renders[a]))
     copy = pad_copy(pads["42"], tmp_path / "lib")
     x = sf.read(copy, dtype="float32")[0]
     assert copy.name == pad_sample(hats, pads["42"]["file_db"]) and copy.name.endswith(" -17.20dB.wav")
