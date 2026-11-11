@@ -213,8 +213,12 @@ def sample_808(song: str, synth: dict) -> str:
 def file_db(path: str | Path) -> float:
     """The scale (dB, 0 or under) that brings a file's peak, over its
     channels at its own rate (as Simpler plays it), to full scale: 0 for a
-    file at or under it, or one that cannot be read. The 0.01 dB step is
-    rounded down, so the scaled copy peaks at full scale or under it.
+    file at or under it, or one that cannot be read. It is rounded down to
+    the 0.1 dB step of a pad's Volume, so the scaled copy peaks at full
+    scale or up to 0.1 dB under it, and the levels move each Volume and the
+    drum fader by whole steps: the plan sounds as without the scale. At
+    0.01 dB steps, the Volumes' rounding moved 5 [6] plans' sounds by up to
+    0.1 dB either way against the kit (htdemucs [htdemucs_ft]).
 
     A float file can peak over full scale: 1 % of the library's 8,854
     entries peak over +6.4 dBFS, the loudest +19.4, and 7 of the 227 pads
@@ -235,7 +239,7 @@ def file_db(path: str | Path) -> float:
     except Exception:
         return 0.0
     peak = float(np.max(np.abs(x))) if x.size else 0.0
-    return -math.ceil(20 * math.log10(peak) * 100) / 100 + 0.0 if peak > 1.0 else 0.0
+    return -math.ceil(round(20 * math.log10(peak) * 10, 6)) / 10 + 0.0 if peak > 1.0 else 0.0
 
 
 def pad_sample(path: str | Path, gain_db: float = 0.0) -> str:
