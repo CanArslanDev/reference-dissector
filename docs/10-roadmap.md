@@ -139,7 +139,7 @@ Checked on 2026-10-29 by two live checks ([07](07-building-in-live.md#live-behav
 ### 4. The closed loop
 
 1. Record the build.
-2. Measure it against the reference: the suite's scores where a truth exists; on a song, `compare`'s measures against the reference's own spread ([11](11-style-beat-lessons.md)) and a listening report per sound ([06](06-listening-for-a-model.md)).
+2. Measure it against the reference: the suite's scores where a truth exists; on a song, `compare`'s measures against the reference's own spread, with the recording mastered and separated as `check-rebuild` does it ([11](11-style-beat-lessons.md)), and a listening report per sound ([06](06-listening-for-a-model.md)).
 3. Turn the differences into edits (level, transpose and detune, decay, EQ, drive, reverb, another sample) and apply them through ableton-live-mcp.
 4. Rebuild, and repeat while the distance falls.
 
@@ -228,10 +228,11 @@ Songs have no truth to score against: every number here comes from synthetic bea
 
 These are from before replica mode, and still open.
 
-1. **Symmetric comparison.** *Started:* `refdissect compare` measures two stem sets the same way against the reference's own spread ([11](11-style-beat-lessons.md)).
-   - Still to do: master the rebuild like the reference, and per-sound null tests.
-   - Render the rebuilt parts from Live (ableton-live-mcp's `render_and_analyze` / `capture_stems`) and master them like the reference. Then separate them with the same Demucs and compare stems with stems: the separation's artifacts are then on both sides.
-   - **Measured by:** per-sound null tests and descriptor differences before/after.
+1. **Symmetric comparison.** *Done offline:* `refdissect compare` measures two stem sets the same way against the reference's own spread, and `refdissect check-rebuild` makes the rebuild's set from a plan: rendered with `render.py`, mastered like the reference (its loudness, spectral tilt and peak ceiling, measured off the reference mix; optionally the same mp3), separated by the same Demucs model, seed and shifts. It reports descriptor differences before and after, null tests per stem and, against a truth, per sound ([11](11-style-beat-lessons.md#checking-a-rebuild-the-same-way-rebuildcheck-mastering)).
+   - Measured on the dev subset's 11 beats (m5 and m5-ft plans): per sound, the magnitude null ranks the truth's sounds as the suite's F1@20 does (Spearman −0.90 and −0.86), its level as the suite's balance does (0.76, 0.66), the 808's null per beat as its note F1 does (−0.68, −0.56). The waveform null does not (+0.11, +0.17 over played sounds): a hat 0.2 ms off nulls at 0 dB. Separated against separated, the drums' null hardly ranks the beats as their drum F1 does (−0.06, −0.30).
+   - Separating both sides took drums LUFS differences 3.9 → 0.8 dB and the bass's 2.8 → 0.3 dB (htdemucs), but the song's own other stem, played back, comes out of a second separation different (−7.7 dB null), and a perfect rebuild (the truth's premix through the same chain) still differs on 22 of ~78 measures.
+   - Still to do: the same from Live's own recording (ableton-live-mcp's `capture_stems`), which `render.py` matches within 0.04 ms on drum hits but not in Simpler's top-end loss; a drum measure for songs that sees hits, not the kit's sound (the separated drums' null does not).
+   - **Measured by:** per-sound null tests and descriptor differences before/after, against the control's floor.
 2. **A grittier 808.** Extend the voice with asymmetric drive and a weighted upper-harmonic term.
    - **Measured by:** harmonics 6–12 within 3 dB, glide shape.
 3. **Melodic instruments.** The plan's melodic tracks are muted and play a placeholder (Drift). Choose instruments by CLAP (`find_similar_sounds`), or synthesize them.
