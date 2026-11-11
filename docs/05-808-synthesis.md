@@ -22,7 +22,7 @@ Eight numbers, each a knob on Operator/Simpler + Saturator:
 | attack, decay | amp envelope |
 | drive, asym | Saturator drive, DC offset or bias |
 
-The search ranges are fixed (`synth808.BOUNDS`): f_start 25–120 Hz, glide 2–200 ms, attack 0.3–200 ms, decay 0.1–6 s, drive 0.1–8. `synth808.one_shot` renders the voice at any pitch as a sample for Simpler. The one-shot the plan plays is `synth808.tracked_shot`'s: the voice on the template's own periods ([In Live](#in-live)).
+The search ranges are fixed (`synth808.BOUNDS`): f_start 25–120 Hz, glide 2–200 ms, attack 0.3–200 ms, decay 0.1–6 s, drive 0.1–8. `synth808.one_shot` renders the voice at any pitch as a sample for Simpler. The one-shot the plan plays is `synth808.tracked_shot`'s: the voice on the template's own periods ([In Live](#in-live)). `fit-808 --grit` fits a grittier voice with two more numbers, off by default ([A grittier voice](#a-grittier-voice)).
 
 ## The reference
 
@@ -69,8 +69,58 @@ The fitted voice against the best of 865 library 808s, tried at ±12 semitones. 
 - **The synth** has the pitch curve and the envelope; tanh drive at that level makes too few upper harmonics (6–12 off by 12.9 dB, the library 808 by 8.7).
 - **The library 808** has the texture: it is a distorted 808, as the reference is. No single file stands out (margin 0.001).
 - **The picture** (README figure, bottom row) shows the same: rich harmonics up to 400 Hz in the reference and the library sample, fewer in the synth.
-- **Making the synth match** would need either a stronger, asymmetric drive term in the model, or the harmonics up to the 12th weighted more in the fit.
+- **Making the synth match** would need either a stronger, asymmetric drive term in the model, or the harmonics up to the 12th weighted more in the fit. Both are now in a grittier voice, behind `--grit` ([below](#a-grittier-voice)).
 - **The one-shot the plan plays** (since m4, the voice on the template's periods, below) reaches NCC 0.880 against the same reference, with the same harmonics and envelope (6.5, 12.9 and 1.3 dB off) and a log-mel distance of 19.3 dB. The m3 code's one-shot, the voice at the template's pitch, had 0.921. Which of them sounds closer is not checked by ear.
+
+## A grittier voice
+
+`fit-808 --grit` (and `suite run --grit`; feat/808-grit, 2026-11-11). Off by default: it moves the plan's levels and some 808 numbers the wrong way (below).
+
+```
+osc(t) = sin φ + grit · Σ_{n=6..12} (6/n) · sin(nφ)
+d(u)   = drive · (1 + skew · sign(u))
+y(t)   = tanh(d(u) · u) − tanh(d(asym) · asym),   u = amp(t) · osc(t) + asym
+```
+
+Two more numbers, each a knob in Live:
+
+| parameter | what it does | knob |
+|---|---|---|
+| skew (−0.8 to 0.8) | the drive's asymmetry: the positive half driven by drive·(1 + skew), the negative by drive·(1 − skew) | Saturator's waveshaper curve, or two drive stages |
+| grit (0 to 0.1) | the upper-harmonic term: harmonics 6–12 added to the oscillator, the 6th at `grit` of the fundamental, each one after at grit·6/n | Operator's partials |
+
+**Why these two.** On the suite the plain voice misses harmonics 6–12 mostly on seed 2's 808s, by 7–24 dB. Those 808s decay in 0.16–0.77 s, so tanh's harmonics fall with the level over the 0.15–0.6 s the harmonics are read on, while the template's stay at about −40 dB. A term added before the drive keeps its level against the fundamental as the note decays.
+
+**How it is fitted.** On top of the plain fit (`synth808.gritted`): the plain search runs as before, then drive, asym, skew and grit are searched again (differential evolution, the same seed and size) with the pitch, the drop, the phase, the attack and the decay kept. The score is the plain one plus 0.1 × the mean distance of harmonics 6–12 again, so they weigh twice. A first try searched all ten numbers together. It reached the harmonics as well, but on v1-2 the drop moved from 120 Hz with a 17 ms glide to 39 Hz with 74 ms, and the attack from 2.5 to 101 ms. Kept separately, the fit takes 85.5 s a suite beat, against 46 s for the plain fit.
+
+In `tracked_shot`, a gritty voice prefers the attack count whose first crossing the reader reads as it reads the template's. The upper harmonics pass the reader's low-pass in the attack. On the first run of the 808 lane (12 beats), 4 one-shots were read one crossing apart, and bass_low-2's line went 35 cents sharp (Detune −1 → +35). The plain voice keeps the old rule.
+
+**Measured** (gr-1 and gr-1-ft against m5 and m5-ft: fit-808, plan and score over m5's other outputs, all 48 beats, `--render`, no cache):
+- **Harmonics 6–12 within 3 dB of the template's:** on 45 of 48 beats (21 before), median 3.5 → 1.4 dB, mean 5.87 → 1.67; htdemucs_ft 44 of 48 (24), 3.05 → 1.4 dB. The tracked one-shot is the same: 45 (20) and 43 (23). The 3 left on htdemucs are v1orig-6 (5.7 → 6.5 dB), v1orig-2 (3.4, unchanged) and melodic-1 (3.5 → 3.3); on htdemucs_ft bass_low-2 (6.1 → 3.6), producer-1 (2.4 → 3.2), v1orig-4 (3.7 → 3.4) and v1orig-6 (6.4 → 6.8). The fit trades harmonics 6–12 against the rest of its score: on 5 beats they end 0.1–1.0 dB further off.
+- **Also closer:** log-mel distance median 12.3 → 8.9 dB (11.3 → 8.8), envelope 3.1 → 2.8 dB (3.45 → 2.8), waveform NCC 0.849 → 0.857 (0.860 → 0.867). Harmonics 2–5 5.0 → 5.2 dB (5.2 → 4.9).
+- **The glide shape is unchanged.** The fitted drop is the plain fit's by construction (f_start, glide and f_end are kept). The one-shot's pitch curve, as `scenarios.tuning` reads it from 50 to 300 ms, sits a median 0.1 cents from the plain one-shot's (median per beat on both models). The largest differences are 168 cents (132), at 50–70 ms on swing58-2 and swing66-2, where the reader reads the attack's first crossing differently. Against the template's own curve: 0.33 → 0.30 cents (0.23 → 0.27).
+- **What it costs** (plan, means over the 22 scenarios; m5 → gr-1, m5-ft → gr-1-ft):
+
+| | m5 | gr-1 | m5-ft | gr-1-ft |
+|---|---|---|---|---|
+| 808 note F1@50 | 0.9342 | 0.9342 | 0.9345 | **0.9342** |
+| 808 median \|cents\| | 4.42 | 4.41 | 9.63 | 9.39 |
+| 808 settled \|cents\| | 3.66 | **3.77** | 6.89 | **7.14** |
+| 808 onset p90 | 7.979 ms | 7.977 | 7.0393 | **7.0395** |
+| distance from a perfect kit | 1.198 dB | 1.173 | 1.152 | **1.193** |
+| balance, median \|·\| | 0.512 dB | 0.491 | 0.476 | **0.551** |
+| 808 against the kit | −1.87 dB | −1.62 | −2.01 | −1.75 |
+| kick against the kit | −0.84 dB | **−0.89** | −0.04 | **−0.17** |
+| kick balance | −0.81 dB | **−1.19** | +0.44 | +0.12 |
+| snare against the kit | +0.04 dB | **+0.35** | −0.75 | −0.46 |
+
+  Drum F1, tempo, meter and every analysis number are the same, as they should be. Bold marks the worse numbers.
+  - The distance from the kit gets worse in 9 of 22 scenarios (13 on htdemucs_ft): tempo95 0.33 → 1.06 dB, swing66 1.14 → 1.88, tempo160 2.67 → 3.35, leadin 1.13 → 1.53.
+  - The settled pitch moves in 5 scenarios on each model, by 0.5–1.0 cents.
+  - htdemucs_ft's bass_low loses one note (F1@50 0.513 → 0.509).
+- **Why the levels move.** The kick is read under the plan's own 808 ([10](10-roadmap.md#6-the-open-issues)), and the 808's fader follows the one-shot's level. A one-shot with more harmonics leaves a different residual under the kick, and the drum fader, matched by RMS, then lifts or lowers every pad. This is the cost the roadmap expected.
+
+Not judged by ear. Live is not involved: the one-shot is still a sample, and Simpler plays it as before.
 
 ## In Live
 
