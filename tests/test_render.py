@@ -61,18 +61,43 @@ def test_transpose_up_an_octave_halves_the_length(tmp_path):
 
 def test_a_choke_group_cuts_the_open_hat(tmp_path):
     """Open hat at 0 s, closed hat at 0.5 s in one choke group: the open hat
-    stops 5 ms after 0.5 s. Without the group it rings on."""
-    pads = {"46": {"path": wav(tmp_path, "oh.wav", noise(1.0)), "transpose": 0, "role": "hat", "choke_group": 1},
+    fades out along a straight line over 1 ms from 0.5 s, as Live 12.4.6
+    cuts it (render.py had faded it over 5 ms). Without the group it rings
+    on. Velocities at unity ("flat"), so the samples compare as they are."""
+    x = noise(1.0)
+    pads = {"46": {"path": wav(tmp_path, "oh.wav", x), "transpose": 0, "role": "hat", "choke_group": 1},
             "42": {"path": wav(tmp_path, "ch.wav", noise(0.05, 1)), "transpose": 0, "role": "hat",
                    "choke_group": 1}}
-    m = render_plan(plan(pads, [note(46, 0.0), note(42, 1.0)]), tmp_path / "choke")
+    m = render_plan(plan(pads, [note(46, 0.0), note(42, 1.0)]), tmp_path / "choke", "flat")
     open_hat = rendered(tmp_path / "choke", m, "46")
-    assert np.abs(open_hat[: int(0.5 * SR)]).max() > 0.4
-    assert np.abs(open_hat[int(0.5 * SR) + samples(5) + 1:]).max() == 0.0
+    cut, fade = int(0.5 * SR), samples(1)
+    assert np.allclose(open_hat[:cut], x[:cut])
+    assert np.allclose(open_hat[cut:cut + fade], x[cut:cut + fade] * np.linspace(1, 0, fade))
+    assert np.abs(open_hat[cut + fade:]).max() == 0.0
     pads["46"]["choke_group"] = None
     free = rendered(tmp_path / "free", render_plan(plan(pads, [note(46, 0.0), note(42, 1.0)]), tmp_path / "free"),
                     "46")
     assert np.abs(free[int(0.8 * SR):int(0.9 * SR)]).max() > 0.4
+
+
+def test_a_hit_after_its_pads_choked_hit_starts_on_time(tmp_path):
+    """A pad plays one voice, and a hit that comes while the pad's hit
+    before still sounds starts 1 ms late; an open hat the closed hat has
+    choked no longer sounds, so the next open hat, inside the file of the
+    one before, starts on time (where render.py had started it 1 ms late
+    and estimate_from_plan flagged it). The open hat also cuts a sounding
+    closed hat of its group, as Live's choke group plays both ways."""
+    pads = {"46": {"path": wav(tmp_path, "oh.wav", noise(1.0)), "transpose": 0, "role": "hat", "choke_group": 1},
+            "42": {"path": wav(tmp_path, "ch.wav", noise(0.3, 1)), "transpose": 0, "role": "hat",
+                   "choke_group": 1}}
+    hits = [note(46, 0.0), note(42, 0.4), note(46, 1.0)]  # 0, 0.2 and 0.5 s: the open hat's file lasts 1 s
+    est = estimate_from_plan(plan(pads, hits))["drums"]
+    assert [(e["sound"], round(e["t"], 4), e["flags"]) for e in est] == [("46", 0.0, []), ("42", 0.2, []),
+                                                                       ("46", 0.5, [])]
+    closed = rendered(tmp_path / "c", render_plan(plan(pads, hits), tmp_path / "c", "flat"), "42")
+    assert np.abs(closed[int(0.5 * SR) + samples(1) + 1:]).max() == 0.0  # 0.2 + 0.3 s: cut at 0.5 s
+    pads["46"]["choke_group"] = pads["42"]["choke_group"] = None
+    assert [e["flags"] for e in estimate_from_plan(plan(pads, hits))["drums"]] == [[], [], ["retrigger"]]
 
 
 def test_a_pad_hit_again_cuts_its_hit_and_starts_1_ms_late(tmp_path):

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from refdissect.audio import PRE, SR
+from refdissect.audio import PRE, SR, attack_time
 from refdissect.live import make_plan, no_overlaps, recurring, velocities, write_midi
 
 
@@ -458,17 +458,28 @@ def test_an_808_note_live_restarts_late_is_planned_1_ms_early(tmp_path):
     assert {t["name"]: t for t in build_spec(plan)}["808 (synth)"]["settings"]["Ve Release"] == "50.0 ms"
 
 
-def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
+def _fake_live(monkeypatch, library=None, held=None, answers=None, volume_held=None) -> list:
     """ableton-live-mcp faked for build: an empty set, build_tracks building
     every track it is sent, each Simpler holding the User Library copy its
     spec names (held: another file, by pad note or "808"); answers: a tool's
     own answer, answers[name](args, calls), which may raise as the server
-    does. Returns the list of (tool, arguments) calls."""
+    does; a pad's Volume held as its number is sent (volume_held: what a
+    number sent leaves instead), and a choke group as set. Returns the list
+    of (tool, arguments) calls."""
     import json
     import sys
     import types
 
-    calls = []
+    calls, chokes, shown = [], {}, {}
+
+    def volume(path: str) -> dict:
+        """A pad's Volume as Live holds it: the number sent (by its value), or
+        what a display text left; Live's display, two decimals."""
+        spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
+        sent = spec["Drums (library)"]["instrument"]["drum_rack"][re.search(r"drum_pads (\d+)", path).group(1)]
+        value = shown.get(path, sent["settings"]["Volume"])
+        value = (volume_held or (lambda v: v))(value) if path not in shown else value
+        return {"value": value, "$display": f"{value:.2f} dB"}
 
     def holds(path: str) -> str | None:
         spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
@@ -489,8 +500,19 @@ def _fake_live(monkeypatch, library=None, held=None, answers=None) -> list:
             text = json.dumps({"tracks": tracks})
         elif name == "build_tracks":
             text = json.dumps({"tracks": [{"track": t["name"], "problems": []} for t in args["tracks"]]})
+        elif name == "lom_get_object" and args["path"].endswith("parameters Volume"):
+            text = json.dumps(volume(args["path"]))
+        elif name == "lom_get_object" and args["path"].endswith("chains 0"):
+            text = json.dumps({"choke_group": chokes.get(args["path"], 0)})
         elif name == "lom_get_object":
             text = json.dumps({"file_path": holds(args["path"])})
+        elif name == "lom_set_property" and args["property"] == "choke_group":
+            chokes[args["path"]] = args["value"]
+            text = "{}"
+        elif name == "run_batch":
+            for c in args["commands"]:  # param_set_display: Live holds a display step under the text
+                shown[c["params"]["path"]] = float(c["params"]["value"].removesuffix(" dB")) - 0.005
+            text = "{}"
         else:
             text = "{}"
         return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)], is_error=False)
@@ -719,7 +741,7 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
 
 
 def _volume(spec_pad: dict) -> float:
-    return float(spec_pad["settings"]["Volume"].removesuffix(" dB"))
+    return spec_pad["settings"]["Volume"]
 
 
 def test_each_pad_plays_where_the_stems_hold_its_sound(tmp_path):
@@ -734,7 +756,7 @@ def test_each_pad_plays_where_the_stems_hold_its_sound(tmp_path):
     pads = plan["tracks"]["drums"]["pads"]
     assert pads["36"]["volume_db"] == 0.0 and pads["42"]["volume_db"] == pytest.approx(-20.0, abs=0.2)
     rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
-    assert rack["36"]["settings"]["Volume"] == "0.0 dB"
+    assert rack["36"]["settings"]["Volume"] == 0.0
     assert _volume(rack["42"]) == pads["42"]["volume_db"] and max(_volume(p) for p in rack.values()) <= 0.0
 
 
@@ -748,7 +770,7 @@ def test_no_pad_plays_over_0_db(tmp_path):
     m = render_plan(plan, tmp_path / "a", n_samples=4 * SR)
     plan["tracks"]["drums"]["pads"]["36"]["volume_db"] = 3.0
     rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
-    assert rack["36"]["settings"]["Volume"] == "0.0 dB"
+    assert rack["36"]["settings"]["Volume"] == 0.0
     m3 = render_plan(plan, tmp_path / "b", n_samples=4 * SR)
     kick, kick3 = (sf.read(tmp_path / d / x["tracks"]["36"], dtype="float32")[0] for d, x in (("a", m), ("b", m3)))
     assert np.array_equal(kick, kick3)
@@ -1012,3 +1034,103 @@ def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
     assert sent["Drums (library)"]["clips"][0]["length"] == 12.0
     assert sent["REF drums"]["audio_clips"][0]["file"] == str(work / "excerpt-2-4" / "drums.wav")
     assert ("set_song_properties", {"tempo": 120.0, "loop": False, "time_signature": "4/4"}) in calls
+
+
+def _hats(tmp_path, choked: bool):
+    """An open hat (0.6 s of decaying noise) at 0.5 s of each of 4 seconds,
+    a closed hat (30 ms) at 0 s and 0.6 s, both "hat" matches, the open
+    hat's file an open hat in the library; the drum stem holds the open hat
+    cut where the closed hat after it starts (choked) or ringing on."""
+    rng = np.random.default_rng(7)
+    n = int(0.6 * SR)
+    open_hat = (rng.uniform(-0.5, 0.5, n) * np.exp(-np.arange(n) / (0.3 * SR))).astype(np.float32)
+    closed = rng.uniform(-0.5, 0.5, int(0.03 * SR)).astype(np.float32)
+    sf.write(tmp_path / "oh.wav", open_hat, SR, subtype="FLOAT")
+    sf.write(tmp_path / "ch.wav", closed, SR, subtype="FLOAT")
+    drums = np.zeros(4 * SR, np.float32)
+    for k in range(4):
+        for t in (k, k + 0.6):
+            drums[int(t * SR):int(t * SR) + len(closed)] += closed
+        a = int((k + 0.5) * SR)
+        x = (open_hat[:int(0.1 * SR)] if choked else open_hat)[:len(drums) - a]
+        drums[a:a + len(x)] += x
+    for stem, y in (("drums", drums), ("bass", np.zeros(4 * SR)), ("other", np.zeros(4 * SR))):
+        sf.write(tmp_path / f"{stem}.wav", y, SR, subtype="FLOAT")
+    a_open, a_closed = attack_time(open_hat, "hat"), attack_time(closed, "hat")
+    events = {"sound_1": [{"t": t, "t_attack": t + a_closed, "gain": 1.0} for k in range(4) for t in (k, k + 0.6)],
+              "sound_2": [{"t": k + 0.5, "t_attack": k + 0.5 + a_open, "gain": 1.0} for k in range(4)]}
+    analysis = {"grid": {"bpm": 120.0}, "source": {"duration_s": 4.0}, "events": events, "notes_808": [],
+                "templates": {k: {"detected_hits": 20, "clean": 1.0} for k in events}}
+    matches = {"sound_1": {"role": "hat", "verdict": "same sample", "same_as": None,
+                           "top": [{"path": str(tmp_path / "ch.wav"), "ncc": 0.97, "semitones": 0.0, "role": "hat"}]},
+               "sound_2": {"role": "hat", "verdict": "same sample", "same_as": None,
+                           "top": [{"path": str(tmp_path / "oh.wav"), "ncc": 0.97, "semitones": 0.0,
+                                    "role": "open_hat"}]}}
+    return analysis, matches
+
+
+def test_hats_the_stem_shows_choked_go_in_one_choke_group(tmp_path, monkeypatch):
+    """Where the drum stem holds each open hat cut by the closed hat after
+    it, the plan puts the hat pads in one choke group (choked_hats), the
+    build spec carries it and the build sets it on the pads' chains and
+    reads it back, so Live cuts the open hat where render_plan does; where
+    the stem lets the open hat ring, no group. Off by default (chokes):
+    make_plan without it plans none."""
+    import asyncio
+
+    from refdissect.live import CHOKE_GROUP, build, build_spec
+    from refdissect.render import render_plan
+    analysis, matches = _hats(tmp_path, choked=True)
+    plan = make_plan(analysis, matches, None, tmp_path, min_hits=1, chokes=True)
+    pads = plan["tracks"]["drums"]["pads"]
+    assert {p["choke_group"] for p in pads.values()} == {CHOKE_GROUP} and len(pads) == 2
+    assert plan["tracks"]["drums"]["chokes"] == {"hits": 4, "cut": 4, "choked": True}
+    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert {p["choke_group"] for p in rack.values()} == {CHOKE_GROUP}
+    opened = next(k for k, p in pads.items() if p["path"].endswith("oh.wav"))
+    m = render_plan(plan, tmp_path / "r", n_samples=4 * SR)
+    x = sf.read(tmp_path / "r" / m["tracks"][opened], dtype="float32")[0]
+    assert np.abs(x[int(0.602 * SR):int(0.98 * SR)]).max() == 0.0  # cut at the closed hat (0.6 s, 1 ms fade)
+    calls = _fake_live(monkeypatch, tmp_path / "lib")
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+    for note in pads:
+        assert ("lom_set_property", {"path": f"live_set tracks 0 devices 0 drum_pads {note} chains 0",
+                                     "property": "choke_group", "value": CHOKE_GROUP}) in calls
+    assert all(c["same"] for c in report["choke_groups"].values()) and len(report["choke_groups"]) == 2
+    assert "choke_group" not in str(make_plan(analysis, matches, None, tmp_path, min_hits=1)["tracks"]
+                                    ["drums"]["pads"])
+    analysis, matches = _hats(tmp_path, choked=False)
+    plan = make_plan(analysis, matches, None, tmp_path, min_hits=1, chokes=True)
+    assert plan["tracks"]["drums"]["chokes"] == {"hits": 4, "cut": 0, "choked": False}
+    assert not any(p.get("choke_group") for p in plan["tracks"]["drums"]["pads"].values())
+    assert all("choke_group" not in p for p in {t["name"]: t for t in build_spec(plan)}["Drums (library)"]
+               ["instrument"]["drum_rack"].values())
+
+
+def test_a_pads_volume_goes_as_a_number_and_is_read_back(tmp_path, monkeypatch):
+    """Sent as display text ("-20.0 dB"), Live 12.4.6 held a pad's Volume a
+    display step under it (0.05 dB from -10 dB down): the build sends it as
+    a number and reads back each pad's value. A pad whose value is not the
+    plan's (a Live that took the number otherwise) gets the text, Live's
+    way before, and is reported."""
+    import asyncio
+
+    from refdissect.live import build, build_spec
+    plan = _kit(tmp_path)
+    pads = plan["tracks"]["drums"]["pads"]
+    rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
+    assert {k: p["settings"]["Volume"] for k, p in rack.items()} == {k: p["volume_db"] for k, p in pads.items()}
+    assert all(isinstance(p["settings"]["Volume"], float) for p in rack.values())
+    _fake_live(monkeypatch, tmp_path / "lib")
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+    assert report["volumes_held"] == 2 and "volumes_not_held" not in report
+    calls = _fake_live(monkeypatch, tmp_path / "lib", volume_held=lambda v: v - 0.3)
+    logged = []
+    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
+    assert report["volumes_held"] == 0 and sorted(report["volumes_not_held"]) == sorted(pads)
+    hat = report["volumes_not_held"]["42"]
+    assert hat["text"] and hat["then"]["value"] == pytest.approx(pads["42"]["volume_db"] - 0.005)
+    sent = [c["params"] for n, a in calls if n == "run_batch" for c in a["commands"]]
+    assert {"path": "live_set tracks 0 devices 0 drum_pads 42 chains 0 devices 0 parameters Volume",
+            "value": f"{pads['42']['volume_db']:.1f} dB"} in sent
+    assert any(line.startswith("pad 42 holds Volume") and line.endswith("sent as text") for line in logged)
