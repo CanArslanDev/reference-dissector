@@ -617,7 +617,10 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, attack_s: f
             tries.append(dict(r, onset=at, apart=apart))
     if not tries:
         return None
-    pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
+    # the grittier voice's upper harmonics pass the reader's low-pass in the attack: there a count the reader
+    # takes as it takes the template (one crossing before the first period) comes first (gr-i1: 4 of the 808
+    # lane's 12 one-shots read apart with the plain rule, bass_low-2's line then 35 cents sharp)
+    pick = min(tries, key=lambda r: (p.gritty and r["j"] != 1, r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
     if pick["apart"] > 4 * ATTACK_TOL:
         # the rounds moved the crossings the attack ends on: its start found again on them, and the rounds
         # run again from there; kept where the crossings stay in place and the attack lands closer
