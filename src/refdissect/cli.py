@@ -26,6 +26,8 @@
 
   comparing and choosing (docs/11):
     refdissect compare ref/stems rebuild/stems --out compare.json   (both separated by the same model)
+    refdissect check-rebuild work/song --reference song.mp3     (the plan rendered, mastered like the song and
+                                         separated by the same model: descriptors before/after, null tests)
     refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
     refdissect space stems/other.wav --spans 40-56 100-116           (width, and the band-pass between spans)
     refdissect mix-gains stems/ --targets targets.json               (fader moves without re-recording)
@@ -248,6 +250,45 @@ def _compare(a):
     print(f"{len(beyond)} of {len(rows)} measures differ by more than the reference's own halves do")
 
 
+def _check_rebuild(a):
+    from .rebuildcheck import check_rebuild, separation_settings
+    from .separate import separate
+    work = Path(a.work)
+    plan_path = Path(a.plan) if a.plan else work / "plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    ref_stems = Path(a.reference_stems) if a.reference_stems else Path(plan["stems"]["drums"]["path"]).parent
+    mix = Path(a.reference) if a.reference else None
+    truth, truth_dir = None, None
+    if a.truth:
+        from .evaluate import load_events
+        truth, truth_dir = load_events(a.truth), Path(a.truth).parent
+        mix = mix or truth_dir / truth["audio"]["mix"]
+    if mix is None:
+        raise SystemExit("--reference (the song's mix) is needed without --truth")
+    given = {k: v for k, v in {"model": a.model, "seed": a.seed, "shifts": a.shifts}.items() if v is not None}
+    sep = {"model": DEFAULT_MODEL, **separation_settings(ref_stems), **given}
+    out = Path(a.out) if a.out else work / "check"
+
+    def run_demucs(audio, stems):
+        separate(audio, stems, sep["model"], seed=sep.get("seed", 0), shifts=sep.get("shifts", 1))
+
+    r = check_rebuild(plan, plan_path.parent, mix, ref_stems, out, None if a.no_separate else run_demucs,
+                      a.mp3, a.kick_gap, truth, truth_dir, a.rebuild_stems)
+    m = r["master"]
+    print(f"master: {m['before']['lufs']} -> {m['after']['lufs']} LUFS (reference {m['reference']['lufs']}), "
+          f"tilt {m.get('tilt_applied_db_per_octave', 0):+.2f} dB/oct, limiter at most {m.get('max_reduction_db')} dB")
+    for part in ("before", "after"):
+        if part in r:
+            s = r[part]["summary"]
+            nulls = ", ".join(f"{k} {v['spectral_null_db']}" for k, v in r[part]["stem_nulls"].items())
+            print(f"{part}: {s['beyond_spread']} of {s['measures']} measures beyond the reference's spread; "
+                  f"stem nulls (magnitude, dB): {nulls}")
+    for k, v in (r.get("sounds") or {}).get("sounds", {}).items():
+        print(f"  {k:10s} null {v['null_db']} dB, magnitude {v['spectral_null_db']} dB, "
+              f"balance {v['balance_db']} dB  ({', '.join(v['pads']) or 'no pad'})")
+    print(f"-> {out / 'check.json'}")
+
+
 def _round(a):
     from .rounds import listening_round
     span_r = _spans([a.reference_span])[0] if a.reference_span else None
@@ -421,6 +462,25 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--kick-gap", type=float, default=0.2,
                    help="seconds between kicks at least (raise it when other attacks bleed into the drums)")
     s.set_defaults(run=_compare)
+
+    s = sub.add_parser("check-rebuild", help="render a plan, master it like the reference, separate it the same "
+                                             "way; descriptors before/after and null tests")
+    s.add_argument("work", help="the work folder (its plan.json; the plan's relative paths start there)")
+    s.add_argument("--plan", default=None, help="another plan file (default: WORK/plan.json)")
+    s.add_argument("--reference", default=None, help="the reference mix (default with --truth: the truth's mix)")
+    s.add_argument("--reference-stems", default=None,
+                   help="the reference's stems (default: the folder of the plan's drum stem)")
+    s.add_argument("--truth", default=None, help="a suite beat's events.json: null tests per sound as well")
+    s.add_argument("--out", default=None, help="default: WORK/check (keep it local: it holds the reference's stems)")
+    s.add_argument("--mp3", type=int, default=None, metavar="KBPS",
+                   help="an mp3 round trip after mastering, as the reference had (the suite's: 256)")
+    s.add_argument("--model", default=None, help="Demucs model (default: the reference stems' separation.json)")
+    s.add_argument("--seed", type=int, default=None)
+    s.add_argument("--shifts", type=int, default=None)
+    s.add_argument("--rebuild-stems", default=None, help="stems of the master made already (no separation)")
+    s.add_argument("--no-separate", action="store_true", help="no Demucs: descriptors before and nulls only")
+    s.add_argument("--kick-gap", type=float, default=0.2)
+    s.set_defaults(run=_check_rebuild)
 
     s = sub.add_parser("listening-round", help="numbered reference-beep-candidate files to choose by ear")
     s.add_argument("reference")
