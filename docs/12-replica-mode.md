@@ -204,7 +204,7 @@ Each step is described in [01](01-pipeline.md), the 808 voice in [05](05-808-syn
 - **cache/** (by default for the `analyze` and `fit-808` commands, in the work folder; in each suite beat only with `--cache`): the 808 reader's results with their log lines, and the 808 fits, each under a hash of what decides it (`cache.py`: the inputs' samples, the settings, numpy's, scipy's and soxr's versions, every `.py` file of the package as the process loaded it).
 - **plan.json**:
   - `tempo`, `beats_per_bar` and `beat_unit` (the grid's meter), `length_beats` (whole bars of it), `stems`, `locators`, `levels`;
-  - `tracks.drums`: `pads` (note → template, file, `transpose`, `detune_cents`, `volume_db`, `vol_vel`, NCC, verdict, role) and `notes`;
+  - `tracks.drums`: `pads` (note → template, file, `transpose`, `detune_cents`, `volume_db`, `vol_vel`, NCC, verdict, role, and `file_db` for a file that peaks over full scale: the scale its copy plays at) and `notes`;
   - `tracks.808`: `notes`, `sample` (the one-shot's name in the User Library, with its digest), `sample_path`, `transpose`, `detune_cents`, `vol_vel`, `tuning_cents`, `heard_cents`, `slides` (every glide), and with Glide on `voices`, `glide_mode` and `glide_time_ms`;
   - `tracks.melodic`: a muted track per tonal stem.
 - **events.json** (schema `refdissect.events/1`) holds a truth or an estimate in one form, so one scorer reads both.

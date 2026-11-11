@@ -724,13 +724,13 @@ def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: flo
 
 def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
     """The hat's file at +17.15 dBFS (the library's loudest entry peaks at
-    +19.4): the plan gives its pad file_db -17.15, the scale that brings it
+    +19.4): the plan gives its pad file_db -17.2, the scale that brings it
     to full scale, and plays it that much lower: the levels give its pad
     the Volume of a file at full scale (0.9 dB under the hat's at 0.9) and
     the hat plays as loud as from that file, 20 dB under the kick, as the
     stems hold it. The build copies the file scaled so, a float WAV at full
     scale named with the gain. Without scale_files the levels made up for
-    the file under a Volume 17.15 dB lower, the same sound with peaks of
+    the file under a Volume 17.2 dB lower, the same sound with peaks of
     +17.15 dBFS ahead of it."""
     from refdissect.live import build_spec, file_db, pad_copy, pad_sample
     from refdissect.render import render_plan
@@ -740,12 +740,12 @@ def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
     hot = _kit(tmp_path / "b", hat_file_gain=8.0)  # the hat's file at 0.9 x 8: +17.15 dBFS
     unscaled = _kit(tmp_path / "c", hat_file_gain=8.0, scale_files=False)
     pads, hats = hot["tracks"]["drums"]["pads"], tmp_path / "b" / "hat.wav"
-    assert file_db(hats) == pads["42"]["file_db"] == -17.15 and file_db(tmp_path / "a" / "hat.wav") == 0.0
+    assert file_db(hats) == pads["42"]["file_db"] == -17.2 and file_db(tmp_path / "a" / "hat.wav") == 0.0
     assert "file_db" not in pads["36"] and "file_db" not in plain["tracks"]["drums"]["pads"]["42"]
     assert "file_db" not in unscaled["tracks"]["drums"]["pads"]["42"]
     volumes = [p["tracks"]["drums"]["pads"]["42"]["volume_db"] for p in (plain, hot, unscaled)]
     assert volumes[1] == pytest.approx(volumes[0] - 0.9, abs=0.1)
-    assert volumes[2] == pytest.approx(volumes[1] - 17.15, abs=0.1)
+    assert volumes[2] == pytest.approx(volumes[1] - 17.2, abs=1e-9)  # whole 0.1 dB steps
     assert hot["levels"] == plain["levels"] == unscaled["levels"]
     renders = [sf.read(tmp_path / k / "r" / render_plan(p, tmp_path / k / "r", n_samples=4 * SR)["drums"])[0]
                for k, p in (("a", plain), ("b", hot), ("c", unscaled))]
@@ -753,8 +753,8 @@ def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
         assert np.max(np.abs(r - renders[0])) < 0.012 * np.max(np.abs(renders[0]))
     copy = pad_copy(pads["42"], tmp_path / "lib")
     x = sf.read(copy, dtype="float32")[0]
-    assert copy.name == pad_sample(hats, pads["42"]["file_db"]) and copy.name.endswith(" -17.15dB.wav")
-    assert 0.998 < np.max(np.abs(x)) <= 1.0 and sf.info(copy).subtype == "FLOAT"
+    assert copy.name == pad_sample(hats, pads["42"]["file_db"]) and copy.name.endswith(" -17.20dB.wav")
+    assert 0.988 < np.max(np.abs(x)) <= 1.0 and sf.info(copy).subtype == "FLOAT"
     assert pad_copy(pads["36"], tmp_path / "lib").name == pad_sample(tmp_path / "b" / "kick.wav")
     rack = {t["name"]: t for t in build_spec(hot)}["Drums (library)"]["instrument"]["drum_rack"]
     assert rack["42"]["sample"] == copy.name and rack["36"]["sample"] == pad_sample(tmp_path / "b" / "kick.wav")
