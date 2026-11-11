@@ -95,6 +95,9 @@ def test_a_worker_serves_what_a_call_prints(worker, call, monkeypatch):
     w = _load(worker)
     assert w.MARK == served.MARK
     monkeypatch.setattr(w, call, lambda argv, model: {"argv": argv} if argv != ["x"] else 1 / 0)
+    released = []
+    if hasattr(w, "release"):  # beat_this's gives torch's GPU cache back after every call
+        monkeypatch.setattr(w, "release", lambda: released.append(1))
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"argv": ["a"]}\n{"argv": ["x"]}\n{"argv": ["b", "c"]}\n'))
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
@@ -104,6 +107,7 @@ def test_a_worker_serves_what_a_call_prints(worker, call, monkeypatch):
     answers = [json.loads(line[len(served.MARK):]) for line in lines]
     assert answers == [{"result": {"argv": ["a"]}}, {"error": "ZeroDivisionError: division by zero"},
                        {"result": {"argv": ["b", "c"]}}]
+    assert released == ([1, 1, 1] if call == "track" else [])
 
 
 @pytest.mark.skipif(os.environ.get("REFDISSECT_SLOW") != "1",
@@ -134,3 +138,21 @@ def test_the_real_workers_kept_answer_as_a_call_does(kit, tmp_path):
                 assert set(a) == set(b) and all(a[n].tobytes() == b[n].tobytes() for n in a)
     finally:
         served.keep(False)
+
+
+def test_a_suite_run_in_one_job_keeps_the_workers_while_it_runs(monkeypatch, tmp_path):
+    """jobs=1: the beats run with served.keep(keep_workers), and the setting
+    is put back after (the workers stopped); a pool's jobs get it through
+    their initializer."""
+    from refdissect import suite
+    seen = []
+    monkeypatch.setattr(suite, "beat_dirs", lambda *a: [tmp_path / "a", tmp_path / "b"])
+    monkeypatch.setattr(suite, "separate_beats", lambda *a: 0)
+    monkeypatch.setattr(suite, "_ready_stores", lambda *a: None)
+    monkeypatch.setattr(suite, "_run_job", lambda args: seen.append(served.kept()) or {})
+    monkeypatch.setattr(suite, "_done", lambda record, log: None)
+    monkeypatch.setattr(suite, "aggregate", lambda root, tag: {})
+    for keep in (True, False):
+        seen.clear()
+        suite.run(tmp_path, "lib.npz", tag="t", jobs=1, keep_workers=keep, log=lambda m: None)
+        assert seen == [keep, keep] and not served.kept()

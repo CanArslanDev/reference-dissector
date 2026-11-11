@@ -515,7 +515,7 @@ def _ready_stores(library, library_808, steps) -> None:
 def run(root: str | Path, library: str | Path, library_808: str | Path | None = None, tag: str = "base",
         model: str = DEFAULT_MODEL, scenarios=None, jobs: int = 3, render: bool = False,
         options: dict | None = None, resume: bool = False, steps=None, reuse: str | None = None,
-        cache: bool = False, subset: str | None = None, log=print) -> dict:
+        cache: bool = False, subset: str | None = None, keep_workers: bool = True, log=print) -> dict:
     """Separate what is not separated yet (one Demucs process), then
     run_beat over the beats, `jobs` at a time in their own processes (each
     maps the library's arrays, written beside it once before they start,
@@ -525,7 +525,8 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     runs again. steps, reuse and cache: run_beat's, steps and reuse checked
     for every beat before any runs (check_steps, reuse_problems). subset:
     the beats of SUBSETS[subset] only (beat_dirs; those root lacks are
-    named in the log)."""
+    named in the log). keep_workers: each job keeps beat_this's and Basic
+    Pitch's workers running between its beats (served.py)."""
     steps = check_steps(steps, reuse)
     if stale := stale_steps(steps, reuse):
         log(f"warning: {', '.join(stale)} reused from runs/{reuse} although "
@@ -551,12 +552,12 @@ def run(root: str | Path, library: str | Path, library_808: str | Path | None = 
     # each job keeps beat_this's and Basic Pitch's workers running from one beat to the next (served.py)
     if jobs > 1 and len(args) > 1:
         with ProcessPoolExecutor(min(jobs, len(args)), mp_context=multiprocessing.get_context("spawn"),
-                                 initializer=served.keep, initargs=(True,)) as pool:
+                                 initializer=served.keep, initargs=(keep_workers,)) as pool:
             for future in as_completed([pool.submit(_run_job, a) for a in args]):
                 _done(future.result(), log)
     else:
         kept = served.kept()
-        served.keep(True)
+        served.keep(keep_workers)
         try:
             for a in args:
                 _done(_run_job(a), log)

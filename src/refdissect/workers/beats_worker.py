@@ -89,7 +89,23 @@ def serve(models: dict) -> int:
             answer = {"error": f"{type(e).__name__}: {e}"}
         sys.stdout.write(MARK + json.dumps(answer) + "\n")
         sys.stdout.flush()
+        release()
     return 0
+
+
+def release() -> None:
+    """What torch keeps on the GPU between calls given back: a kept worker
+    held 1.71 GB of physical footprint after a call on v1-1's stems, 0.66 GB
+    after this (the same beats on the next call)."""
+    import gc
+
+    import torch
+
+    gc.collect()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def main() -> int:
