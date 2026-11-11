@@ -149,7 +149,7 @@ Checked on 2026-10-29 by two live checks ([07](07-building-in-live.md#live-behav
 
 Now (m3a, 2 jobs, Apple M4 with Live open): 112.6 s a beat after separation, 45 minutes for the 48 beats (m2g: 141.9 s and 56 minutes, on a quiet machine). At one job on 4 beats (2026-11-04): analyze 31.4 s, match 26.5 s, fit-808 46.1 s, 107.7 s a beat.
 - analyze takes 34.4 s (38.7 at m2g, 5.7 in m1). The 808 reader fits each start and transposition once: 21 % of its fits on v1-1 had repeated one already.
-- match takes 28.0 s (49.1 at m2g, 24.4 in m1): a band's template windows are searched together, and a transposed candidate is resampled from the start its window holds. The silent-file check adds 4.7 % with an index built before its floor.
+- match takes 28.0 s (49.1 at m2g, 24.4 in m1): a band's template windows are searched together, and a transposed candidate is resampled from the start its window holds. The silent-file check adds 4.7 % with an index built before its floor; an index built again (2026-11-11) gives the same matches without it.
 - fit-808 takes 46.2 s (50.9 at m2g): its band filter, window and time axis are made once. In m1 it was 56.2 of 90.2 s a beat (62 %); now it is 41 %.
 
 Done, every output the same:
@@ -206,8 +206,8 @@ Measured on m5 where m5 moved a number (the plan's levels, meter and 808 timing)
 | False hits rose on single beats (not investigated) | v1-2 6 → 9, drum_pitch-2 4 → 5; htdemucs_ft producer-2 4 → 9, rare-1 2 → 3 | – |
 | htdemucs_ft's extra sounds: tempo160-2's snare-band template, once scored as the kick, now counts as an extra | 1.977 a beat at analysis level (1.955) | – |
 | Pads that play a file of another role (not judged by ear): dynamics-2's kick (a snare file), melodic-1's and tempo160-1's snares (hat files); htdemucs_ft rolls-1's hat template matched as a kick | rolls-1 plan kick F1@20 0.466 (htdemucs_ft) | – |
-| Library files over full scale play unscaled | 1 % of the entries peak over +6.4 dBFS, the loudest +19.4 | – |
-| An index built before the −60 dBFS floor reads each listed entry's file once | 4.7 % of match over 6 beats | `index-library` again |
+| Library files over full scale: a pad plays a copy scaled to full scale, made up in its Volume and the drum fader (`file_db`, [12](12-replica-mode.md#what-each-stage-measured)); not built in Live yet | 7 of 227 pads of the m5 plans (8 of 229) play one, +1.3 to +7.3 dBFS; with the scale every score of the 48 beats equals m5's (fs-3) | the scaled copies loaded and read back in a live build |
+| An index built before the −60 dBFS floor reads each listed entry's file once | 4.7 % of match over 6 beats; a new index (`fs1-library.npz`) holds the same entries less the silent one and gives the same matches on all 96 beat runs, match 29.59 → 29.30 s a beat on htdemucs_ft (not a controlled timing) | the user replaces `library.npz` with it, or not |
 | Chords follow the sections, which follow the drum hits | full-2 majmin 0.999 → 0.961 in an intermediate run, with the same notes | ≥ 0.85 |
 | bass_low-2's htdemucs_ft template is read from its tail, 57 cents flat; `settle()` refuses its reading and only lowers a template | written note right 0.130 on that beat; bass_low 0.559 on htdemucs_ft, its plan note F1@50 0.513 (bass_low-1 0.981) | ≥ 0.95 |
 | 808 candidates inside a silence are dropped after the segmentation, not before it; an attack under 9 dB with no kick stays in the note before (once on PIRAMIT, 6.5 dB) | no truth on PIRAMIT; one suite note moved onto a rise 19 ms after the truth's onset (bass_low-2, htdemucs_ft) | – |
