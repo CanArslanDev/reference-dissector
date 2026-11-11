@@ -215,10 +215,8 @@ def file_db(path: str | Path) -> float:
     channels at its own rate (as Simpler plays it), to full scale: 0 for a
     file at or under it, or one that cannot be read. It is rounded down to
     the 0.1 dB step of a pad's Volume, so the scaled copy peaks at full
-    scale or up to 0.1 dB under it, and the levels move each Volume and the
-    drum fader by whole steps: the plan sounds as without the scale. At
-    0.01 dB steps, the Volumes' rounding moved 5 [6] plans' sounds by up to
-    0.1 dB either way against the kit (htdemucs [htdemucs_ft]).
+    scale or up to 0.1 dB under it (scale_files_to_full moves Volumes and
+    the drum fader by whole steps).
 
     A float file can peak over full scale: 1 % of the library's 8,854
     entries peak over +6.4 dBFS, the loudest +19.4, and 7 of the 227 pads
@@ -230,8 +228,9 @@ def file_db(path: str | Path) -> float:
     the Drums track within -123 dB in the live check), but every Simpler,
     pad and the Drum Rack ahead of the fader then carried peaks over full
     scale. The plan gives such a pad file_db, plays its file that much
-    lower everywhere (render.pad_hits), and the build copies it scaled
-    (pad_copy)."""
+    lower everywhere (render.pad_hits) and makes it up in the pad's Volume
+    and the drum fader (scale_files_to_full), and the build copies it
+    scaled (pad_copy)."""
     try:
         import soundfile as sf
 
@@ -498,8 +497,9 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     match's layers (matches.json) are not played yet. With scale_files, a
     pad whose file peaks over full scale gets file_db, the scale that
     brings it to full scale: it plays that much lower in every estimate
-    and render of the plan, the levels set its Volume and the drum fader
-    on it, and the build plays a copy scaled so (pad_copy). With melodic
+    and render of the plan, its Volume and the drum fader make it up
+    (scale_files_to_full), and the build plays a copy scaled so
+    (pad_copy). With melodic
     (melodic.json), each tonal stem's notes get a MIDI track. The plan
     carries the grid's meter (beats_per_bar, beat_unit), which the build
     sets as Live's time signature, and lasts whole bars of it."""
@@ -592,13 +592,41 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
         plan["tracks"].setdefault("melodic", {})[stem] = {"instrument": MELODIC_INSTRUMENT,
                                                           "cents": info.get("tuning_cents", 0),
                                                           "notes": no_overlaps(notes, None)}
-    if scale_files:  # a file over full scale plays scaled to it, and the levels read it so (file_db)
-        for pad in pads.values():
-            gain = file_db(pad["path"])
-            if gain < 0:
-                pad["file_db"] = gain
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
+    if scale_files:
+        scale_files_to_full(plan)
     return plan
+
+
+def scale_files_to_full(plan: dict) -> None:
+    """Gives each pad whose file peaks over full scale its file_db, and
+    takes it back in the pad's Volume, as far as 0 dB; what is left the
+    drum fader takes, every pad's Volume as much lower, as far as FADER_DB.
+    Each pad's fader + Volume + file_db stays what estimate_levels set, so
+    the plan sounds as before: the levels read the file at its own level.
+    file_db is in the Volumes' 0.1 dB steps (file_db()), so are the moves.
+    Read with the scaled file instead, the Volumes' rounding moved the
+    sounds of 5 [6] plans by up to 0.1 dB either way (htdemucs
+    [htdemucs_ft]), with 0.01 dB steps and with 0.1 dB steps alike, as a
+    pad that becomes the loudest moves every other pad's rounding."""
+    pads, levels = plan["tracks"]["drums"]["pads"], plan["levels"]
+    gains = {k: file_db(p["path"]) for k, p in pads.items()}
+    hot = {k: g for k, g in gains.items() if g < 0}
+    if not hot:
+        return
+    fader = levels.get("drums_track_db")
+    raised = {k: pad_settings(pads[k])["volume_db"] - g for k, g in hot.items()}
+    over = round(max(0.0, *raised.values()), 1)
+    if fader is not None:  # the fader takes what a pad's Volume cannot, as far as its top
+        over = round(max(0.0, min(over, FADER_DB - fader)), 1)
+        levels["drums_track_db"] = round(fader + over, 1) + 0.0
+    else:
+        over = 0.0
+    for k, pad in pads.items():
+        volume = round((raised[k] if k in hot else pad_settings(pad)["volume_db"]) - over, 1)
+        pad["volume_db"] = min(0.0, volume) + 0.0
+        if k in hot:
+            pad["file_db"] = round(hot[k] + max(0.0, volume), 1) + 0.0
 
 
 def _backbone(info: dict, m: dict | None, clean: float, least: int) -> bool:
