@@ -244,7 +244,8 @@ These are from before replica mode, and still open.
    - Run the packaged `live-build` against Live in CI-like checks.
 6. **Style beats** ([11](11-style-beat-lessons.md)).
    - Done: `listening-round` (numbered A/B files and a manifest), `compare`, `space` and `mix-gains` commands.
-   - Still to do: generating the 8-bar candidates themselves from a plan.
+   - Done: `candidates` draws 8-bar candidates from a plan's statistics, seeded and reproducible. The statistics are tempo, meter, swing, each drum role's placement, hat rolls, the 808's placement, register, pitches and slides, and the chords. It renders each candidate with `render.py` (the chords on a plain pad), ducks the 808 and the chords along the reference's kick curve, measures each one with `compare` and puts them into one listening round ([11](11-style-beat-lessons.md#5-sketches-drawn-from-the-plan-candidates)).
+   - Still to do: a listener's picks on real candidates. Melodies and riffs: a candidate has drums, 808 and chords only. Statistics from several songs (item 4). Candidates separated by Demucs by default, so they compare symmetrically.
    - **Measured by:** the listener's picks, and ducking and balance against the reference.
 
 **Not planned:** publishing transcriptions or audio of songs, for the reasons in [09](09-data-and-copyright.md).

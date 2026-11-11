@@ -38,6 +38,31 @@ Sounds were chosen by ear in two-part files (song → beep → candidate, [`list
 3. Let the listener pick.
 4. Only then build and mix the whole beat.
 
+### 5. Sketches drawn from the plan ([`candidates`](../src/refdissect/candidates.py))
+
+Step 2 is now a command: `refdissect candidates WORK --out DIR --n 6 --seed 1 --section A`. It reads the plan's statistics and draws new 8-bar beats from them. It never copies the plan's notes. The statistics come from the bars of the named section (every bar without `--section`):
+
+| What | Read from | Drawn as |
+|---|---|---|
+| tempo, meter | the plan | the same |
+| swing | `analysis.json`'s `grid.swing`, else the plan's off-16th hats with the rolls left out | each 16th moved as the swing puts it |
+| kick, snare, hat, perc placement | the share of bars with a hit on each 16th, per role; how much a bar differs from the one two bars before | a two-bar motif drawn from those shares, each later bar the one two bars before with each 16th drawn again at that rate |
+| hat rolls | the share of beats holding hats closer than 3/4 of a 16th; their division (16th triplets, 32nds, 32nd triplets, 64ths) and length | a roll in a beat at that rate, replacing the hats it covers, its velocity rising |
+| 808 placement | how often it starts on a kick's 16th, and on each 16th without one | the same chances, as a two-bar motif |
+| 808 pitch | how often it repeats its pitch or plays the chord's root, its pitches, its register (5th to 95th percentile) | in that order of chances, in the register |
+| 808 length, slides | the median share of the gap to the next note it holds; the share of notes the note before is held over (a slide), their intervals, the Glide Time | the same; a candidate with a slide gets one voice with Glide, as `plan` does |
+| chords | `melodic.json`'s chord segments: the labels that cover 80 % of the time (at most 6), the changes between them, the length of one in half bars | a progression on half bars, each chord following the reference's changes from the one before, voiced from where the melodic stems play |
+| velocities, pads | each role's velocities and pads, the pad played most on each 16th | drawn from those |
+
+- **Not a copy.** Each bar's kick and snare 16ths, 808 (16th, pitch) and chord changes are compared with every reference bar of the section (F1). A candidate whose mean over its bars is over `--max-copy` (0.75) is drawn again, up to 50 times; `candidates.json` keeps the score, how many were drawn and which one was kept. A statistic at 0 or 1 still plays where the reference does: in the tests a snare on every bar's 3 always comes back. No candidate is a bar-for-bar copy.
+- **Reproducible.** Candidate k is drawn by a generator seeded with (seed, k): the same seed gives the same notes, plans, MIDI files and audio samples, and candidate 3 is the same whether 3 or 10 are drawn. `candidates.json` carries a digest of each candidate's notes. Two runs give float WAVs whose samples are equal, though their bytes are not: libsndfile writes a timestamp into each one's PEAK chunk.
+- **Rendered as Live would play the plan.** Each candidate is a plan with the reference plan's pads, 808 one-shot and settings, and faders. `render.py` plays its drums and 808, and `live-build` can build it. The chords play on a plain additive pad, as a sketch of the harmony, not as a choice of sound.
+- **Ducked like the reference.** Under each kick the 808 and the chords follow the reference's own kick curve (`kick_curve` re the layer's median, at its points from 20 ms to 400 ms), cut at 0 dB and at −24 dB: a stand-in for a Compressor keyed from the kick. Without reference stems, a duck of 12 dB (808) and 10 dB (chords) over 200 and 270 ms. The chords sit as far over or under the drums (LUFS) as the reference's other stem does over its drums.
+- **Measured, then heard.** Each candidate's stems (drums, the 808 as bass, the chords as other) are set to the reference's drum loudness and measured against the same bars of the reference (`compare`): how far the 808's and the chords' kick curves are from the reference's, each drum role's level re the loudest against the reference's, and how many measures differ by more than the reference's own halves do. The mixes go into one listening round, numbered as the candidates are.
+- **Clean against separated.** The candidates' stems are clean and the reference's are Demucs stems, so the levels and the octave balance include the separation's own differences. `--separate MODEL` puts each candidate's mix through Demucs first. A difference within the reference's spread is no difference. A curve distance is not a verdict: it ranks candidates against each other.
+
+On PIRAMIT's plan (section A, 54 bars, seed 1; the reference stems by htdemucs, the candidates clean) the four candidates drew a copy score of 0.50 to 0.72: one was drawn 4 times to get under 0.75. The 808 does not duck in PIRAMIT (its curve rises at the kick, where it starts), so the fit left it alone. The chords' curve falls 7–8 dB at 20–50 ms and is back by 100 ms. The 808's curve came 1.5–8.8 dB from the reference's and the chords' 0.9–1.5 dB. The kick sat 4.3–5.6 dB further under the snare than in the reference, the hat within 1.3 dB. 45 to 51 of 78 measures differed by more than the reference's own halves do, as expected of clean stems against separated ones. Two runs gave the same digests, scores and samples. Nobody has listened to these candidates yet.
+
 ## What it cost
 
 About 7.7 hours of active work (228 minutes of tool time, the rest writing and deciding):
@@ -55,6 +80,7 @@ About 7.7 hours of active work (228 minutes of tool time, the rest writing and d
 - `refdissect listening-round REF CANDIDATES... --question ...`: one numbered A/B file per candidate and a manifest.
 - `refdissect space STEM --spans a-b c-d`: width per octave, and the band-pass from the first span to the second.
 - `refdissect mix-gains STEMS --targets targets.json`: the gain per recorded stem that reaches a target level.
+- `refdissect candidates WORK --out DIR --n N --seed S`: N new 8-bar beats drawn from the plan's statistics (section 5), each as a plan, MIDI files and a render, measured against the reference's same bars and put into one listening round. Options: `--section`, `--bars`, `--reference-bar`, `--stems`, `--question`, `--max-copy`, `--no-duck`, `--no-compare`, `--kick-gap`, `--separate MODEL`, `--lufs`.
 
 ## Smaller findings
 
