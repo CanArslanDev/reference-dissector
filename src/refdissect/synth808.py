@@ -37,8 +37,16 @@ from .cache import keep, kept, key
 from .describe import envelope_db, harmonics, mel_distance
 from .xcorr import ncc
 
-NAMES = ("f_end_hz", "f_start_hz", "glide_ms", "decay_s", "attack_ms", "drive", "asym", "phase")
+NAMES = ("f_end_hz", "f_start_hz", "glide_ms", "decay_s", "attack_ms", "drive", "asym", "phase", "skew", "grit")
 BOUNDS = [(25, 60), (25, 120), (2, 200), (0.1, 6), (0.3, 200), (0.1, 8), (-0.6, 0.6), (0, 2 * np.pi)]
+# the grittier voice (fit's grit=True): the drive's asymmetry (the positive half driven by drive * (1 + skew),
+# the negative by drive * (1 - skew)) and the weight of the upper-harmonic term (harmonics UPPER, the 6th at
+# grit of the fundamental, each further one at grit * 6 / n: Operator's partials), and how much more the
+# fit's loss weighs harmonics 6-12 (UPPER_WEIGHT, on top of the 0.1 every harmonic has). Fitted on top of the
+# plain fit, searching again only GRIT_FREE: the pitch and the drop stay the plain fit's
+GRIT_BOUNDS = [(-0.8, 0.8), (0.0, 0.1)]
+UPPER, UPPER_WEIGHT = range(6, 13), 0.1
+GRIT_FREE = ("drive", "asym", "skew", "grit")
 # tracked_shot(): the template's periods are followed until its drop has settled, SETTLED_CENTS or less from
 # its settled pitch for SETTLED_S (the suite's 808s stay within 5 cents of it from 0.14-0.98 s on:
 # scenarios.pitch_curve), then the pitch eases there over EASE_S; the crossings the reader takes off the voice
@@ -81,13 +89,21 @@ class Params:
     drive: float
     asym: float
     phase: float
+    skew: float = 0.0
+    grit: float = 0.0
 
     @classmethod
     def of(cls, v) -> Params:
         return cls(*[float(x) for x in v])
 
+    @property
+    def gritty(self) -> bool:
+        return bool(self.skew or self.grit)
+
     def to_dict(self) -> dict:
-        return {k: round(v, 4) for k, v in asdict(self).items()}
+        """Rounded; skew and grit only where the voice has them (the plain voice's eight numbers as before)."""
+        d = {k: round(v, 4) for k, v in asdict(self).items()}
+        return d if self.gritty else {k: v for k, v in d.items() if k not in ("skew", "grit")}
 
     @property
     def glide_semitones(self) -> float:
@@ -111,7 +127,16 @@ def _drop_hz(p: Params, t: np.ndarray, ratio: float = 1.0) -> np.ndarray:
 def _sound(p: Params, t: np.ndarray, phi: np.ndarray) -> np.ndarray:
     """The voice at phase phi (radians) at times t: its envelope and drive, peak-normalized."""
     amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)
-    y = np.tanh(p.drive * (amp * np.sin(phi) + p.asym)) - np.tanh(p.drive * p.asym)
+    if not p.gritty:
+        y = np.tanh(p.drive * (amp * np.sin(phi) + p.asym)) - np.tanh(p.drive * p.asym)
+    else:  # the upper harmonics added to the oscillator, then the drive, asymmetric
+        osc = np.sin(phi)
+        if p.grit:
+            osc = osc + p.grit * sum(6 / n * np.sin(n * phi) for n in UPPER)
+
+        def shape(u):
+            return np.tanh(p.drive * u * (1 + p.skew * np.sign(u)))
+        y = shape(amp * osc + p.asym) - shape(p.asym)
     return (y / (np.max(np.abs(y)) or 1.0)).astype(np.float32)
 
 
@@ -145,27 +170,18 @@ def compare(reference: np.ndarray, x: np.ndarray, f1: float) -> dict:
 
 def _read_back(path: Path | None, log) -> tuple[Params, dict] | None:
     """The fit kept at path (cache.kept), with info cached naming its file."""
-    found = kept(path, log)
+    found = kept(path, log, "synth808")
     try:
         return Params.of(found["x"]), {"loss": found["loss"], "seconds": found["seconds"], "cached": path.name}
     except (KeyError, TypeError, ValueError):  # nothing kept (None), or not a fit
         return None
 
 
-def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int = 1,
-        maxiter: int = 150, popsize: int = 20, cache: str | Path | None = None, log=print) -> tuple[Params, dict]:
-    """Params whose voice matches the reference template (an averaged 808
-    note laid out with its onset PRE in), and how long the search took.
-    With a cache folder, a fit is kept there under the template's samples,
-    f1, the settings, the versions and the package's code (cache.key) and
-    read back by a fit that has the same ones (info's cached names the file;
-    seconds is the search's). The search is seeded, so it would find the
-    same Params again: 50-140 s a suite beat, and a few ms read back. log
-    gets what the cache says (code changed on disk: not read back or kept)."""
-    settings = {"f1": float(f1), "waveform_only": waveform_only, "seed": seed, "maxiter": maxiter, "popsize": popsize}
-    path = Path(cache) / f"fit-808-{key((reference,), settings)}.json" if cache else None
-    if found := _read_back(path, log):
-        return found
+def _scorer(reference: np.ndarray, f1: float):
+    """loss(p, upper) for candidates against the reference: 1 - their
+    waveform match in the 808 band, plus 0.1 x their harmonics' and their
+    envelope's mean distance from it (in 20 dB), plus `upper` x that of
+    harmonics 6-12 alone; None for a waveform match alone."""
     target = band(reference, "808")
     h_ref = harmonics(reference, f1)
     e_ref = np.maximum(envelope_db(reference, 25), -40)
@@ -179,17 +195,45 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
         v = np.r_[corr[: lag + 1], corr[-lag:]] / (t_norm * (float(np.linalg.norm(c)) or 1.0))
         return float(np.max(np.abs(v)))
 
-    def loss(v):
-        p = Params.of(v)
+    def loss(p: Params, upper: float | None = 0.0) -> float:
         if p.f_start_hz < p.f_end_hz:
             return 2.0
         y = laid_out(p, n)
         wave = 1 - wave_match(band(y, "808"))
-        if waveform_only:
+        if upper is None:
             return wave
-        harm = np.mean(np.abs(harmonics(y, p.f_end_hz) - h_ref)) / 20
+        off = np.abs(harmonics(y, p.f_end_hz) - h_ref)
+        harm = np.mean(off) / 20
         env = np.mean(np.abs(np.maximum(envelope_db(y, 25), -40) - e_ref)) / 20
+        if upper:
+            return wave + 0.1 * harm + upper * np.mean(off[4:]) / 20 + 0.1 * env
         return wave + 0.1 * harm + 0.1 * env
+    return loss
+
+
+def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int = 1,
+        maxiter: int = 150, popsize: int = 20, cache: str | Path | None = None, log=print,
+        grit: bool = False) -> tuple[Params, dict]:
+    """Params whose voice matches the reference template (an averaged 808
+    note laid out with its onset PRE in), and how long the search took.
+    With a cache folder, a fit is kept there under the template's samples,
+    f1, the settings, the versions and the code synth808 reaches (cache.key) and
+    read back by a fit that has the same ones (info's cached names the file;
+    seconds is the search's). The search is seeded, so it would find the
+    same Params again: 50-140 s a suite beat, and a few ms read back. log
+    gets what the cache says (code changed on disk: not read back or kept).
+    grit: the grittier voice, fitted on top of this one (gritted)."""
+    if grit:
+        return gritted(reference, f1, *fit(reference, f1, waveform_only, seed, maxiter, popsize, cache, log),
+                       seed=seed, maxiter=maxiter, popsize=popsize, cache=cache, log=log)
+    settings = {"f1": float(f1), "waveform_only": waveform_only, "seed": seed, "maxiter": maxiter, "popsize": popsize}
+    path = Path(cache) / f"fit-808-{key((reference,), settings, 'synth808')}.json" if cache else None
+    if found := _read_back(path, log):
+        return found
+    score = _scorer(reference, f1)
+
+    def loss(v):
+        return score(Params.of(v), None if waveform_only else 0.0)
 
     bounds = list(BOUNDS)
     bounds[0] = (f1 * 0.9, f1 * 1.1)
@@ -198,8 +242,41 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
                                polish=True)
     p = Params.of(r.x)
     info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
-    keep(path, {"x": [float(v) for v in r.x], **info}, log)
+    keep(path, {"x": [float(v) for v in r.x], **info}, log, "synth808")
     return p, info
+
+
+def gritted(reference: np.ndarray, f1: float, plain: Params, plain_info: dict, seed: int = 1, maxiter: int = 150,
+            popsize: int = 20, cache: str | Path | None = None, log=print) -> tuple[Params, dict]:
+    """The grittier voice on top of a plain fit: its GRIT_FREE numbers
+    searched again with skew and grit (GRIT_BOUNDS), every other one (the
+    pitch, the drop, the phase) kept, scored with harmonics 6-12 weighed
+    UPPER_WEIGHT more; kept and read back as fit's are. info: the search's
+    loss, both searches' seconds, and the plain fit's loss and Params."""
+    names = list(NAMES)
+    free = [names.index(k) for k in GRIT_FREE]
+    base = np.array([getattr(plain, k) for k in names])
+    settings = {"f1": float(f1), "seed": seed, "maxiter": maxiter, "popsize": popsize, "grit": True,
+                "plain": [float(v) for v in base]}
+    path = Path(cache) / f"fit-808-grit-{key((reference,), settings, 'synth808')}.json" if cache else None
+    if found := _read_back(path, log):
+        return found[0], {**found[1], "plain": plain.to_dict(), "plain_loss": plain_info["loss"]}
+    score = _scorer(reference, f1)
+
+    def loss(v):
+        x = base.copy()
+        x[free] = v
+        return score(Params.of(x), UPPER_WEIGHT)
+
+    bounds = [(BOUNDS + GRIT_BOUNDS)[i] for i in free]
+    started = time.time()
+    r = differential_evolution(loss, bounds, popsize=popsize, maxiter=maxiter, tol=1e-7, seed=seed,
+                               polish=True)
+    x = base.copy()
+    x[free] = r.x
+    info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started + plain_info["seconds"], 1)}
+    keep(path, {"x": [float(v) for v in x], **info}, log, "synth808")
+    return Params.of(x), {**info, "plain": plain.to_dict(), "plain_loss": plain_info["loss"]}
 
 
 def _finished(y: np.ndarray, fade_ms: float) -> np.ndarray:
@@ -540,7 +617,10 @@ def tracked_shot(p: Params, pitch_hz: float, curve, curve_hz: float, attack_s: f
             tries.append(dict(r, onset=at, apart=apart))
     if not tries:
         return None
-    pick = min(tries, key=lambda r: (r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
+    # the grittier voice's upper harmonics pass the reader's low-pass in the attack: there a count the reader
+    # takes as it takes the template (one crossing before the first period) comes first (gr-i1: 4 of the 808
+    # lane's 12 one-shots read apart with the plain rule, bass_low-2's line then 35 cents sharp)
+    pick = min(tries, key=lambda r: (p.gritty and r["j"] != 1, r["worst_s"] > STEADY_S, abs(np.log(r["scale"]))))
     if pick["apart"] > 4 * ATTACK_TOL:
         # the rounds moved the crossings the attack ends on: its start found again on them, and the rounds
         # run again from there; kept where the crossings stay in place and the attack lands closer

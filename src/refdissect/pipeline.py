@@ -70,15 +70,15 @@ def _load(path: Path):
 def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print,
                 slides: bool = False) -> tuple[dict, str | None]:
     """bass808.transcribe, kept in cache under what decides it (cache.key:
-    the two stems' samples, the versions, the package's code and slides
+    the two stems' samples, the versions, the code bass808 reaches and slides
     where on) and read back, its log lines too, when those are the same:
     the reader is 20-40 s of a suite beat's analyze. Returns its result
     (through JSON, read back or not: what bass808.json holds) and the file
     it was read back from, or None when it ran. slides: legato notes
     (bass808.glides)."""
     opts = {"slides": True} if slides else {}
-    path = Path(cache) / f"808-{key((bass, drums), opts)}.json" if cache else None
-    found = kept(path, log)
+    path = Path(cache) / f"808-{key((bass, drums), opts, 'bass808')}.json" if cache else None
+    found = kept(path, log, "bass808")
     if found and isinstance(found.get("bass808"), dict) and isinstance(found.get("log"), list):
         log(f"808 reader: read back from {path}; its log when it ran:")
         for line in found["log"]:
@@ -90,7 +90,7 @@ def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=pri
         lines.append(str(msg))
         log(msg)
     out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both, **opts), default=float))
-    keep(path, {"bass808": out, "log": lines}, log)
+    keep(path, {"bass808": out, "log": lines}, log, "bass808")
     return out, None
 
 
@@ -607,7 +607,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
             log=print, cache: str | Path | bool = False, **fit_options) -> dict:
     """Fit the 808 on bass808's template notes (drums + bass, so the attack
     is in) and write a one-shot at the 808's settled pitch. fit_options go
-    to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
+    to synth808.fit (maxiter, popsize: a smaller search for tests; grit:
+    the grittier voice, asymmetric drive and an upper-harmonic term). cache:
     the folder synth808.fit keeps its fits in (True: work/cache, as the
     command has it; by default none), so a run whose template, settings and
     code are unchanged reads its fit back (synth808.json's fit.cached names
@@ -754,14 +755,15 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     return out
 
 
-def plan(work: str | Path, stems_dir: str | Path | None = None, log=print) -> dict:
+def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = False) -> dict:
     from .live import make_plan, write_midi
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
     synth = _load(work / "synth808.json") if (work / "synth808.json").is_file() else None
     melodic_notes = _load(work / "melodic.json") if (work / "melodic.json").is_file() else None
-    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes)
+    p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes,
+                  chokes=chokes)
     _save(work / "plan.json", p)
     written = write_midi(p, work / "midi")
     tonal = ", ".join(f"{len(t['notes'])} {s}" for s, t in p["tracks"].get("melodic", {}).items())

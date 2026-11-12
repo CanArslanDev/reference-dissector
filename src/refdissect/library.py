@@ -23,6 +23,7 @@ fitted to a template together.
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -33,6 +34,7 @@ import time
 import warnings
 import zipfile
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
@@ -356,6 +358,19 @@ def copies(a: np.ndarray, b: np.ndarray, pitched: bool, threshold: float = 0.95)
     return not pitched or abs(ncc(band(a, "snare"), band(b, "snare"), samples(2))[0]) > threshold
 
 
+# match()'s work on THREADS threads (REFDISSECT_THREADS; 1: one at a time): _sweep's inverse
+# transforms, ROWS rows of a block at a time, and the transposed candidates of _match and
+# match_fine, an entry at a time. numpy's FFT and soxr let other threads run while they work, and
+# each row, entry and transposition is computed as one at a time computes it: the same numbers.
+THREADS = max(1, int(os.environ.get("REFDISSECT_THREADS", "4")))
+ROWS = 64
+
+
+@functools.cache
+def _threads() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(THREADS, thread_name_prefix="refdissect-ncc")
+
+
 class _Ncc:
     """|NCC| of a template against blocks of candidates of its length, both
     filtered to the role's band (band()'s response applied to the spectra),
@@ -555,8 +570,16 @@ class Library:
         for a in range(0, len(chosen), chunk):
             C = scorers[0].spectra(self.block(chosen[a:a + chunk], len(ts[0]), base))
             e, conj = energy(C, scorers[0].n), np.conj(C)
-            for (scores, lags), score in zip(out, scorers):
-                scores[a:a + chunk], lags[a:a + chunk] = score.scores(conj, e)
+            # each template's inverse transform of the block, in ROWS-row parts on THREADS threads: a
+            # row's numbers do not depend on the rows transformed with it, so they are the same
+            parts = [(k, slice(r, r + ROWS)) for k in range(len(scorers)) for r in range(0, len(C), ROWS)]
+
+            def part(job, conj=conj, e=e):
+                k, rows = job
+                return scorers[k].scores(conj[rows], e[rows])
+            for (k, rows), (s, lag) in zip(parts, _threads().map(part, parts)):
+                at = slice(a + rows.start, a + rows.start + len(s))
+                out[k][0][at], out[k][1][at] = s, lag
         return out
 
     def prepare(self, windows: dict[str, list[np.ndarray]], max_lag_ms: float = 30, chunk: int = 256) -> None:
@@ -615,15 +638,22 @@ class Library:
         else:
             tries = {}
         by_i = {r["i"]: r for r in results}
-        for i, shifts in tries.items():
-            r = by_i[i]
+
+        def tried(item):  # an entry's transpositions, each laid out and scored as before, on its own
+            i, shifts = item
+            out = []
             for s in shifts:
-                C = np.fft.rfft(self.candidate(r["i"], n_t, base + s), n) * H
+                C = np.fft.rfft(self.candidate(i, n_t, base + s), n) * H
                 v = np.fft.irfft(T * np.conj(C), n)[lags] / np.sqrt(t_energy * float(energy(C, n)) + 1e-20)
                 k = int(np.argmax(np.abs(v)))
-                if abs(v[k]) > r["ncc"]:
-                    r.update(ncc=float(abs(v[k])), lag=k if k <= max_lag else k - len(lags),
-                             semitones=float(base + s))
+                out.append((s, float(abs(v[k])), k))
+            return out
+        # the entries on THREADS threads, their scores taken in the order a loop over them had
+        for (i, _), scored in zip(tries.items(), _threads().map(tried, tries.items())):
+            r = by_i[i]
+            for s, v, k in scored:
+                if v > r["ncc"]:
+                    r.update(ncc=v, lag=k if k <= max_lag else k - len(lags), semitones=float(base + s))
         results.sort(key=lambda r: -r["ncc"])
         return results
 
@@ -689,9 +719,13 @@ class Library:
                     tried.setdefault(r["i"], at[r["i"]])
         score = _Ncc(t, role, max_lag_ms)
         offsets = np.arange(-cents, cents + step / 2, step)
-        for i, j in tried.items():
+
+        def near(item):  # an entry at its speckle transposition and the steps around it
+            i, j = item
             semis = (cents_off[j] + offsets) / 100
-            v, lag = score(np.stack([self.candidate(i, len(t), float(s)) for s in semis]))
+            return semis, *score(np.stack([self.candidate(i, len(t), float(s)) for s in semis]))
+        # the entries on THREADS threads, taken in the order a loop over them had
+        for (i, j), (semis, v, lag) in zip(tried.items(), _threads().map(near, tried.items())):
             k = int(np.argmax(v))
             if i not in found or v[k] > found[i]["ncc"]:
                 found[i] = {"i": i, "ncc": float(v[k]), "lag": int(lag[k]), "semitones": round(float(semis[k]), 4)}

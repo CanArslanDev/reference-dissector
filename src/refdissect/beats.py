@@ -25,6 +25,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import served
+
 WORKER = Path(__file__).with_name("workers") / "beats_worker.py"
 VERSION = "1.1.0"
 PACKAGES = (f"beat-this=={VERSION}", "soundfile>=0.12")
@@ -45,8 +47,13 @@ def command(audio: list[str | Path], device: str | None = None, checkpoint: str 
 
 def track(audio: list[str | Path], device: str | None = None, checkpoint: str = "final0") -> dict:
     """Beats and downbeats (s) of the files summed to mono:
-    {beats, downbeats, name, version, checkpoint, device, torch, duration_s, seconds}."""
-    done = subprocess.run(command(audio, device, checkpoint), capture_output=True, text=True)
+    {beats, downbeats, name, version, checkpoint, device, torch, duration_s, seconds}.
+    With served.keep on, from the worker kept running (served.py)."""
+    cmd = command(audio, device, checkpoint)
+    if served.kept():
+        at = cmd.index(str(WORKER)) + 1
+        return served.ask(cmd[:at], {"argv": cmd[at:]})
+    done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
         raise RuntimeError(f"beat_this failed:\n{done.stderr[-2000:]}")
     return json.loads(done.stdout.strip().splitlines()[-1])
