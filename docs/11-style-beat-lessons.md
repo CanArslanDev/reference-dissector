@@ -55,6 +55,66 @@ About 7.7 hours of active work (228 minutes of tool time, the rest writing and d
 - `refdissect listening-round REF CANDIDATES... --question ...`: one numbered A/B file per candidate and a manifest.
 - `refdissect space STEM --spans a-b c-d`: width per octave, and the band-pass from the first span to the second.
 - `refdissect mix-gains STEMS --targets targets.json`: the gain per recorded stem that reaches a target level.
+- `refdissect check-rebuild WORK --reference MIX`: the plan checked against the song the same way on both sides (below).
+
+## Checking a rebuild the same way ([`rebuildcheck`](../src/refdissect/rebuildcheck.py), [`mastering`](../src/refdissect/mastering.py))
+
+`compare` needs a rebuild's stems made the way the song's were. `check-rebuild` makes them from a plan, without Live:
+1. **Render.** `render.py` plays the plan (the pads and the 808 as Live plays them, at their faders), with the song's own stems the plan does not mute at their fader, as Live plays them beside it.
+2. **Master like the reference.** Three things are measured on the reference mix and nothing else: integrated loudness (LUFS), spectral tilt (the slope of its third-octave levels, 50 Hz–16 kHz, in dB per octave) and its sample peak. The rebuild is tilted to that slope, then gained into a look-ahead limiter at that peak until it reaches that loudness. Only the tilt, not a full EQ match: a match would copy the song's balance between sounds onto the rebuild and hide what is wrong with it. `--mp3 256` adds the mp3 round trip the suite's mixes had.
+3. **Separate with the same Demucs**: the model, seed and shifts are read from the reference stems' `separation.json`.
+4. **Measure.** Every `compare` measure, "before" (the rebuild's clean tracks at the master's gain against the song's separated stems: the comparison without this command) and "after" (separated against separated), each against the song's own spread. Null tests per stem, before and after: the residual in dB after the least-squares gain, on the waveform and on STFT magnitudes (46 ms frames). With `--truth` (a suite beat's `events.json`), null tests per sound as well: each truth drum sound against the pads assigned to it, and the truth 808 against the 808 track.
+
+```bash
+uv run refdissect check-rebuild work/song/refdissect --reference song.mp3 --mp3 256    # -> work/song/refdissect/check/
+uv run refdissect check-rebuild "$S/v1-1/runs/m5" --truth "$S/v1-1/events.json" --mp3 256 --out check-v1-1
+```
+
+`check/` holds the song's stems played back and re-separated: keep it local ([09](09-data-and-copyright.md)).
+
+### What it measured on the suite (tag sy-check, 2026-11-11)
+
+The 11 beats of the dev subset, m5's plans on htdemucs and m5-ft's on htdemucs_ft, against each beat's truth. As a control, the truth's own premix (the beat before its clipper) went through the same mastering, mp3 and separation: a perfect rebuild.
+
+**Mastering.** Every master reached the reference's loudness within 0.04 LU after the mp3. The tilts applied were −1.02 to +0.94 dB/octave (the references: −3.43 on average); the limiter took up to 1.84 dB (htdemucs_ft plans: 2.27; the control 4.86, the clipper's density).
+
+**Per sound, against the truth.** The magnitude null agrees with the suite's per-sound scores; the waveform null does not.
+
+| | htdemucs (m5) | htdemucs_ft (m5-ft) |
+|---|---|---|
+| Spearman ρ, magnitude null vs per-sound F1@20, 61 truth sounds (a sound no pad plays nulls at 0 dB: 14 and 10) | −0.90 | −0.86 |
+| the same, the sounds a pad plays | −0.77 (47) | −0.75 (51) |
+| Spearman ρ, waveform null vs F1@20, the sounds a pad plays | +0.11 | +0.17 |
+| median null of a played sound: waveform / magnitude (dB) | −0.06 / −10.7 | −0.16 / −12.4 |
+| Spearman ρ, per-sound \|balance\| (magnitude gain) vs the suite's \|balance_db\| | 0.76 | 0.66 |
+| Spearman ρ, 808 magnitude null vs the plan's 808 note F1@50, per beat | −0.68 | −0.56 |
+
+- The waveform null is too strict for drums: a hat 0.2 ms off (the plan's median hat error) is out of phase above a few kHz, so hats and snares null at about 0 dB whatever their F1. Only kicks null on the waveform (−0.02 to −15.3 dB).
+
+**Per stem, separated against separated.** Measures beyond the song's own spread, over the ~78 measures both sides have:
+
+| | before | after | control (a perfect rebuild) |
+|---|---|---|---|
+| htdemucs | 38.1 | 44.0 | 22.4 |
+| htdemucs_ft | 38.2 | 41.4 | 23.5 |
+
+- Separating both sides takes most of the gap in the drums and the 808 out of the measures. Median |difference| on htdemucs: drums LUFS 3.9 → 0.8 dB (control 0.3), bass LUFS 2.8 → 0.3, the bass's octave balance 5.9 → 3.05 dB (0.6), the hat's level re the kick 4.7 → 1.8 dB (0.8), the snare's 2.3 → 1.1 (0.3). On htdemucs_ft the bass moves alike (1.2 → 0.2 dB, 4.4 → 2.3), the drum roles do not (hat 1.3 → 1.7, snare 0.4 → 1.7).
+- More measures are flagged after than before because the song's own other stem, which the plan plays back, comes out of a second separation different: it nulls at −7.7 dB against the song's other stem (htdemucs_ft −11.2), the control's at −13.1 (−14.8). That stem holds the separation's bleed (drums and 808), which a second pass puts elsewhere. Before, it was the song's stem itself and could not differ.
+- A perfect rebuild still differs on 22–23 measures: the limiter is not the scenarios' clipper, and a synthetic loop's halves are so alike that its spread is near 0 on many measures. Read "after" against that floor, not against 0.
+- The separated drums null at −4.8 dB on average (htdemucs_ft −6.9; control −14.5 and −15.8), the separated bass at −10.8 dB (−12.1; control −25.8 and −25.5).
+
+**Agreement with the suite, per beat** (11 beats, Spearman ρ against the plan's scores):
+
+| | htdemucs | htdemucs_ft |
+|---|---|---|
+| separated drums, magnitude null, vs drums F1@20 | −0.06 | −0.30 |
+| the truth's drum group against the rendered drums (clean), vs drums F1@20 | −0.47 | −0.84 |
+| separated bass, magnitude null, vs 808 note F1@50 | −0.53 | −0.54 |
+| measures beyond the spread after, vs strict F1@20 | −0.35 | −0.30 |
+
+- Against a truth, per sound, the new measure ranks sounds as the suite does. Separated against separated, the only form a song allows, it ranks beats on the 808 about as the suite does, but hardly on the drums: tempo160-1 (drums F1 0.73) and layers-1 (0.47) null at −0.3 dB, full-1 (0.35) at −7.2 dB. A drum stem's null mixes what was played wrong with the kit's sound, its level and what the separation does to both; the suite's F1 sees only the hits.
+
+**Existing outputs.** `compare` gives the same rows and spread as before on full-1's htdemucs and htdemucs_ft stems (the same data; its rows come out in a different order from run to run, as before), and `render_plan` writes the same samples and `render.json` for full-1's m5 plan.
 
 ## Smaller findings
 
