@@ -31,6 +31,8 @@
     refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
     refdissect space stems/other.wav --spans 40-56 100-116           (width, and the band-pass between spans)
     refdissect mix-gains stems/ --targets targets.json               (fader moves without re-recording)
+    refdissect candidates work/song --out sketches --n 6 --seed 1 --section A
+                                         (8-bar beats drawn from the plan's statistics, rendered, in one round)
 """
 
 from __future__ import annotations
@@ -350,6 +352,13 @@ def _gains(a):
     print(json.dumps(gains_to_targets(stems, levels, SR, spans, a.measure), indent=1))
 
 
+def _candidates(a):
+    from .candidates import run
+    run(a.work, a.out, a.n, a.seed, a.bars, a.section, a.reference_bar, a.stems, a.question, a.max_copy,
+        not a.no_duck, not a.no_compare, a.kick_gap, a.separate, a.lufs, log=_say)
+    print(f"{a.n} candidates -> {a.out} (candidates.json; round/manifest.md says what each number is)")
+
+
 def _suite_parser(sub) -> None:
     suite = sub.add_parser("suite", help="calibration v2: scenario beats with their truth, run and scored per tag")
     ss = suite.add_subparsers(dest="suite_command", required=True)
@@ -533,6 +542,29 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--targets", required=True, help='JSON: {"Kick": -12, "Pad": {"target_db": -20, "spans": ["8-24"]}}')
     s.add_argument("--measure", choices=["lufs", "rms"], default="lufs")
     s.set_defaults(run=_gains)
+
+    s = sub.add_parser("candidates", help="new 8-bar beats drawn from a plan's statistics, rendered, compared and "
+                                          "put in one listening round")
+    s.add_argument("work", help="the work folder: plan.json (analysis.json's swing, melodic.json's chords)")
+    s.add_argument("--out", required=True)
+    s.add_argument("--n", type=int, default=4, help="how many candidates")
+    s.add_argument("--seed", type=int, default=1, help="the same seed, the same candidates (each from (seed, number))")
+    s.add_argument("--bars", type=int, default=8)
+    s.add_argument("--section", default=None, help="statistics from this section's bars (its locators: A, B, ...)")
+    s.add_argument("--reference-bar", type=int, default=None,
+                   help="the reference's bars to hear and compare start here (from 0; default: the section's first)")
+    s.add_argument("--stems", default=None, help="the reference's stems (default: the plan's)")
+    s.add_argument("--question", default=None)
+    s.add_argument("--max-copy", type=float, default=0.75,
+                   help="draw again while a candidate's bars match the reference's this much (mean F1; docs/09)")
+    s.add_argument("--no-duck", action="store_true", help="no ducking of the 808 and the chords under the kicks")
+    s.add_argument("--no-compare", action="store_true", help="skip measuring the candidates against the reference")
+    s.add_argument("--kick-gap", type=float, default=0.2, help="as compare's")
+    s.add_argument("--separate", default=None, metavar="MODEL",
+                   help="separate each candidate's mix with this Demucs model before comparing (default: its clean "
+                        "stems)")
+    s.add_argument("--lufs", type=float, default=-14.0, help="the round's loudness")
+    s.set_defaults(run=_candidates)
 
     a = p.parse_args(argv)
     a.run(a)
