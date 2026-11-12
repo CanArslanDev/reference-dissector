@@ -14,7 +14,9 @@ check:
   (audio.transpose: pitch and length change together);
 - gain = track fader (build_spec's min(6, levels[...]) dB) x 10^(volume_db/20)
   [volume_db 0, a pad's at most 0 (pad_settings); build_spec sets a
-  Simpler's Volume to it] x the velocity's level ["live": velocity_db, Live
+  Simpler's Volume to it] x 10^(file_db/20) [a pad's file_db 0; under 0
+  for a file that peaks over full scale, whose copy the build scales by it,
+  live.file_db] x the velocity's level ["live": velocity_db, Live
   12.4.6's law, at the pad's or the 808's vol_vel, which build_spec sets as
   Simpler's "Vol < Vel" (VOL_VEL); "linear", v/127, was the assumption
   before the law was measured];
@@ -67,7 +69,7 @@ from .audio import SR, read, samples, transpose
 # pad loaded through the browser, ableton-live-mcp 2.2.0's only way to load a pad
 VOL_VEL = 0.35
 PAD = {"start_s": 0.0, "detune_cents": 0.0, "playback_mode": "one_shot", "choke_group": None, "volume_db": 0.0,
-       "velocity_curve": None, "vol_vel": VOL_VEL}
+       "velocity_curve": None, "vol_vel": VOL_VEL, "file_db": 0.0}
 TRACK_808 = {"cents": 0.0, "detune_cents": 0.0, "start_s": 0.0, "volume_db": 0.0, "playback_mode": "classic",
              "velocity_curve": None, "vol_vel": VOL_VEL}
 # A note that comes while a voice of its pitch still sounds (a pad's hit before it) fades that voice out along a
@@ -319,8 +321,8 @@ def pad_hits(plan: dict, shots: dict, settings: dict, velocity_curve="live", fad
     """The plan's drum hits on the pads with a sample in shots (each as
     played, settings[key] its pad_settings), as Live plays them: per hit its
     pad, t (s) and a (sample) where its sample starts, stop (sample) and
-    gain (the drum fader with faders, the pad's Volume, the velocity's
-    level). mono: one voice per pad (late_starts), a hit that comes while
+    gain (the drum fader with faders, the pad's Volume, the scale of its
+    file's copy file_db, the velocity's level). mono: one voice per pad (late_starts), a hit that comes while
     the pad's hit before plays cutting that one at its note (its fade
     RETRIGGER_S long) and starting RETRIGGER_S late. Choke groups cut
     across pads after that (_chokes)."""
@@ -349,10 +351,10 @@ def pad_hits(plan: dict, shots: dict, settings: dict, velocity_curve="live", fad
             if s["playback_mode"] == "classic":
                 stop = min(stop, on + int(round(n["duration"] / bps * SR)))
             curve = s["velocity_curve"] or velocity_curve
+            g_pad = g_track * 10 ** ((s["volume_db"] + s["file_db"]) / 20)
             hits.append({"pad": key, "t": float(t[k]) + RETRIGGER_S * int(late[k]), "a": a, "stop": stop,
                          "late": bool(late[k]), "velocity": int(n["velocity"]),
-                         "gain": g_track * 10 ** (s["volume_db"] / 20) * velocity_gain(n["velocity"], curve,
-                                                                                         s["vol_vel"])})
+                         "gain": g_pad * velocity_gain(n["velocity"], curve, s["vol_vel"])})
     _chokes(hits, {k: s["choke_group"] for k, s in settings.items()})
     return hits
 

@@ -210,10 +210,43 @@ def sample_808(song: str, synth: dict) -> str:
         return f"{song} {name.name}"
 
 
-def pad_sample(path: str | Path) -> str:
+def file_db(path: str | Path) -> float:
+    """The scale (dB, 0 or under) that brings a file's peak, over its
+    channels at its own rate (as Simpler plays it), to full scale: 0 for a
+    file at or under it, or one that cannot be read. It is rounded down to
+    the 0.1 dB step of a pad's Volume, so the scaled copy peaks at full
+    scale or up to 0.1 dB under it (scale_files_to_full moves Volumes and
+    the drum fader by whole steps).
+
+    A float file can peak over full scale: 1 % of the library's 8,854
+    entries peak over +6.4 dBFS, the loudest +19.4, and 7 of the 227 pads
+    of the m5 plans (8 of 229 on htdemucs_ft) play one, at +1.3 to +7.3
+    dBFS. The plan's levels read each file at its own level, so the drum
+    fader made up for such a file (each of those 7 plans' faders -13.5 to
+    -23.5 dB), and Live plays a float file over full scale without
+    clipping it (v1orig-3's kick and snare at +5.1 and +1.6 dBFS summed to
+    the Drums track within -123 dB in the live check), but every Simpler,
+    pad and the Drum Rack ahead of the fader then carried peaks over full
+    scale. The plan gives such a pad file_db, plays its file that much
+    lower everywhere (render.pad_hits) and makes it up in the pad's Volume
+    and the drum fader (scale_files_to_full), and the build copies it
+    scaled (pad_copy)."""
+    try:
+        import soundfile as sf
+
+        x, _ = sf.read(str(path), dtype="float64", always_2d=True)
+    except Exception:
+        return 0.0
+    peak = float(np.max(np.abs(x))) if x.size else 0.0
+    return -math.ceil(round(20 * math.log10(peak) * 10, 6)) / 10 + 0.0 if peak > 1.0 else 0.0
+
+
+def pad_sample(path: str | Path, gain_db: float = 0.0) -> str:
     """A pad's file name in the User Library: the file's own name (its
     spaces run together) and its content's digest, as sample_808 names the
-    808's one-shot. build_tracks (ableton-live-mcp 2.2.0) loads a pad
+    808's one-shot; with gain_db (a pad's file_db, under 0) that gain after
+    the digest ("-7.31dB"), for the copy pad_copy writes scaled by it, as a
+    WAV. build_tracks (ableton-live-mcp 2.2.0) loads a pad
     through Live's browser by file name, and the browser holds other files
     of a pad's name: in the live check (Live 12.4.6, 2026-10-29) v1orig-3's
     open-hat pad played an 808 of the same name and PIRAMIT's closed-hat pad
@@ -223,10 +256,11 @@ def pad_sample(path: str | Path) -> str:
     97 plans named a file that other files of other content share. Without
     a readable file, the file's name."""
     p = Path(path)
+    gain = f" {gain_db:.2f}dB" if gain_db < 0 else ""
     try:
-        return f"{' '.join(p.stem.split())} {one_shot_digest(p)}{p.suffix}"
+        return f"{' '.join(p.stem.split())} {one_shot_digest(p)}{gain}{'.wav' if gain else p.suffix}"
     except OSError:
-        return p.name
+        return f"{p.stem}{gain}.wav" if gain else p.name
 
 
 def heard_808(notes: list[dict], shot: np.ndarray, shift0: float, starts: list[float] | None = None) -> float | None:
@@ -397,7 +431,8 @@ def _one_voice(out: list[dict], order: list[int], slid: list[bool], bps: float) 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
               headroom_db: float = 4.0, min_hits: int | None = None, min_clean: float = 0.5,
-              min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5) -> dict:
+              min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5,
+              scale_files: bool = True) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad on evidence that it is one:
@@ -459,7 +494,12 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
     note that Live starts late, as it comes while its pad's hit before
     still plays, goes that much earlier (on_time). A
-    match's layers (matches.json) are not played yet. With melodic
+    match's layers (matches.json) are not played yet. With scale_files, a
+    pad whose file peaks over full scale gets file_db, the scale that
+    brings it to full scale: it plays that much lower in every estimate
+    and render of the plan, its Volume and the drum fader make it up
+    (scale_files_to_full), and the build plays a copy scaled so
+    (pad_copy). With melodic
     (melodic.json), each tonal stem's notes get a MIDI track. The plan
     carries the grid's meter (beats_per_bar, beat_unit), which the build
     sets as Live's time signature, and lasts whole bars of it."""
@@ -553,7 +593,40 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "cents": info.get("tuning_cents", 0),
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
+    if scale_files:
+        scale_files_to_full(plan)
     return plan
+
+
+def scale_files_to_full(plan: dict) -> None:
+    """Gives each pad whose file peaks over full scale its file_db, and
+    takes it back in the pad's Volume, as far as 0 dB; what is left the
+    drum fader takes, every pad's Volume as much lower, as far as FADER_DB.
+    Each pad's fader + Volume + file_db stays what estimate_levels set, so
+    the plan sounds as before: the levels read the file at its own level.
+    file_db is in the Volumes' 0.1 dB steps (file_db()), so are the moves.
+    Read with the scaled file instead, the Volumes' rounding moved the
+    sounds of 5 [6] plans by up to 0.1 dB either way (htdemucs
+    [htdemucs_ft]), with 0.01 dB steps and with 0.1 dB steps alike, as a
+    pad that becomes the loudest moves every other pad's rounding."""
+    pads, levels = plan["tracks"]["drums"]["pads"], plan["levels"]
+    gains = {k: file_db(p["path"]) for k, p in pads.items()}
+    hot = {k: g for k, g in gains.items() if g < 0}
+    if not hot:
+        return
+    fader = levels.get("drums_track_db")
+    raised = {k: pad_settings(pads[k])["volume_db"] - g for k, g in hot.items()}
+    over = round(max(0.0, *raised.values()), 1)
+    if fader is not None:  # the fader takes what a pad's Volume cannot, as far as its top
+        over = round(max(0.0, min(over, FADER_DB - fader)), 1)
+        levels["drums_track_db"] = round(fader + over, 1) + 0.0
+    else:
+        over = 0.0
+    for k, pad in pads.items():
+        volume = round((raised[k] if k in hot else pad_settings(pad)["volume_db"]) - over, 1)
+        pad["volume_db"] = min(0.0, volume) + 0.0
+        if k in hot:
+            pad["file_db"] = round(hot[k] + max(0.0, volume), 1) + 0.0
 
 
 def _backbone(info: dict, m: dict | None, clean: float, least: int) -> bool:
@@ -1115,7 +1188,8 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
     (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound, its file by the name build
-    copies it under, pad_sample), the melodic notes on MIDI
+    copies it under, pad_sample: scaled by its file_db where it has one),
+    the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers with
     warping off, the 808's at 0 dB and each pad's at its volume_db
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
@@ -1138,7 +1212,7 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     drums = plan["tracks"]["drums"]
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
-                     str(note): {"sample": pad_sample(pad["path"]), "warping": False,
+                     str(note): {"sample": pad_sample(pad["path"], pad_settings(pad)["file_db"]), "warping": False,
                                  "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
                                               "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
@@ -1274,28 +1348,53 @@ def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
     return target
 
 
-async def held_samples(call, overview: dict, plan: dict) -> dict:
+def pad_copy(pad: dict, user_library: str | Path) -> Path:
+    """A pad's file in the User Library's GENERATED folder under its
+    pad_sample name: copied as it is (library_copy), or with a file_db
+    under 0 written scaled by it as a 32-bit float WAV at its own rate and
+    channels, unless that name is there already (it carries the file's
+    digest and the gain, so it holds this content)."""
+    gain = float(pad.get("file_db") or 0.0)
+    if gain >= 0:
+        return library_copy(pad["path"], user_library, pad_sample(pad["path"]))
+    import soundfile as sf
+
+    target = Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], gain)
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        x, rate = sf.read(str(pad["path"]), dtype="float64", always_2d=True)
+        sf.write(str(target), (x * 10 ** (gain / 20)).astype(np.float32), rate, subtype="FLOAT")
+    return target
+
+
+async def held_samples(call, overview: dict, plan: dict, user_library: str | Path | None = None) -> dict:
     """The file each Simpler of the build holds, read back from Live (its
     sample's file_path), per pad note and "808", beside the plan's file:
-    same when their contents' digests agree."""
+    same when their contents' digests agree. A pad with a file_db under 0
+    holds its scaled copy (pad_copy in user_library), checked against
+    that copy."""
     index = {t["name"]: t["index"] for t in overview["tracks"]}
     pads, t808 = plan["tracks"]["drums"]["pads"], plan["tracks"]["808"]
     where = {}
     if "808 (synth)" in index and "sample_path" in t808:
-        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"])
+        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"],
+                        t808["sample_path"])
     if "Drums (library)" in index:
         for note, pad in pads.items():
+            scaled = float(pad.get("file_db") or 0.0) < 0 and user_library is not None
             where[str(note)] = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 "
-                                "devices 0 sample", pad["path"])
+                                "devices 0 sample", pad["path"],
+                                Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], pad["file_db"])
+                                if scaled else pad["path"])
     out = {}
-    for key, (path, want) in where.items():
+    for key, (path, want, copy) in where.items():
         try:
             held = json.loads(await call("lom_get_object", path=path, properties=["file_path"])).get("file_path")
         except Exception as e:  # no Simpler, or one without a sample
             out[key] = {"plan": want, "live": None, "same": False, "error": str(e)}
             continue
         try:
-            same = bool(held) and one_shot_digest(held) == one_shot_digest(want)
+            same = bool(held) and one_shot_digest(held) == one_shot_digest(copy)
         except OSError:
             same = False
         out[key] = {"plan": want, "live": held, "same": same}
@@ -1364,7 +1463,7 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     if "sample_path" in t808:
         library_copy(t808["sample_path"], user_library, t808["sample"])
     for pad in pads.values():
-        library_copy(pad["path"], user_library, pad_sample(pad["path"]))
+        pad_copy(pad, user_library)
     spec = build_spec(plan)
     try:
         built = json.loads(await call("build_tracks", tracks=spec))
@@ -1382,7 +1481,7 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
         if moved:
             report["locators_moved"] = moved
     overview = json.loads(await call("get_session_overview"))
-    held = await held_samples(call, overview, plan)
+    held = await held_samples(call, overview, plan, user_library)
     report["samples_checked"] = len(held)
     wrong = {key: h for key, h in held.items() if not h["same"]}
     if wrong:
