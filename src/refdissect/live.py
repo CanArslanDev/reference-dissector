@@ -81,7 +81,9 @@ from .render import (
     RETRIGGER_S,
     VOL_VEL,
     as_played,
+    choke_voices,
     glide_s,
+    grouped,
     late_808,
     pad_hits,
     pad_settings,
@@ -122,6 +124,11 @@ FADER_DB = 6.0  # a Live track fader's top: build_spec and render.fader_db cap t
 # a sound whose hits clear of every other sound's (by CLEAR_MS) number CLEAR_HITS or more, agree within CLEAR_IQR_DB
 # (their interquartile range) and read more than CLEAR_GAP_DB under all its hits is read on those (pad_levels)
 CLEAR_MS, CLEAR_HITS, CLEAR_IQR_DB, CLEAR_GAP_DB = 50.0, 3, 3.0, 6.0
+# The hats choke their open hats (choked_hats) where the drum stem, from CHOKE_WINDOW_S[0] after the closed hat that
+# follows an open hat to CHOKE_WINDOW_S[1] after it (or the next drum hit), holds more than CHOKE_DB under what the
+# open hat's tail alone would ring there, on CHOKE_LEAST hits or more and on at least half the hits whose window is
+# not masked (louder than that tail by over CHOKE_MASKED_DB: another sound plays there). They go in CHOKE_GROUP.
+CHOKE_WINDOW_S, CHOKE_DB, CHOKE_LEAST, CHOKE_MASKED_DB, CHOKE_GROUP = (0.04, 0.15), -6.0, 2, 3.0, 1
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -210,10 +217,43 @@ def sample_808(song: str, synth: dict) -> str:
         return f"{song} {name.name}"
 
 
-def pad_sample(path: str | Path) -> str:
+def file_db(path: str | Path) -> float:
+    """The scale (dB, 0 or under) that brings a file's peak, over its
+    channels at its own rate (as Simpler plays it), to full scale: 0 for a
+    file at or under it, or one that cannot be read. It is rounded down to
+    the 0.1 dB step of a pad's Volume, so the scaled copy peaks at full
+    scale or up to 0.1 dB under it (scale_files_to_full moves Volumes and
+    the drum fader by whole steps).
+
+    A float file can peak over full scale: 1 % of the library's 8,854
+    entries peak over +6.4 dBFS, the loudest +19.4, and 7 of the 227 pads
+    of the m5 plans (8 of 229 on htdemucs_ft) play one, at +1.3 to +7.3
+    dBFS. The plan's levels read each file at its own level, so the drum
+    fader made up for such a file (each of those 7 plans' faders -13.5 to
+    -23.5 dB), and Live plays a float file over full scale without
+    clipping it (v1orig-3's kick and snare at +5.1 and +1.6 dBFS summed to
+    the Drums track within -123 dB in the live check), but every Simpler,
+    pad and the Drum Rack ahead of the fader then carried peaks over full
+    scale. The plan gives such a pad file_db, plays its file that much
+    lower everywhere (render.pad_hits) and makes it up in the pad's Volume
+    and the drum fader (scale_files_to_full), and the build copies it
+    scaled (pad_copy)."""
+    try:
+        import soundfile as sf
+
+        x, _ = sf.read(str(path), dtype="float64", always_2d=True)
+    except Exception:
+        return 0.0
+    peak = float(np.max(np.abs(x))) if x.size else 0.0
+    return -math.ceil(round(20 * math.log10(peak) * 10, 6)) / 10 + 0.0 if peak > 1.0 else 0.0
+
+
+def pad_sample(path: str | Path, gain_db: float = 0.0) -> str:
     """A pad's file name in the User Library: the file's own name (its
     spaces run together) and its content's digest, as sample_808 names the
-    808's one-shot. build_tracks (ableton-live-mcp 2.2.0) loads a pad
+    808's one-shot; with gain_db (a pad's file_db, under 0) that gain after
+    the digest ("-7.31dB"), for the copy pad_copy writes scaled by it, as a
+    WAV. build_tracks (ableton-live-mcp 2.2.0) loads a pad
     through Live's browser by file name, and the browser holds other files
     of a pad's name: in the live check (Live 12.4.6, 2026-10-29) v1orig-3's
     open-hat pad played an 808 of the same name and PIRAMIT's closed-hat pad
@@ -223,10 +263,11 @@ def pad_sample(path: str | Path) -> str:
     97 plans named a file that other files of other content share. Without
     a readable file, the file's name."""
     p = Path(path)
+    gain = f" {gain_db:.2f}dB" if gain_db < 0 else ""
     try:
-        return f"{' '.join(p.stem.split())} {one_shot_digest(p)}{p.suffix}"
+        return f"{' '.join(p.stem.split())} {one_shot_digest(p)}{gain}{'.wav' if gain else p.suffix}"
     except OSError:
-        return p.name
+        return f"{p.stem}{gain}.wav" if gain else p.name
 
 
 def heard_808(notes: list[dict], shot: np.ndarray, shift0: float, starts: list[float] | None = None) -> float | None:
@@ -397,7 +438,8 @@ def _one_voice(out: list[dict], order: list[int], slid: list[bool], bps: float) 
 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
               headroom_db: float = 4.0, min_hits: int | None = None, min_clean: float = 0.5,
-              min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5) -> dict:
+              min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5,
+              chokes: bool = False, scale_files: bool = True) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad on evidence that it is one:
@@ -459,10 +501,26 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     gain under Live's law at the pad's "Vol < Vel" (velocities, VOL_VEL). A
     note that Live starts late, as it comes while its pad's hit before
     still plays, goes that much earlier (on_time). A
-    match's layers (matches.json) are not played yet. With melodic
+    match's layers (matches.json) are not played yet. With scale_files, a
+    pad whose file peaks over full scale gets file_db, the scale that
+    brings it to full scale: it plays that much lower in every estimate
+    and render of the plan, its Volume and the drum fader make it up
+    (scale_files_to_full), and the build plays a copy scaled so
+    (pad_copy). With melodic
     (melodic.json), each tonal stem's notes get a MIDI track. The plan
     carries the grid's meter (beats_per_bar, beat_unit), which the build
-    sets as Live's time signature, and lasts whole bars of it."""
+    sets as Live's time signature, and lasts whole bars of it. With chokes
+    (off by default: on the suite it moved producer-1 alone, its open hat
+    0.05 dB closer to a perfect kit and the levels' balance 0.5117 ->
+    0.5120 dB, htdemucs; nothing on htdemucs_ft),
+    the hat pads (an open hat's, by its match, and the other "hat" pads)
+    go in one choke group (CHOKE_GROUP) where the drum stem shows the
+    closed hats cutting the open hats (choked_hats; its reading under the
+    drum track's "chokes"), as Live's choke group plays them. A pitched
+    copy's pad stays out: in one group the pads of a roll's pitched copies
+    cut each other, which the songs' rolls do not (on the suite, with them
+    in: full's hats 0.11 dB further under a perfect kit, its balance 1.165
+    -> 1.12 dB but htdemucs_ft's 1.41 -> 1.50)."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -533,9 +591,19 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             drum_notes.append({"pitch": pad, "start_time": round(max(0.0, t - pad_lead(pads[str(pad)], leads))
                                                                    * beats_per_second, 4),
                                "duration": 1.0, "velocity": v})
+    choke = None
+    if chokes and (Path(stems_dir) / "drums.wav").is_file():
+        opens = {k for k, p in pads.items()
+                 if (matches.get(p["template"], {}).get("top") or [{}])[0].get("role") == "open_hat"}
+        choke = choked_hats(pads, played, opens, read(Path(stems_dir) / "drums.wav"))
+        if choke["choked"]:
+            for p in pads.values():
+                if p.get("role") == "hat" and "semitones" not in p:  # a pitched copy's pad stays out
+                    p["choke_group"] = CHOKE_GROUP
     on_time(drum_notes, pads, beats_per_second, {})
     plan = {"tempo": bpm, **meter, "length_beats": float(length_beats),
-            "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0)},
+            "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0),
+                                 **({"chokes": choke} if choke else {})},
                        "808": plan_808(analysis, synth, stems_dir, beats_per_second)},
             "stems": {}, "locators": [], "levels": {}}
     stems_dir = Path(stems_dir)
@@ -553,7 +621,40 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
                                                           "cents": info.get("tuning_cents", 0),
                                                           "notes": no_overlaps(notes, None)}
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
+    if scale_files:
+        scale_files_to_full(plan)
     return plan
+
+
+def scale_files_to_full(plan: dict) -> None:
+    """Gives each pad whose file peaks over full scale its file_db, and
+    takes it back in the pad's Volume, as far as 0 dB; what is left the
+    drum fader takes, every pad's Volume as much lower, as far as FADER_DB.
+    Each pad's fader + Volume + file_db stays what estimate_levels set, so
+    the plan sounds as before: the levels read the file at its own level.
+    file_db is in the Volumes' 0.1 dB steps (file_db()), so are the moves.
+    Read with the scaled file instead, the Volumes' rounding moved the
+    sounds of 5 [6] plans by up to 0.1 dB either way (htdemucs
+    [htdemucs_ft]), with 0.01 dB steps and with 0.1 dB steps alike, as a
+    pad that becomes the loudest moves every other pad's rounding."""
+    pads, levels = plan["tracks"]["drums"]["pads"], plan["levels"]
+    gains = {k: file_db(p["path"]) for k, p in pads.items()}
+    hot = {k: g for k, g in gains.items() if g < 0}
+    if not hot:
+        return
+    fader = levels.get("drums_track_db")
+    raised = {k: pad_settings(pads[k])["volume_db"] - g for k, g in hot.items()}
+    over = round(max(0.0, *raised.values()), 1)
+    if fader is not None:  # the fader takes what a pad's Volume cannot, as far as its top
+        over = round(max(0.0, min(over, FADER_DB - fader)), 1)
+        levels["drums_track_db"] = round(fader + over, 1) + 0.0
+    else:
+        over = 0.0
+    for k, pad in pads.items():
+        volume = round((raised[k] if k in hot else pad_settings(pad)["volume_db"]) - over, 1)
+        pad["volume_db"] = min(0.0, volume) + 0.0
+        if k in hot:
+            pad["file_db"] = round(hot[k] + max(0.0, volume), 1) + 0.0
 
 
 def _backbone(info: dict, m: dict | None, clean: float, least: int) -> bool:
@@ -710,15 +811,96 @@ def on_time(notes: list[dict], pads: dict, bps: float, cache: dict) -> None:
     (render.pad_hits). Placed where its sample is to start, a hit is late
     where it comes within the file of the hit before; moved, it still is,
     and Live starts it on its place (render.late_starts gives the same
-    hits on the moved notes)."""
+    hits on the moved notes). On a choke group's pads a hit before that
+    another pad of the group has cut no longer sounds, and the hit after
+    it starts on time (render.choke_voices)."""
+    group_of = grouped({k: p.get("choke_group") for k, p in pads.items()})
     by_pad: dict[str, list[dict]] = {}
     for e in notes:
         by_pad.setdefault(str(e["pitch"]), []).append(e)
     for key, mine in by_pad.items():
+        if key in group_of:
+            continue
         mine.sort(key=lambda e: e["start_time"])
         start = np.array([e["start_time"] / bps for e in mine])
         for e in np.array(mine)[1:][start[1:] < start[:-1] + pad_voice_s(pads[key], cache)]:
             e["start_time"] = round(max(0.0, e["start_time"] - RETRIGGER_S * bps), 4)
+    for group in sorted(set(group_of.values())):
+        mine = sorted((e for key in by_pad if group_of.get(key) == group for e in by_pad[key]),
+                      key=lambda e: e["start_time"])
+        keys = [str(e["pitch"]) for e in mine]
+        late, _ = choke_voices(np.array([e["start_time"] / bps for e in mine]),
+                               [pad_voice_s(pads[k], cache) for k in keys], keys, group_of)
+        for e in np.array(mine, dtype=object)[late]:
+            e["start_time"] = round(max(0.0, e["start_time"] - RETRIGGER_S * bps), 4)
+
+
+def _energy(x: np.ndarray, a: int, b: int) -> float:
+    return float(np.sum(np.square(x[max(0, a):max(0, b)], dtype=np.float64)))
+
+
+def choked_hats(pads: dict, played: dict, opens: set, drums: np.ndarray) -> dict:
+    """Whether the closed hats choke the open hats, read off the drum stem
+    (a producer puts them in one choke group; Live then cuts an open hat
+    where the next closed hat starts, render.choke_voices). For each open
+    hat followed by a closed hat inside its file (opens: the pads whose
+    match is an open hat, the closed ones the other "hat" pads; played: each
+    pad's attacks, s), the stem's energy in the hat band from
+    CHOKE_WINDOW_S[0] after the closed hat to CHOKE_WINDOW_S[1] after it
+    (or 2 ms before the next drum hit; 10 ms at least) against what the
+    open hat's tail alone rings there (its file as played, at the level the
+    stem holds its first 30 ms, or up to the closed hat). Other sounds only
+    add energy: a window CHOKE_MASKED_DB or more over the tail is masked
+    and left out, and one CHOKE_DB or more under it is a cut tail. Returns
+    hits (windows read), cut and choked (CHOKE_LEAST cut tails or more and
+    half the windows or more).
+
+    On the suite's m5 analyses (htdemucs; htdemucs_ft in brackets), where
+    the rolls, producer and full scenarios choke every open hat that a
+    closed hat follows inside its file: windows cut, of those read,
+    rolls-1 6 of 8 [none read], rolls-2 4 of 4 [4 of 4], full-1 6 of 7 [7
+    of 7], full-2 3 of 4 [4 of 4], producer-1 5 of 10 [none read],
+    producer-2 2 of 6 [2 of 6]: 5 [3] of the 6 choke beats choked. On the
+    other 42 beats, which choke none, no window read cut [2 of melodic-1's
+    5, 3 of rare-1's 13]: none choked."""
+    closed = [k for k, p in pads.items() if p.get("role") == "hat" and k not in opens]
+    out = {"hits": 0, "cut": 0, "choked": False}
+    if not opens or not closed:
+        return out
+    stem = band(drums, "hat")
+    shot, attack = {}, {}
+    for k in list(opens) + closed:
+        s = pad_settings(pads[k])
+        try:
+            x = as_played(read(pads[k]["path"]), s["start_s"], s["transpose"] + s["detune_cents"] / 100)
+        except (OSError, RuntimeError):
+            continue
+        shot[k], attack[k] = band(x, "hat"), int(round(attack_time(x, "hat") * SR))
+    hats = sorted(t for k in closed if k in shot for t in played.get(int(k), []))
+    every = np.sort(np.array([t for v in played.values() for t in v] + [np.inf]))
+    for o in (k for k in opens if k in shot):
+        x, ax = shot[o], attack[o]
+        for a0 in played.get(int(o), []):
+            a1 = next((t for t in hats if t > a0 + 0.002), None)
+            if a1 is None or ax + (a1 - a0) * SR >= len(x) - 1:
+                continue  # no closed hat inside the open hat's file
+            w0 = a1 + CHOKE_WINDOW_S[0]
+            w1 = min(a1 + CHOKE_WINDOW_S[1], every[np.searchsorted(every, a1 + 0.005, "right")] - 0.002)
+            if w1 - w0 < 0.01:
+                continue
+            head = int(min(a1 - a0, 0.03) * SR)
+            mine = _energy(x, ax, ax + head)
+            theirs = _energy(stem, int(round(a0 * SR)), int(round(a0 * SR)) + head)
+            if mine <= 0 or theirs <= 0:
+                continue
+            tail = theirs / mine * _energy(x, ax + int(round((w0 - a0) * SR)), ax + int(round((w1 - a0) * SR)))
+            heard = _energy(stem, int(round(w0 * SR)), int(round(w1 * SR)))
+            if tail <= 0 or heard >= tail * 10 ** (CHOKE_MASKED_DB / 10):
+                continue
+            out["hits"] += 1
+            out["cut"] += bool(heard <= tail * 10 ** (CHOKE_DB / 10))
+    out["choked"] = out["cut"] >= CHOKE_LEAST and 2 * out["cut"] >= out["hits"]
+    return out
 
 
 def _pitched_pads(pads: dict, note: int, semitones) -> dict[int, int]:
@@ -936,8 +1118,14 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     # the tail of a sound's hit before under its next one (the suite's truth sums them), and read against the hits
     # cut as Live plays them, a pad took those tails for its own level (render_plan as Live plays: the suite's
     # levels.vs_kit_abs_db 1.20 -> 1.30 dB, htdemucs_ft 1.19 -> 1.27; balance_abs_db 0.49 -> 0.60, 0.50 -> 0.51)
+    # A choke group's pads cut each other where Live cuts them (render.choke_voices), as the stem holds them
+    group_of = grouped({key: s["choke_group"] for key, (x, s) in shots.items()})
     hits = {key: pad_hits(plan, {key: x}, {key: {**s, "volume_db": 0.0}}, faders=False, mono=False)
-            for key, (x, s) in shots.items()}
+            for key, (x, s) in shots.items() if key not in group_of}
+    if group_of:
+        together = pad_hits(plan, {k: shots[k][0] for k in group_of},
+                            {k: {**shots[k][1], "volume_db": 0.0} for k in group_of}, faders=False, mono=False)
+        hits |= {k: [h for h in together if h["pad"] == k] for k in group_of}
     at = {key: np.array([e["start_time"] / bps for e in notes if str(e["pitch"]) == key]) + attack_time(x, s["role"])
           for key, (x, s) in shots.items()}
     heard: dict[str, list[float]] = {}
@@ -1111,17 +1299,36 @@ def excerpt(plan: dict, bars: tuple[int, int], stems_out: str | Path | None = No
     return out
 
 
+def pad_volume(pad: dict) -> float:
+    """A pad's Volume as the build sends it: its volume_db (at most 0 dB,
+    render.pad_settings), a number in dB, which build_tracks sets as the
+    parameter's value. Sent as display text ("-6.6 dB"), Live 12.4.6 held a
+    display step under it (-6.605 dB; from -10 dB down 0.05 dB: "-14.9 dB"
+    held -14.95) in the live check (2026-10-29); the build reads the value
+    back and sends the text where the number did not hold (held_volumes)."""
+    return float(pad_settings(pad)["volume_db"]) + 0.0
+
+
+def choke_of(pad: dict) -> int:
+    """A pad's choke group as Live takes it: 1 to 16, 0 for none."""
+    return grouped({"pad": pad.get("choke_group")}).get("pad", 0)
+
+
 def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
     (simpler_808; "voices" for build, which build_tracks does not read),
     the drums on a Drum Rack (one pad per sound, its file by the name build
-    copies it under, pad_sample), the melodic notes on MIDI
+    copies it under, pad_sample: scaled by its file_db where it has one),
+    the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks; Simplers with
     warping off, the 808's at 0 dB and each pad's at its volume_db
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
     transposition (a pad's Transpose and Detune), "Vol < Vel" at the plan's
     vol_vel (VOL_VEL), so velocities play the levels the plan assumes, Snap
-    off (LIVE_OFF), and faders from the plan's levels. With bars (a, b),
+    off (LIVE_OFF), and faders from the plan's levels. A pad's Volume goes
+    as a number (pad_volume), and a pad of a choke group carries its group
+    (choke_group: ableton-live-mcp's replica-mode build_tracks reads it,
+    2.2.0 does not, and build sets it on the pad's chain, set_chokes). With bars (a, b),
     the spec of excerpt(plan, bars, stems_out): bars a to b, from 0."""
     if bars:
         plan = excerpt(plan, bars, stems_out)
@@ -1138,11 +1345,12 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     drums = plan["tracks"]["drums"]
     spec.append({"name": "Drums (library)",
                  "instrument": {"drum_rack": {
-                     str(note): {"sample": pad_sample(pad["path"]), "warping": False,
-                                 "settings": {"Volume": f"{pad_settings(pad)['volume_db'] + 0.0:.1f} dB",
+                     str(note): {"sample": pad_sample(pad["path"], pad_settings(pad)["file_db"]), "warping": False,
+                                 "settings": {"Volume": pad_volume(pad),
                                               "Transpose": float(pad["transpose"]),
                                               "Detune": float(pad.get("detune_cents", 0)),
-                                              "Vol < Vel": float(pad.get("vol_vel", VOL_VEL)), **LIVE_OFF}}
+                                              "Vol < Vel": float(pad.get("vol_vel", VOL_VEL)), **LIVE_OFF},
+                                 **({"choke_group": choke_of(pad)} if choke_of(pad) else {})}
                      for note, pad in drums["pads"].items()}},
                  "volume_db": round(min(6.0, levels.get("drums_track_db", -levels["headroom_db"])), 1),
                  "clips": [{"start": 0.0, "length": float(plan["length_beats"]), "name": "Drums",
@@ -1274,31 +1482,129 @@ def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
     return target
 
 
-async def held_samples(call, overview: dict, plan: dict) -> dict:
+def pad_copy(pad: dict, user_library: str | Path) -> Path:
+    """A pad's file in the User Library's GENERATED folder under its
+    pad_sample name: copied as it is (library_copy), or with a file_db
+    under 0 written scaled by it as a 32-bit float WAV at its own rate and
+    channels, unless that name is there already (it carries the file's
+    digest and the gain, so it holds this content)."""
+    gain = float(pad.get("file_db") or 0.0)
+    if gain >= 0:
+        return library_copy(pad["path"], user_library, pad_sample(pad["path"]))
+    import soundfile as sf
+
+    target = Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], gain)
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        x, rate = sf.read(str(pad["path"]), dtype="float64", always_2d=True)
+        sf.write(str(target), (x * 10 ** (gain / 20)).astype(np.float32), rate, subtype="FLOAT")
+    return target
+
+
+async def held_samples(call, overview: dict, plan: dict, user_library: str | Path | None = None) -> dict:
     """The file each Simpler of the build holds, read back from Live (its
     sample's file_path), per pad note and "808", beside the plan's file:
-    same when their contents' digests agree."""
+    same when their contents' digests agree. A pad with a file_db under 0
+    holds its scaled copy (pad_copy in user_library), checked against
+    that copy."""
     index = {t["name"]: t["index"] for t in overview["tracks"]}
     pads, t808 = plan["tracks"]["drums"]["pads"], plan["tracks"]["808"]
     where = {}
     if "808 (synth)" in index and "sample_path" in t808:
-        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"])
+        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"],
+                        t808["sample_path"])
     if "Drums (library)" in index:
         for note, pad in pads.items():
+            scaled = float(pad.get("file_db") or 0.0) < 0 and user_library is not None
             where[str(note)] = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 "
-                                "devices 0 sample", pad["path"])
+                                "devices 0 sample", pad["path"],
+                                Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], pad["file_db"])
+                                if scaled else pad["path"])
     out = {}
-    for key, (path, want) in where.items():
+    for key, (path, want, copy) in where.items():
         try:
             held = json.loads(await call("lom_get_object", path=path, properties=["file_path"])).get("file_path")
         except Exception as e:  # no Simpler, or one without a sample
             out[key] = {"plan": want, "live": None, "same": False, "error": str(e)}
             continue
         try:
-            same = bool(held) and one_shot_digest(held) == one_shot_digest(want)
+            same = bool(held) and one_shot_digest(held) == one_shot_digest(copy)
         except OSError:
             same = False
         out[key] = {"plan": want, "live": held, "same": same}
+    return out
+
+
+def _db_of(text) -> float | None:
+    """The number in a parameter's display text ("-6.60 dB"), None for none."""
+    try:
+        return float(str(text).replace("dB", "").strip())
+    except ValueError:
+        return float("-inf") if "inf" in str(text) else None
+
+
+async def held_volumes(call, overview: dict, plan: dict) -> dict:
+    """Each pad's Volume read back from Live (its Simpler's Volume: the
+    value and Live's display of it), per pad note, against the plan's
+    (pad_volume): held when the value is the plan's dB within 0.001 and,
+    where Live shows it, the display within 0.006 dB (two decimals from
+    -10 dB up). A pad that does not hold it gets its Volume again as
+    display text, Live's way before (a display step under it), and is
+    listed with "text" True and what Live holds then. Not verified in Live:
+    that Simpler's Volume takes a number in dB as its value."""
+    index = {t["name"]: t["index"] for t in overview["tracks"]}
+    if "Drums (library)" not in index:
+        return {}
+    out = {}
+    for note, pad in plan["tracks"]["drums"]["pads"].items():
+        path = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 devices 0 "
+                "parameters Volume")
+        want = pad_volume(pad)
+
+        async def read_back(path: str = path) -> dict:
+            try:
+                got = json.loads(await call("lom_get_object", path=path, properties=["value", "$display"]))
+            except Exception as e:  # no Simpler on the pad
+                return {"error": str(e)}
+            return {"value": got.get("value"), "display": got.get("$display")}
+
+        got = await read_back()
+        shown = _db_of(got["display"]) if isinstance(got.get("display"), str) else None
+        held = (isinstance(got.get("value"), int | float) and abs(float(got["value"]) - want) <= 1e-3
+                and (shown is None or abs(shown - want) <= 0.006))
+        row = {"plan": want, **got, "held": bool(held)}
+        if not held and "error" not in got:
+            try:
+                await call("run_batch", commands=[{"type": "param_set_display",
+                                                   "params": {"path": path, "value": f"{want:.1f} dB"}}],
+                           stop_on_error=False)
+                row |= {"text": True, "then": await read_back()}
+            except Exception as e:
+                row["text_error"] = str(e)
+        out[str(note)] = row
+    return out
+
+
+async def set_chokes(call, overview: dict, plan: dict) -> dict:
+    """Each pad of a choke group put in it (its chain's choke_group, which
+    ableton-live-mcp's battery set and read back in Live 12.4.6: 0 none, 1
+    to 16) and read back, per pad note: the plan's group, Live's and
+    whether they agree. build_tracks (2.2.0) does not set it. Not verified
+    in Live by this build."""
+    index = {t["name"]: t["index"] for t in overview["tracks"]}
+    pads = {note: choke_of(pad) for note, pad in plan["tracks"]["drums"]["pads"].items() if choke_of(pad)}
+    if "Drums (library)" not in index or not pads:
+        return {}
+    out = {}
+    for note, group in pads.items():
+        path = f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0"
+        try:
+            await call("lom_set_property", path=path, property="choke_group", value=int(group))
+            live = json.loads(await call("lom_get_object", path=path, properties=["choke_group"])).get("choke_group")
+        except Exception as e:
+            out[str(note)] = {"plan": group, "live": None, "same": False, "error": str(e)}
+            continue
+        out[str(note)] = {"plan": group, "live": live, "same": live == group}
     return out
 
 
@@ -1320,7 +1626,11 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     (refused) or where the build stopped and which tracks it left in the set
     (failed_build, also logged). Live's time signature goes to the plan's
     meter (meter_of) before the locators, and a locator Live puts elsewhere
-    is deleted and listed under locators_moved (moved_locators). With
+    is deleted and listed under locators_moved (moved_locators). Each pad
+    of a choke group goes in it after build_tracks (set_chokes; under
+    choke_groups), and each pad's Volume, sent as a number, is read back
+    (held_volumes: volumes_held, and volumes_not_held, sent again as
+    text). With
     bars (a, b), bars a to b of the plan are built, from 0, with the stems
     cut to them in stems_out (excerpt)."""
     if bars:
@@ -1364,7 +1674,7 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
     if "sample_path" in t808:
         library_copy(t808["sample_path"], user_library, t808["sample"])
     for pad in pads.values():
-        library_copy(pad["path"], user_library, pad_sample(pad["path"]))
+        pad_copy(pad, user_library)
     spec = build_spec(plan)
     try:
         built = json.loads(await call("build_tracks", tracks=spec))
@@ -1382,7 +1692,22 @@ async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, hea
         if moved:
             report["locators_moved"] = moved
     overview = json.loads(await call("get_session_overview"))
-    held = await held_samples(call, overview, plan)
+    chokes = await set_chokes(call, overview, plan)
+    if chokes:
+        report["choke_groups"] = chokes
+        for key, c in chokes.items():
+            if not c["same"]:
+                log(f"pad {key} is in choke group {c['live']}, not the plan's {c['plan']}"
+                    + (f" ({c['error']})" if "error" in c else ""))
+    volumes = await held_volumes(call, overview, plan)
+    report["volumes_held"] = sum(v["held"] for v in volumes.values())
+    unheld = {key: v for key, v in volumes.items() if not v["held"]}
+    if unheld:
+        report["volumes_not_held"] = unheld
+        for key, v in unheld.items():
+            log(f"pad {key} holds Volume {v.get('value')} ({v.get('display')}), not the plan's {v['plan']} dB"
+                + (": sent as text" if v.get("text") else ""))
+    held = await held_samples(call, overview, plan, user_library)
     report["samples_checked"] = len(held)
     wrong = {key: h for key, h in held.items() if not h["same"]}
     if wrong:

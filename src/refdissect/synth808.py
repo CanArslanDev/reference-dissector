@@ -170,7 +170,7 @@ def compare(reference: np.ndarray, x: np.ndarray, f1: float) -> dict:
 
 def _read_back(path: Path | None, log) -> tuple[Params, dict] | None:
     """The fit kept at path (cache.kept), with info cached naming its file."""
-    found = kept(path, log)
+    found = kept(path, log, "synth808")
     try:
         return Params.of(found["x"]), {"loss": found["loss"], "seconds": found["seconds"], "cached": path.name}
     except (KeyError, TypeError, ValueError):  # nothing kept (None), or not a fit
@@ -217,7 +217,7 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
     """Params whose voice matches the reference template (an averaged 808
     note laid out with its onset PRE in), and how long the search took.
     With a cache folder, a fit is kept there under the template's samples,
-    f1, the settings, the versions and the package's code (cache.key) and
+    f1, the settings, the versions and the code synth808 reaches (cache.key) and
     read back by a fit that has the same ones (info's cached names the file;
     seconds is the search's). The search is seeded, so it would find the
     same Params again: 50-140 s a suite beat, and a few ms read back. log
@@ -227,7 +227,7 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
         return gritted(reference, f1, *fit(reference, f1, waveform_only, seed, maxiter, popsize, cache, log),
                        seed=seed, maxiter=maxiter, popsize=popsize, cache=cache, log=log)
     settings = {"f1": float(f1), "waveform_only": waveform_only, "seed": seed, "maxiter": maxiter, "popsize": popsize}
-    path = Path(cache) / f"fit-808-{key((reference,), settings)}.json" if cache else None
+    path = Path(cache) / f"fit-808-{key((reference,), settings, 'synth808')}.json" if cache else None
     if found := _read_back(path, log):
         return found
     score = _scorer(reference, f1)
@@ -242,7 +242,7 @@ def fit(reference: np.ndarray, f1: float, waveform_only: bool = False, seed: int
                                polish=True)
     p = Params.of(r.x)
     info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started, 1)}
-    keep(path, {"x": [float(v) for v in r.x], **info}, log)
+    keep(path, {"x": [float(v) for v in r.x], **info}, log, "synth808")
     return p, info
 
 
@@ -258,7 +258,7 @@ def gritted(reference: np.ndarray, f1: float, plain: Params, plain_info: dict, s
     base = np.array([getattr(plain, k) for k in names])
     settings = {"f1": float(f1), "seed": seed, "maxiter": maxiter, "popsize": popsize, "grit": True,
                 "plain": [float(v) for v in base]}
-    path = Path(cache) / f"fit-808-grit-{key((reference,), settings)}.json" if cache else None
+    path = Path(cache) / f"fit-808-grit-{key((reference,), settings, 'synth808')}.json" if cache else None
     if found := _read_back(path, log):
         return found[0], {**found[1], "plain": plain.to_dict(), "plain_loss": plain_info["loss"]}
     score = _scorer(reference, f1)
@@ -275,7 +275,7 @@ def gritted(reference: np.ndarray, f1: float, plain: Params, plain_info: dict, s
     x = base.copy()
     x[free] = r.x
     info = {"loss": round(float(r.fun), 4), "seconds": round(time.time() - started + plain_info["seconds"], 1)}
-    keep(path, {"x": [float(v) for v in x], **info}, log)
+    keep(path, {"x": [float(v) for v in x], **info}, log, "synth808")
     return Params.of(x), {**info, "plain": plain.to_dict(), "plain_loss": plain_info["loss"]}
 
 

@@ -145,9 +145,20 @@ def _fit(a):
             **_fit_kwargs(a))
 
 
+def _plan_options(s) -> None:
+    s.add_argument("--chokes", action="store_true",
+                   help="put the hat pads in one choke group where the drum stem shows the closed hats cutting the "
+                        "open hats (live.choked_hats; off by default: see docs/12)")
+
+
+def _plan_kwargs(a) -> dict:
+    """plan's options as `suite run` passes them on: none unless given."""
+    return {"plan": {"chokes": True}} if a.chokes else {}
+
+
 def _plan(a):
     from .pipeline import plan
-    plan(a.work)
+    plan(a.work, chokes=a.chokes)
 
 
 def _build(a):
@@ -209,9 +220,9 @@ def _suite_build(a):
 def _suite_run(a):
     from .suite import run
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
-            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a),
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a), **_plan_kwargs(a),
              **({"fit_808": _fit_kwargs(a)} if a.grit else {})}, a.resume, _list(a.steps), a.reuse,
-            cache=a.cache, subset=a.subset, log=_say)
+            cache=a.cache, subset=a.subset, keep_workers=a.keep_workers, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
@@ -330,13 +341,18 @@ def _suite_parser(sub) -> None:
     s.add_argument("--reuse", default=None, metavar="TAG",
                    help="copy the outputs of the steps not run from runs/TAG/ of each beat (TAG itself: in place); "
                         "fails before running when one is missing")
+    s.add_argument("--keep-workers", action=argparse.BooleanOptionalAction, default=True,
+                   help="keep beat_this's and Basic Pitch's workers running from one beat to the next in each job "
+                        "(default on: about 2 s a beat less, about 0.9 GB more held per job)")
     s.add_argument("--cache", action=argparse.BooleanOptionalAction, default=False,
                    help="keep the 808 reader's results and the fits in each beat's cache/ and read them back where "
-                        "the stems or the template, the settings and the package's code are the same (default off: "
+                        "the stems or the template, the settings and the code of the step (its module and every module "
+                        "it imports) are the same (default off: "
                         "every step runs, and its seconds are the code's)")
     _analyze_options(s)
     _match_options(s)
     _fit_options(s)
+    _plan_options(s)
     s.set_defaults(run=_suite_run)
     s = ss.add_parser("report", help="markdown tables per scenario, with the deltas between tags")
     s.add_argument("dir")
@@ -408,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(run=_fit)
     s = sub.add_parser("plan", help="notes in beats, sounds and levels for Live; MIDI files")
     s.add_argument("work")
+    _plan_options(s)
     s.set_defaults(run=_plan)
     s = sub.add_parser("live-build", help="build the plan in the open (empty) Live set")
     s.add_argument("plan", help="plan.json or the work folder")
