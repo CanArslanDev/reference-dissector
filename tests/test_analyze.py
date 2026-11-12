@@ -98,7 +98,7 @@ def test_with_the_tracker_phase_is_the_first_bar_line(stems, tmp_path, monkeypat
 
 def test_the_808_reader_is_read_back_while_its_stems_and_code_are_the_same(tmp_path, monkeypatch):
     """pipeline._transcribe keeps bass808.transcribe's result by the two
-    stems' samples and the package's code, and reads it back with its log
+    stems' samples and the code bass808 reaches, and reads it back with its log
     lines, through JSON either way, saying where from (a read-back left no
     trace in the log); other stems, or no cache, read again."""
     from refdissect import pipeline
