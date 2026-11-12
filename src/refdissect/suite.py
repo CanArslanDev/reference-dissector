@@ -392,7 +392,7 @@ def _pipeline(beat: Path, work: Path, model: str, library, library_808, options:
                 problems["fit_808"] = str(e)
             lap("fit_808")
         if status["plan"] == "run":
-            pipeline.plan(work, log=log)
+            pipeline.plan(work, log=log, **options.get("plan", {}))
             lap("plan")
     return problems, cached
 

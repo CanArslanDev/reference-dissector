@@ -134,9 +134,20 @@ def _fit(a):
     fit_808(a.work, library_808=Library.load(a.library_808) if a.library_808 else None, cache=not a.no_cache)
 
 
+def _plan_options(s) -> None:
+    s.add_argument("--chokes", action="store_true",
+                   help="put the hat pads in one choke group where the drum stem shows the closed hats cutting the "
+                        "open hats (live.choked_hats; off by default: see docs/12)")
+
+
+def _plan_kwargs(a) -> dict:
+    """plan's options as `suite run` passes them on: none unless given."""
+    return {"plan": {"chokes": True}} if a.chokes else {}
+
+
 def _plan(a):
     from .pipeline import plan
-    plan(a.work)
+    plan(a.work, chokes=a.chokes)
 
 
 def _build(a):
@@ -198,7 +209,8 @@ def _suite_build(a):
 def _suite_run(a):
     from .suite import run
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
-            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a)}, a.resume, _list(a.steps), a.reuse,
+            {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a), **_plan_kwargs(a)}, a.resume, _list(a.steps),
+            a.reuse,
             cache=a.cache, subset=a.subset, keep_workers=a.keep_workers, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
@@ -328,6 +340,7 @@ def _suite_parser(sub) -> None:
                         "every step runs, and its seconds are the code's)")
     _analyze_options(s)
     _match_options(s)
+    _plan_options(s)
     s.set_defaults(run=_suite_run)
     s = ss.add_parser("report", help="markdown tables per scenario, with the deltas between tags")
     s.add_argument("dir")
@@ -398,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(run=_fit)
     s = sub.add_parser("plan", help="notes in beats, sounds and levels for Live; MIDI files")
     s.add_argument("work")
+    _plan_options(s)
     s.set_defaults(run=_plan)
     s = sub.add_parser("live-build", help="build the plan in the open (empty) Live set")
     s.add_argument("plan", help="plan.json or the work folder")
