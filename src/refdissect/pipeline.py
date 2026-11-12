@@ -70,15 +70,15 @@ def _load(path: Path):
 def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=print,
                 slides: bool = False) -> tuple[dict, str | None]:
     """bass808.transcribe, kept in cache under what decides it (cache.key:
-    the two stems' samples, the versions, the package's code and slides
+    the two stems' samples, the versions, the code bass808 reaches and slides
     where on) and read back, its log lines too, when those are the same:
     the reader is 20-40 s of a suite beat's analyze. Returns its result
     (through JSON, read back or not: what bass808.json holds) and the file
     it was read back from, or None when it ran. slides: legato notes
     (bass808.glides)."""
     opts = {"slides": True} if slides else {}
-    path = Path(cache) / f"808-{key((bass, drums), opts)}.json" if cache else None
-    found = kept(path, log)
+    path = Path(cache) / f"808-{key((bass, drums), opts, 'bass808')}.json" if cache else None
+    found = kept(path, log, "bass808")
     if found and isinstance(found.get("bass808"), dict) and isinstance(found.get("log"), list):
         log(f"808 reader: read back from {path}; its log when it ran:")
         for line in found["log"]:
@@ -90,7 +90,7 @@ def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=pri
         lines.append(str(msg))
         log(msg)
     out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both, **opts), default=float))
-    keep(path, {"bass808": out, "log": lines}, log)
+    keep(path, {"bass808": out, "log": lines}, log, "bass808")
     return out, None
 
 

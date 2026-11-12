@@ -170,7 +170,7 @@ uv run refdissect suite report "$S" --tags mine,mine-b --out "$W/work/mine-b.md"
 ```
 
 Every step writes JSON next to its inputs, so you can read what it decided before the next step uses it.
-- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and every `.py` file of the package as the process loaded it. The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
+- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and the `.py` files of the step as the process loaded them: the module that makes the result and every module of the package it imports (an edit elsewhere, to `live.py` say, keeps them). The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
 - `scripts/export_results.py` turns a work folder into the shareable `results/` and `figures/`: no audio, and no file names from a personal library.
 - `scripts/export_results.py --suite DIR TAG` publishes a suite tag's means per scenario, and nothing else.
 - `--v1-truth` takes the six v1 beats rebuilt with truth stems. No command here makes them: without them the suite has the 42 scenario beats. [12](docs/12-replica-mode.md) has every suite option.
@@ -188,7 +188,7 @@ uv run ruff check .
 - The 48 test functions marked `slow` (62 test items, with their parameters) took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
 - With `-n`, an idle worker takes tests from a busy one (`--dist worksteal`, set in pyproject). At -n 4 that cut the whole suite from 132 s to 94–96 s.
 - On a machine you are working on, `-n 4` leaves cores free.
-- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`; its time there is not measured yet.
+- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`: a job took 3m50s on ubuntu and 4m40s on macOS (PR #2), 4m44s and 7m55s (PR #3), 2m51s and 2m14s, then 6m10s and 7m23s on main after each merge; in one process 7.4 and 12.6 min (PR #1's last run). GitHub's runners vary from run to run.
 
 For pipeline changes, iterate on the suite's dev subset, then measure on every beat:
 
@@ -262,7 +262,8 @@ src/refdissect/
   calibrate.py   calibration v1: synthetic beats and their scoring
   figures.py     spectrograms side by side, the calibration plot
   pipeline.py    the steps, each writing JSON
-  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and the code
+  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and their step's code
+  served.py      beat_this's and Basic Pitch's workers kept running between a suite job's beats
   cli.py         refdissect
   workers/       the Demucs, beat_this and Basic Pitch workers
 results/         measured numbers (calibration v1, the suite's means per scenario, PIRAMIT) - no audio

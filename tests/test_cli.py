@@ -45,6 +45,9 @@ def test_the_commands_keep_by_default_and_the_suite_only_when_asked(monkeypatch)
     for flags, cache in (([], False), (["--cache"], True), (["--no-cache"], False)):
         main(["suite", "run", "d", "--library", "l", "--tag", "t", *flags])
         assert seen["suite"]["cache"] is cache, flags
+    for flags, keep in (([], True), (["--keep-workers"], True), (["--no-keep-workers"], False)):
+        main(["suite", "run", "d", "--library", "l", "--tag", "t", *flags])
+        assert seen["suite"]["keep_workers"] is keep, flags
 
 
 def test_analyze_and_the_suite_pass_slides_on_request(monkeypatch):
