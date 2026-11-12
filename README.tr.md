@@ -86,7 +86,7 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 - `melodic`: her tonal kanal için notalar ve akorlar (Basic Pitch).
 - `index-speckle`: sample'ları herhangi bir perdede eşleştirmek için speckle indeksi. `index-library` bunu artık kendisi yazıyor; bu komut daha önce indekslenmiş bir kütüphane içindir.
 - `suite build`, `suite run`, `suite report`: kalibrasyon v2'yi kurar, her etiket (tag) için çalıştırır ve puanlar. `suite run` şunları alır: `--steps`, `--reuse`, `--jobs`, `--render`, `--model`, `--resume`, `--cache`, `--subset`.
-- `analyze` ve `fit-808`, 808 okuyucusunun sonucunu ve 808 fit'ini çalışma klasörünün `cache/` alt klasöründe saklar. Stem'ler (ya da şablon), ayarlar, numpy, scipy ve soxr sürümleri ve paketin bütün `.py` dosyaları aynıysa sonraki çalıştırma bunları geri okur ve log'a hangi dosyayı okuduğunu yazar. `--no-cache` hepsini yeniden çalıştırır. `suite run` ise `--cache` verilmedikçe hiçbir şey saklamaz; böylece ölçülen süreler kodun kendi süreleridir.
+- `analyze` ve `fit-808`, 808 okuyucusunun sonucunu ve 808 fit'ini çalışma klasörünün `cache/` alt klasöründe saklar. Stem'ler (ya da şablon), ayarlar, numpy, scipy ve soxr sürümleri ve adımın `.py` dosyaları (sonucu üreten modül ve paketten içe aktardığı her modül) aynıysa sonraki çalıştırma bunları geri okur ve log'a hangi dosyayı okuduğunu yazar. Başka bir modüldeki değişiklik (örneğin `live.py`) saklananları bozmaz. `--no-cache` hepsini yeniden çalıştırır. `suite run` ise `--cache` verilmedikçe hiçbir şey saklamaz; böylece ölçülen süreler kodun kendi süreleridir.
 
 - `suite run --subset dev`: süitin her senaryo ailesinden birer beat alan 11 beat'lik geliştirme alt kümesi; `--cache` ile denemeler için.
 - `suite clean DIR --keep a,b`: tutulmayan etiketlerin çalıştırma klasörlerini boşaltır, her birinin `scores.json`'unu saklar. `--yes` verilmezse yalnızca neyin silineceğini listeler.
@@ -107,7 +107,7 @@ uv run ruff check .
 - `slow` işaretli 48 test fonksiyonu (parametreleriyle 62 test), tek süreçte her biri 2 s ya da daha uzun sürdü: 308 s'lik test süresinin 250 s'si. Hızlı döngü bunları atlar; commit'ten önceki kontrol yine bütün testlerdir.
 - `-n` ile boşta kalan bir işçi, meşgul olanın testlerini alıyor (`--dist worksteal`, pyproject'te). -n 4'te bütün testler 132 s'den 94–96 s'ye indi.
 - Üzerinde çalıştığın bir bilgisayarda `-n 4` çekirdek bırakır.
-- Ölçüm 10 çekirdekli Apple M4'te (04–05.11.2026): 366 geçti, 3 atlandı, 2 beklenen hata (tek süreç süresi, kütüphane deposunun 1 s'den kısa süren 3 testinden önce, 363 testle ölçüldü). CI `-n auto` ile çalışıyor; oradaki süresi henüz ölçülmedi.
+- Ölçüm 10 çekirdekli Apple M4'te (04–05.11.2026): 366 geçti, 3 atlandı, 2 beklenen hata (tek süreç süresi, kütüphane deposunun 1 s'den kısa süren 3 testinden önce, 363 testle ölçüldü). CI `-n auto` ile çalışıyor: bir iş ubuntu'da 3 dk 50 s, macOS'ta 4 dk 40 s (PR #2), 4 dk 44 s ve 7 dk 55 s (PR #3), her birleştirmeden sonra main'de 2 dk 51 s ve 2 dk 14 s, sonra 6 dk 10 s ve 7 dk 23 s sürdü; tek süreçte 7,4 ve 12,6 dk (PR #1'in son çalışması). GitHub'ın makineleri çalışmadan çalışmaya değişiyor.
 
 Boru hattında bir değişiklik denerken önce geliştirme alt kümesinde dene, sonra bütün beat'lerde ölç:
 

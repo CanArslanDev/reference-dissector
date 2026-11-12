@@ -211,7 +211,7 @@ def _suite_run(a):
     s = run(a.dir, a.library, a.library_808, a.tag, a.model, _list(a.scenarios), a.jobs, a.render,
             {"analyze": _analyze_kwargs(a), "match": _match_kwargs(a), **_plan_kwargs(a)}, a.resume, _list(a.steps),
             a.reuse,
-            cache=a.cache, subset=a.subset, log=_say)
+            cache=a.cache, subset=a.subset, keep_workers=a.keep_workers, log=_say)
     o = s["overall"]
     print(f"{s['beats']} beats scored under {a.tag} ({len(s['failed'])} failed); strict F1@20 over scenarios: "
           f"analysis {o['analysis'].get('strict_f1_20')}, plan {o['plan'].get('strict_f1_20')} "
@@ -330,9 +330,13 @@ def _suite_parser(sub) -> None:
     s.add_argument("--reuse", default=None, metavar="TAG",
                    help="copy the outputs of the steps not run from runs/TAG/ of each beat (TAG itself: in place); "
                         "fails before running when one is missing")
+    s.add_argument("--keep-workers", action=argparse.BooleanOptionalAction, default=True,
+                   help="keep beat_this's and Basic Pitch's workers running from one beat to the next in each job "
+                        "(default on: about 2 s a beat less, about 0.9 GB more held per job)")
     s.add_argument("--cache", action=argparse.BooleanOptionalAction, default=False,
                    help="keep the 808 reader's results and the fits in each beat's cache/ and read them back where "
-                        "the stems or the template, the settings and the package's code are the same (default off: "
+                        "the stems or the template, the settings and the code of the step (its module and every module "
+                        "it imports) are the same (default off: "
                         "every step runs, and its seconds are the code's)")
     _analyze_options(s)
     _match_options(s)
