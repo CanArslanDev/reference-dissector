@@ -26,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import served
+
 FRAME_S = 256 / 22050
 WINDOW_FRAMES = 172
 # each window's start moves back by this much (Basic Pitch's own constants,
@@ -101,8 +103,13 @@ def transcribe(audio: list[str | Path], out_dir: str | Path, presets: dict, file
     min_hz}}) overrides the presets for a file, whose tuning (semitones from
     A440) is taken out before inference. Writes OUT_DIR/<stem>.json (notes per
     preset in the file's seconds, tuning, time_scale) and OUT_DIR/<stem>.npz
-    (posteriorgrams, float16; frame times block_times x time_scale)."""
-    done = subprocess.run(command(audio, out_dir, presets, files), capture_output=True, text=True)
+    (posteriorgrams, float16; frame times block_times x time_scale). With
+    served.keep on, by the worker kept running (served.py)."""
+    cmd = command(audio, out_dir, presets, files)
+    if served.kept():
+        at = cmd.index(str(WORKER)) + 1
+        return served.ask(cmd[:at], {"argv": cmd[at:]})
+    done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
         raise RuntimeError(f"Basic Pitch failed:\n{done.stderr[-2000:]}")
     return json.loads(done.stdout.strip().splitlines()[-1])

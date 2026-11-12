@@ -151,6 +151,8 @@ uv run --extra live refdissect live-build "$W/song/refdissect"   # into an empty
 # comparing and choosing (docs/11)
 uv run refdissect separate rebuild.wav --out "$W/song/rebuild_stems"      # the same model as the reference
 uv run refdissect compare "$W/song/stems" "$W/song/rebuild_stems" --out "$W/song/compare.json"
+uv run refdissect check-rebuild "$W/song/refdissect" --reference song.mp3 --mp3 256   # the plan rendered, mastered
+                                    # like the song, separated alike: descriptors before/after, null tests (local)
 uv run refdissect listening-round ref.wav cand1.wav cand2.wav --question "Which chords?" --out "$W/song/round1"
 uv run refdissect space "$W/song/stems/other.wav" --spans 40-56 100-116
 uv run refdissect mix-gains "$W/song/recorded" --targets targets.json
@@ -172,7 +174,7 @@ uv run refdissect suite report "$S" --tags mine,mine-b --out "$W/work/mine-b.md"
 ```
 
 Every step writes JSON next to its inputs, so you can read what it decided before the next step uses it.
-- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and every `.py` file of the package as the process loaded it. The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
+- `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and the `.py` files of the step as the process loaded them: the module that makes the result and every module of the package it imports (an edit elsewhere, to `live.py` say, keeps them). The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
 - `scripts/export_results.py` turns a work folder into the shareable `results/` and `figures/`: no audio, and no file names from a personal library.
 - `scripts/export_results.py --suite DIR TAG` publishes a suite tag's means per scenario, and nothing else.
 - `--v1-truth` takes the six v1 beats rebuilt with truth stems. No command here makes them: without them the suite has the 42 scenario beats. [12](docs/12-replica-mode.md) has every suite option.
@@ -190,7 +192,7 @@ uv run ruff check .
 - The 48 test functions marked `slow` (62 test items, with their parameters) took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
 - With `-n`, an idle worker takes tests from a busy one (`--dist worksteal`, set in pyproject). At -n 4 that cut the whole suite from 132 s to 94–96 s.
 - On a machine you are working on, `-n 4` leaves cores free.
-- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`; its time there is not measured yet.
+- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`: a job took 3m50s on ubuntu and 4m40s on macOS (PR #2), 4m44s and 7m55s (PR #3), 2m51s and 2m14s, then 6m10s and 7m23s on main after each merge; in one process 7.4 and 12.6 min (PR #1's last run). GitHub's runners vary from run to run.
 
 For pipeline changes, iterate on the suite's dev subset, then measure on every beat:
 
@@ -253,6 +255,8 @@ src/refdissect/
   listening.py   A/B files: reference, beep, candidate at equal loudness
   mixsim.py      gains decided on recorded stems instead of re-recording
   symmetric.py   a rebuild and its reference measured the same way, against the reference's own spread
+  mastering.py   a rebuild mastered like its reference: loudness, spectral tilt, a limiter at its peak, mp3
+  rebuildcheck.py  check-rebuild: a plan rendered, mastered, separated alike; null tests per stem and per sound
   rounds.py      listening rounds: numbered reference-beep-candidate files and a manifest
   live.py        plan (pads with Transpose, Detune and a Volume each; the 808 with Detune and Glide), MIDI files, the build
   render.py      a plan played offline, as the plan-level scores assume Live plays it
@@ -264,7 +268,8 @@ src/refdissect/
   calibrate.py   calibration v1: synthetic beats and their scoring
   figures.py     spectrograms side by side, the calibration plot
   pipeline.py    the steps, each writing JSON
-  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and the code
+  cache.py       the 808 reader's results and the 808 fits kept on disk, keyed on their inputs and their step's code
+  served.py      beat_this's and Basic Pitch's workers kept running between a suite job's beats
   cli.py         refdissect
   workers/       the Demucs, beat_this and Basic Pitch workers
 results/         measured numbers (calibration v1, the suite's means per scenario, PIRAMIT) - no audio
@@ -281,6 +286,7 @@ This is a working pipeline with measured limits, not a finished product:
 - **The levels are read on the stems.** Each pad's Volume comes from the separated stems. On the suite the plan sits 1.20 dB from a perfect kit (1.25 at m4; 4.09 dB at m3, with every pad at 0 dB), but at m4 the kick against the snare was further off than at m3 on 2 of 42 beats, and one voice per pad took dynamics 1.27 → 2.16 dB. A song has no truth to check its levels against.
 - **One Detune for every 808 note.** The one-shot now follows its template's pitch, and bass_low-1's plan notes are right (F1 0.72 → 1.00). A note the analysis hears off the line's tuning is still played at that tuning: full's plan 808 notes fell 0.890 → 0.851.
 - **The build in Live is checked, not finished.** Built and recorded on 2026-10-29 (Live 12.4.6): on four m5 plans and PIRAMIT's every Simpler held its plan's file, and Live played the drum hits within 0.04 ms and the 808 notes within 0.11 ms of `render.py`. The levels differ only by Simpler's top-end loss, which `render.py` does not model (hats up to 0.97 dB). Not verified: `refdissect live-build` itself end to end (Live served 8 clients, so the checks sent its calls through their own session), one `build_tracks` call of a song's size, htdemucs_ft plans, a whole plan with Glide (an 8-bar excerpt played its slides as `render.py` does) and choke groups; locators off Live's Arrangement grid are deleted, not placed.
+- **A rebuild can be checked like the song, offline** (`check-rebuild`, [11](docs/11-style-beat-lessons.md#checking-a-rebuild-the-same-way-rebuildcheck-mastering)). The plan is rendered, mastered like the song (loudness, tilt, peak) and separated by the same Demucs. On 11 suite beats its per-sound null tests rank sounds as the suite's F1@20 does (Spearman −0.90 on htdemucs, −0.86 on htdemucs_ft), on magnitudes; the waveform null does not, since a hat 0.2 ms off nulls at 0 dB. Separated against separated, which is all a song allows, the drums' null hardly ranks beats as their drum F1 does (−0.06, −0.30).
 - **Melodies are transcribed but not played.** They go to muted placeholder tracks, and the original melodic stems play under the rebuilt beat.
 - **The 808's slides are off by default.** The reader writes no legato notes unless asked (`--slides`). Asked, it finds 8 of seed 1's 10 slides (in-sample) but 4 of seed 2's 14 and 5 of 22 on held-out beats of a new kit and pattern (htdemucs), and beats without a slide get false legato notes (4 notes on each model). The rule before it, which called every unattacked pitch move a slide, was right 6 times in 79.
 

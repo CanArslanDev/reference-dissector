@@ -3,6 +3,7 @@ Core ML model on macOS; no TensorFlow in this package's). Standalone on
 purpose: imports nothing from refdissect.
 
 usage: basicpitch_worker.py OUT_DIR SETTINGS AUDIO [AUDIO ...]
+       basicpitch_worker.py --serve
 SETTINGS is JSON: {"presets": {name: {onset, frame, min_ms, melodia, min_hz,
 max_hz}}, "files": {audio file stem: {tuning, min_hz}}}; a file's entry
 overrides the presets for that file, and its tuning (semitones from A440) is
@@ -10,7 +11,10 @@ taken out before inference (load), so its min_hz is on A440 too. Per audio
 file the model runs once; its posteriorgrams go to OUT_DIR/<name>.npz
 (float16, frames at block_times x time_scale in the file) and every preset is
 decoded from them into OUT_DIR/<name>.json (with tuning and time_scale).
-Prints one JSON line with the result.
+Prints one JSON line with the result. With --serve it keeps running
+(refdissect/served.py) and loads the model once: each line on its standard
+input is {"argv": the arguments of a call}, answered on one line, MARK and
+then {"result": what the call prints} or {"error": ...}.
 
 Four things differ from basic_pitch.inference.predict, each measured:
 - 0.4.0 keeps 86 frames per second of the 86.58 it makes (142 frames per
@@ -127,17 +131,24 @@ def decode(output: dict, s: dict, scale: float = 1.0) -> list[dict]:
     return sorted(notes, key=lambda n: (n["start_s"], n["midi"]))
 
 
-def main() -> int:
+MARK = "#refdissect-served# "  # served.MARK
+
+
+def load_model():
     from basic_pitch import ICASSP_2022_MODEL_PATH
     from basic_pitch.inference import Model
 
-    out_dir, settings = Path(sys.argv[1]), json.loads(sys.argv[2])
-    out_dir.mkdir(parents=True, exist_ok=True)
     with contextlib.redirect_stdout(io.StringIO()):
-        model = Model(ICASSP_2022_MODEL_PATH)
+        return Model(ICASSP_2022_MODEL_PATH)
+
+
+def run(argv: list[str], model) -> dict:
+    """A call's output for its arguments (OUT_DIR SETTINGS AUDIO ...)."""
+    out_dir, settings = Path(argv[0]), json.loads(argv[1])
+    out_dir.mkdir(parents=True, exist_ok=True)
     result = {"stems": {}, "model": "basic-pitch 0.4.0", "backend": model.model_type.name,
               "python": platform.python_version(), "settings": settings}
-    for path in sys.argv[3:]:
+    for path in argv[2:]:
         name = Path(path).stem
         tuning = float(settings.get("files", {}).get(name, {}).get("tuning", 0.0))
         t = time.time()
@@ -154,7 +165,29 @@ def main() -> int:
         result["stems"][name] = {"notes": str(target), "posteriorgram": str(out_dir / f"{name}.npz"),
                                  "seconds": seconds, "infer_s": round(infer_s, 2),
                                  "notes_per_preset": {k: len(v) for k, v in notes.items()}}
-    print(json.dumps(result))
+    return result
+
+
+def serve(model) -> int:
+    """Calls answered one per line until the standard input closes."""
+    import traceback
+
+    for line in sys.stdin:
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                answer = {"result": run(json.loads(line)["argv"], model)}
+        except Exception as e:
+            traceback.print_exc()
+            answer = {"error": f"{type(e).__name__}: {e}"}
+        sys.stdout.write(MARK + json.dumps(answer) + "\n")
+        sys.stdout.flush()
+    return 0
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--serve"]:
+        return serve(load_model())
+    print(json.dumps(run(sys.argv[1:], load_model())))
     return 0
 
 
