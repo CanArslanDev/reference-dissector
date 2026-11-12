@@ -53,7 +53,7 @@ A score is only meaningful with a threshold checked on cases with a known answer
 - **Average many hits** before judging one sound.
 - **Line up and band-limit** both sides the same way: the same attack point, the same filter, enough lag to cover onset uncertainty (±30 ms).
 - **Match levels** before comparing spectra. Compare loudness separately.
-- **Compare like with like** ("symmetric comparison"). A sound from a mixed, mastered, mp3'd, separated song should be compared with a candidate that went through the same chain. `refdissect compare` measures two stem sets separated by the same model the same way, against the reference's own spread ([11](11-style-beat-lessons.md)). Rendering the Live build and mastering it like the reference is on the [roadmap](10-roadmap.md).
+- **Compare like with like** ("symmetric comparison"). A sound from a mixed, mastered, mp3'd, separated song should be compared with a candidate that went through the same chain. `refdissect compare` measures two stem sets separated by the same model the same way, against the reference's own spread ([11](11-style-beat-lessons.md)). `refdissect check-rebuild` renders a plan offline, masters it like the reference (loudness, tilt, peak ceiling) and separates it with the same model, so that compare's two sides went through the same chain ([11](11-style-beat-lessons.md#checking-a-rebuild-the-same-way-rebuildcheck-mastering)). Doing the same from Live's own recording is on the [roadmap](10-roadmap.md).
 - **Use several measures and require them to agree;** show the picture when they disagree.
 - **The ear decides last.** The Live build keeps the original stems muted under the rebuilt parts, so A/B is two clicks.
 

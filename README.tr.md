@@ -91,6 +91,9 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 - `suite run --subset dev`: süitin her senaryo ailesinden birer beat alan 11 beat'lik geliştirme alt kümesi; `--cache` ile denemeler için.
 - `suite clean DIR --keep a,b`: tutulmayan etiketlerin çalıştırma klasörlerini boşaltır, her birinin `scores.json`'unu saklar. `--yes` verilmezse yalnızca neyin silineceğini listeler.
 - `live-build --bars A-B`: planın yalnızca A–B ölçülerini, 0'dan başlatarak kurar; stem'ler aynı anlarda kesilir. Kısa bir Live kontrolü içindir; henüz Live'da çalıştırılmadı.
+- `check-rebuild WORK --reference MIX`: planı Live'sız, `render.py` ile çalar; referans gibi mastering yapar (referans mix'ten ölçülen loudness, spektral eğim ve tepe seviyesi; istenirse aynı mp3) ve referansın stem'lerini ayıran Demucs modeli, seed'i ve shift'iyle ayırır. Böylece ayırmanın izleri iki tarafta da olur. Önce/sonra betimleyici farkları, stem başına null testleri ve `--truth` ile ses başına null testleri yazar. Çıktısı şarkının stem'lerini tuttuğu için yerelde kalmalı ([11](docs/11-style-beat-lessons.md#checking-a-rebuild-the-same-way-rebuildcheck-mastering)).
+  - Geliştirme alt kümesinin 11 beat'inde (m5 ve m5-ft planları): ses başına genlik spektrumu null'ı, sesleri süitin F1@20'si gibi sıralıyor (Spearman −0,90; htdemucs_ft −0,86). Dalga biçimi null'ı sıralamıyor (+0,11; +0,17): 0,2 ms kaymış bir hat 0 dB'de kalıyor. İki taraf da ayrıldığında davulların null'ı beat'leri davul F1'i gibi neredeyse hiç sıralamıyor (−0,06; −0,30).
+  - İki tarafı da ayırmak, davul LUFS farkını 3,9 → 0,8 dB'e, basınkini 2,8 → 0,3 dB'e indirdi (htdemucs). Kusursuz bir yeniden yapım (doğrunun kendi premix'i aynı zincirden geçince) yine de ~78 ölçünün 22'sinde farklı: "sonra" sayıları 0'a göre değil bu tabana göre okunmalı.
 
 Komutların tamamı README.md'nin "Quick start" bölümünde, ayrıntıları docs/12'de.
 
