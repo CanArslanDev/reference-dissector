@@ -107,7 +107,7 @@ uv run ruff check .
 - `slow` işaretli 48 test fonksiyonu (parametreleriyle 62 test), tek süreçte her biri 2 s ya da daha uzun sürdü: 308 s'lik test süresinin 250 s'si. Hızlı döngü bunları atlar; commit'ten önceki kontrol yine bütün testlerdir.
 - `-n` ile boşta kalan bir işçi, meşgul olanın testlerini alıyor (`--dist worksteal`, pyproject'te). -n 4'te bütün testler 132 s'den 94–96 s'ye indi.
 - Üzerinde çalıştığın bir bilgisayarda `-n 4` çekirdek bırakır.
-- Ölçüm 10 çekirdekli Apple M4'te (04–05.11.2026): 366 geçti, 3 atlandı, 2 beklenen hata (tek süreç süresi, kütüphane deposunun 1 s'den kısa süren 3 testinden önce, 363 testle ölçüldü). CI `-n auto` ile çalışıyor; oradaki süresi henüz ölçülmedi.
+- Ölçüm 10 çekirdekli Apple M4'te (04–05.11.2026): 366 geçti, 3 atlandı, 2 beklenen hata (tek süreç süresi, kütüphane deposunun 1 s'den kısa süren 3 testinden önce, 363 testle ölçüldü). CI `-n auto` ile çalışıyor: bir iş ubuntu'da 3 dk 50 s, macOS'ta 4 dk 40 s (PR #2), 4 dk 44 s ve 7 dk 55 s (PR #3), her birleştirmeden sonra main'de 2 dk 51 s ve 2 dk 14 s, sonra 6 dk 10 s ve 7 dk 23 s sürdü; tek süreçte 7,4 ve 12,6 dk (PR #1'in son çalışması). GitHub'ın makineleri çalışmadan çalışmaya değişiyor.
 
 Boru hattında bir değişiklik denerken önce geliştirme alt kümesinde dene, sonra bütün beat'lerde ölç:
 

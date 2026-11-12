@@ -154,7 +154,7 @@ Now (m3a, 2 jobs, Apple M4 with Live open): 112.6 s a beat after separation, 45 
 
 Done, every output the same:
 - Kept results, read back by the `analyze` and `fit-808` commands and by `suite run --cache` (above).
-- The tests in parallel (pytest-xdist, `--dist worksteal`): the whole suite 307 s in one process, 94–96 s at `-n 4`; the 48 test functions of 2 s or more (62 items) marked `slow`, and the fast loop without them 306 tests in 22 s at `-n 4`. CI runs `-n auto`.
+- The tests in parallel (pytest-xdist, `--dist worksteal`): the whole suite 307 s in one process, 94–96 s at `-n 4`; the 48 test functions of 2 s or more (62 items) marked `slow`, and the fast loop without them 306 tests in 22 s at `-n 4`. CI runs `-n auto`: a job took 3m50s on ubuntu and 4m40s on macOS (PR #2), 4m44s and 7m55s (PR #3), 2m14s–7m23s on main after the merges, against 7.4 and 12.6 min in one process (PR #1's last run).
 - The dev subset (`suite run --subset dev`, [03](03-calibration.md#a-dev-subset)): 11 beats, 260–268 s at 2 jobs with `--cache` read back. Every change of 0.01 or more over the 48 beats moved the same way on it, in the one tag pair compared on its own beats that had any (7 of 7, with one move of +0.025 on the subset that the 48 beats did not show) and in four pairs compared on its scenarios' 22 beats (in-sample).
 - The library memory-mapped from `.npy` stores beside each `.npz`: a run's jobs share one copy, and each job peaked at 1.0 GB of physical footprint instead of 1.7–1.8 GB at 2 jobs, at the same wall time ([12](12-replica-mode.md#the-suite)).
 - `suite clean`: the run folders of the tags not kept emptied, their `scores.json` kept.
@@ -165,7 +165,6 @@ Measured and left out, because the outputs changed:
 
 **Next:**
 - `live-build --bars` in Live: the minutes of a short check, and its recording against the excerpt's offline render.
-- CI's time with `-n auto` on ubuntu and macOS (7.4 and 12.6 min in one process); not measured, nothing was pushed.
 - Memory at 4 jobs with Live open, where swap reached 7–9 GB before the library was shared; not tested (2 jobs is this machine's limit).
 - fit-808, now the biggest step of a cold run (46 s), and match, the biggest of a cached one (33 s): faster only with the same outputs.
 - A controlled timing of the whole suite (m3a shared the machine with Live, m2g did not).

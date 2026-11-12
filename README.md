@@ -188,7 +188,7 @@ uv run ruff check .
 - The 48 test functions marked `slow` (62 test items, with their parameters) took 2 s or more each in one process: 250 of the 308 s of test time. The fast loop leaves them out; the whole suite stays the gate.
 - With `-n`, an idle worker takes tests from a busy one (`--dist worksteal`, set in pyproject). At -n 4 that cut the whole suite from 132 s to 94–96 s.
 - On a machine you are working on, `-n 4` leaves cores free.
-- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`; its time there is not measured yet.
+- Measured on a 10-core Apple M4 (2026-11-04/05): 366 passed, 3 skipped, 2 expected failures (the one-process time with 363, before the library store's 3 tests, which take under 1 s). CI runs `-n auto`: a job took 3m50s on ubuntu and 4m40s on macOS (PR #2), 4m44s and 7m55s (PR #3), 2m51s and 2m14s, then 6m10s and 7m23s on main after each merge; in one process 7.4 and 12.6 min (PR #1's last run). GitHub's runners vary from run to run.
 
 For pipeline changes, iterate on the suite's dev subset, then measure on every beat:
 
