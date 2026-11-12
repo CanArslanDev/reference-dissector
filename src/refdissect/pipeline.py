@@ -607,7 +607,8 @@ def fit_808(work: str | Path, stems_dir: str | Path | None = None, library_808: 
             log=print, cache: str | Path | bool = False, **fit_options) -> dict:
     """Fit the 808 on bass808's template notes (drums + bass, so the attack
     is in) and write a one-shot at the 808's settled pitch. fit_options go
-    to synth808.fit (maxiter, popsize: a smaller search for tests). cache:
+    to synth808.fit (maxiter, popsize: a smaller search for tests; grit:
+    the grittier voice, asymmetric drive and an upper-harmonic term). cache:
     the folder synth808.fit keeps its fits in (True: work/cache, as the
     command has it; by default none), so a run whose template, settings and
     code are unchanged reads its fit back (synth808.json's fit.cached names

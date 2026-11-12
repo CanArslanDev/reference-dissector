@@ -191,7 +191,7 @@ Measured on m5 where m5 moved a number (the plan's levels, meter and 808 timing)
 | Levels per role in single scenarios: bass_low's kick (the hat's file on its hits); on htdemucs_ft, dynamics' and tempo72's snares | bass_low kick −13.5 dB against the kit (−15.4 at m4, −12.1 at m3), snare −0.6 (−2.5, −1.3); htdemucs_ft dynamics snare −4.3 (−3.8, −1.0), tempo72 snare −2.9 (−2.9, −0.4) | within 1 dB of the kit (an estimate) |
 | Balance is read across the drum and bass groups, whose kit offsets differ (htdemucs drums 5.52 dB under the truth's, bass 0.96 dB) | the 808's balance +2.50 dB (+2.70 at m4; −1.76); htdemucs_ft −0.14 (−0.05; −3.96) | balance scored within each stem group |
 | The 808's level: its fader matches the bass stem's whole-track RMS (item 1) | the 808 −1.87 dB against the kit (−1.98); htdemucs_ft −2.01 (−2.24) | match faders the way levels are scored |
-| A kick is read under the plan's own 808, so a change to the one-shot moves the drum levels | against the levels alone: 109 of 227 pad Volumes moved, by up to 1.7 dB; the distance from the kit worse in 11 of 22 scenarios, by up to 0.20 dB, better overall (1.27 → 1.25 dB) | measure the levels again after every 808 change |
+| A kick is read under the plan's own 808, so a change to the one-shot moves the drum levels | against the levels alone: 109 of 227 pad Volumes moved, by up to 1.7 dB; the distance from the kit worse in 11 of 22 scenarios, by up to 0.20 dB, better overall (1.27 → 1.25 dB). The grittier one-shot (`--grit`, gr-1): worse in 9 of 22 scenarios (htdemucs_ft 13), by up to 0.74 dB (tempo95, swing66), kick −0.84 → −0.89 dB from the kit (htdemucs_ft −0.04 → −0.17) | measure the levels again after every 808 change; a kick level that does not move with the one-shot |
 | A kick with no plan 808 to read under (no one-shot, or no bass stem) is read with the 808 in it, or on the drum stem alone | no suite beat lacks either | – |
 | Simpler's top-end loss is not in `render.py` (item 1) | in Live hats 0.06–0.97 dB and snares 0.03–0.16 dB under `render.py`; v1orig-3's balance 0.17 → 0.57 dB | every pad within 0.5 dB of the offline render (an estimate) |
 | One voice per pad moved dynamics (m4 → m5) | dynamics 1.27 → 2.16 dB from the kit; dynamics-2 0.34 → 2.03 dB | no scenario further off than at m4 |
@@ -241,6 +241,12 @@ These are from before replica mode, and still open.
    - **Measured by:** per-sound null tests and descriptor differences before/after.
 2. **A grittier 808.** Extend the voice with asymmetric drive and a weighted upper-harmonic term.
    - **Measured by:** harmonics 6–12 within 3 dB, glide shape.
+   - *Done, behind `--grit`, off by default* (2026-11-11; tags gr-1 and gr-1-ft; [05](05-808-synthesis.md#a-grittier-voice)).
+     - Harmonics 6–12 are within 3 dB of the template's on 45 of 48 beats (21 with the plain voice), 44 of 48 on htdemucs_ft (24); median 3.5 → 1.4 dB.
+     - The glide shape is unchanged: the drop is the plain fit's, and the one-shot's pitch curve sits a median 0.1 cents from the plain one-shot's.
+     - It stays off because the plan's levels and some 808 numbers get worse. On htdemucs_ft the distance from the kit goes 1.152 → 1.193 dB, balance 0.476 → 0.551 dB, 808 note F1@50 0.9345 → 0.9342 and the settled pitch 6.89 → 7.14 cents. On htdemucs the kick sits −0.84 → −0.89 dB from the kit, its balance −0.81 → −1.19 dB, and the settled pitch 3.66 → 3.77 cents.
+     - It also adds 39 s of fit a beat.
+   - Still to do: on by default, once the kick's level no longer depends on the one-shot (item 6, "A kick is read under the plan's own 808"); then judge it by ear.
 3. **Melodic instruments.** The plan's melodic tracks are muted and play a placeholder (Drift). Choose instruments by CLAP (`find_similar_sounds`), or synthesize them.
    - **Measured by:** note F1 against hand-checked bars; chroma distance.
 4. **Style mode and profiles** (the original brief):
