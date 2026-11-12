@@ -27,7 +27,10 @@ check:
   its note and starts RETRIGGER_S late, as Live 12.4.6 played 391 such hits
   (late_starts); mono=False sums them;
 - pads with the same choke_group [None] cut each other: a hit fades out the
-  sounding hits of the group's other pads;
+  sounding hits of the group's other pads along a straight line over
+  CHOKE_S from where it starts, as Live 12.4.6 cuts them (groups 1 to 16;
+  0 is none), and a hit whose pad's hit before was cut so starts on time
+  (choke_voices);
 - the 808 Simpler plays its one-shot per note, transposed by
   (pitch - 60) + transpose + detune_cents / 100 semitones (Simpler plays a
   sample at its own pitch on C3; with live.tune_808's Transpose and Detune
@@ -42,8 +45,8 @@ check:
   over glide_time_ms, and stops at the last note's end (chains_808; measured
   in Live 12.4.6 on a 1 kHz sine: overlapping notes only, exactly the Glide
   Time, for 2 to 12 semitones);
-- a pad cut by its note's end (Classic) or its choke group fades out along
-  a straight line over fade_ms [5 ms] from the cut;
+- a pad cut by its note's end (Classic) fades out along a straight line
+  over fade_ms [5 ms] from the cut (not measured in Live);
 - no effects; the reference stems Live plays beside these are the
   reference's own and are not rendered.
 
@@ -78,6 +81,10 @@ TRACK_808 = {"cents": 0.0, "detune_cents": 0.0, "start_s": 0.0, "volume_db": 0.0
 # (median; 98 % within 0.95-1.05 ms, read on a 1/32 ms grid), the hit before gone in that ms, and 13 hits within
 # their pad's file but after Snap had ended its voice started on time
 RETRIGGER_S = 0.001
+# A choke group cuts the sounding pads of the group's other pads along a straight line over CHOKE_S from the new
+# hit's onset (ableton-live-mcp's battery, Live 12.4.6, 2026-10-19). render.py had faded such a cut over 5 ms.
+# Groups 1 to 16 choke; 0 is none (Live refuses 17, 99 and -1)
+CHOKE_S = 0.001
 # With Glide on (one voice), whether a note that comes while the chain before still sounds in its release, at any
 # pitch, takes that voice over as a note of its pitch does without Glide (late_808 mono: the chain faded out over
 # RETRIGGER_S from the note, the note RETRIGGER_S late, planned that much earlier). Not measured in Live (a note 1,
@@ -294,21 +301,35 @@ def _place(track: np.ndarray, x: np.ndarray, a: int, gain: float) -> None:
         track[a:b] += gain * x[: b - a]
 
 
-def _chokes(hits: list[dict], group_of: dict) -> None:
-    """Shorten each hit's stop to the first later hit that cuts it: one of
-    another pad in its choke group (with the render's fade)."""
-    hits.sort(key=lambda h: h["a"])
-    for k, h in enumerate(hits):
-        group = group_of.get(h["pad"])
-        if group is None:
-            continue
-        for g in hits[k + 1:]:
-            if g["a"] >= h["stop"]:
-                break
-            if g["pad"] != h["pad"] and g["a"] > h["a"] and group_of.get(g["pad"]) == group:
-                h["stop"] = g["a"]
-                h.pop("fade", None)
-                break
+def choke_voices(times, rings, pads: list[str], group_of: dict, mono: bool = True) -> tuple[np.ndarray, list]:
+    """Which of the notes of a choke group's pads (in time order: their
+    times, how long each one's sound lasts from where it starts, s, and its
+    pad) Live starts RETRIGGER_S late, and which later note cuts each one
+    (an index, or None). A note cuts the sounding hit of another pad of its
+    group that started before it, from where it starts (CHOKE_S); with mono
+    (one voice per pad) it also cuts its own pad's hit before, and starts
+    late, while that one still sounds, as late_starts has it: a hit a choke
+    has cut no longer sounds, and the hit after it starts on time."""
+    n = len(times)
+    late, cut_by = np.zeros(n, bool), [None] * n
+    start, end = np.zeros(n), np.zeros(n)
+    last: dict[str, int] = {}
+    for i in range(n):
+        j = last.get(pads[i])
+        if mono and j is not None and times[i] < end[j]:
+            late[i], end[j], cut_by[j] = True, times[i], i
+        start[i] = times[i] + RETRIGGER_S * late[i]
+        end[i] = start[i] + rings[i]
+        for q, k in last.items():
+            if q != pads[i] and group_of.get(q) == group_of.get(pads[i]) and start[k] < start[i] < end[k]:
+                end[k], cut_by[k] = start[i], i
+        last[pads[i]] = i
+    return late, cut_by
+
+
+def grouped(group_of: dict) -> dict:
+    """The pads that choke (choke_group 1 to 16) and their groups."""
+    return {k: int(g) for k, g in group_of.items() if g is not None and int(g) > 0}
 
 
 def _write(path: Path, x: np.ndarray) -> None:
@@ -322,40 +343,67 @@ def pad_hits(plan: dict, shots: dict, settings: dict, velocity_curve="live", fad
     played, settings[key] its pad_settings), as Live plays them: per hit its
     pad, t (s) and a (sample) where its sample starts, stop (sample) and
     gain (the drum fader with faders, the pad's Volume, the scale of its
-    file's copy file_db, the velocity's level). mono: one voice per pad (late_starts), a hit that comes while
-    the pad's hit before plays cutting that one at its note (its fade
-    RETRIGGER_S long) and starting RETRIGGER_S late. Choke groups cut
-    across pads after that (_chokes)."""
+    file's copy file_db, the velocity's level), in the order they start.
+    mono: one voice per pad (late_starts), a hit that comes while the pad's
+    hit before plays cutting that one at its note (its fade RETRIGGER_S
+    long) and starting RETRIGGER_S late. The pads of a choke group
+    (choke_group 1 to 16) are played together (choke_voices): a hit cuts the
+    sounding hits of the group's other pads where it starts (their fade
+    CHOKE_S long)."""
     bps = plan["tempo"] / 60
     g_track = 10 ** ((fader_db(plan, "drums") if faders else 0.0) / 20)
-    late_n = int(round(RETRIGGER_S * SR))
+    late_n, choke_n = int(round(RETRIGGER_S * SR)), int(round(CHOKE_S * SR))
+    group_of = grouped({k: settings[k]["choke_group"] for k in shots})
     by_pad: dict[str, list[dict]] = {}
     for n in plan["tracks"]["drums"]["notes"]:
         if str(n["pitch"]) in shots:
             by_pad.setdefault(str(n["pitch"]), []).append(n)
+
+    def hit(key: str, n: dict, t: float, late: bool) -> dict:
+        s = settings[key]
+        on = int(round(t * SR))  # the note
+        a = on + late_n * int(late)
+        stop = a + len(shots[key])
+        if s["playback_mode"] == "classic":
+            stop = min(stop, on + int(round(n["duration"] / bps * SR)))
+        curve = s["velocity_curve"] or velocity_curve
+        return {"pad": key, "t": float(t) + RETRIGGER_S * int(late), "a": a, "stop": stop, "late": bool(late),
+                "velocity": int(n["velocity"]),
+                "gain": g_track * 10 ** ((s["volume_db"] + s["file_db"]) / 20)
+                * velocity_gain(n["velocity"], curve, s["vol_vel"])}
+
+    def ring(key: str, n: dict, t: float) -> float:
+        out = len(shots[key]) / SR
+        return min(out, n["duration"] / bps) if settings[key]["playback_mode"] == "classic" else out
+
     hits = []
     for key, notes in by_pad.items():
+        if key in group_of:
+            continue
         notes = sorted(notes, key=lambda n: n["start_time"])
-        s, length = settings[key], len(shots[key])
         t = np.array([n["start_time"] / bps for n in notes])
-        ends = t + length / SR
-        if s["playback_mode"] == "classic":
-            ends = np.minimum(ends, t + np.array([n["duration"] / bps for n in notes]))
+        ends = t + np.array([ring(key, n, tk) for n, tk in zip(notes, t)])
         late = late_starts(t, ends) if mono else np.zeros(len(t), bool)
         for k, n in enumerate(notes):
-            on = int(round(t[k] * SR))  # the note
             if late[k]:  # the pad's hit before, appended last, fades out from this note
-                hits[-1]["stop"], hits[-1]["fade"] = on, late_n
-            a = on + late_n * int(late[k])
-            stop = a + length
-            if s["playback_mode"] == "classic":
-                stop = min(stop, on + int(round(n["duration"] / bps * SR)))
-            curve = s["velocity_curve"] or velocity_curve
-            g_pad = g_track * 10 ** ((s["volume_db"] + s["file_db"]) / 20)
-            hits.append({"pad": key, "t": float(t[k]) + RETRIGGER_S * int(late[k]), "a": a, "stop": stop,
-                         "late": bool(late[k]), "velocity": int(n["velocity"]),
-                         "gain": g_pad * velocity_gain(n["velocity"], curve, s["vol_vel"])})
-    _chokes(hits, {k: s["choke_group"] for k, s in settings.items()})
+                hits[-1]["stop"], hits[-1]["fade"] = int(round(t[k] * SR)), late_n
+            hits.append(hit(key, n, t[k], late[k]))
+    for group in sorted(set(group_of.values())):
+        notes = sorted(((n["start_time"] / bps, key, n) for key in by_pad if group_of.get(key) == group
+                        for n in by_pad[key]), key=lambda e: e[0])
+        t = np.array([e[0] for e in notes])
+        late, cut_by = choke_voices(t, [ring(key, n, tk) for tk, key, n in notes], [e[1] for e in notes], group_of,
+                                    mono)
+        mine = [hit(key, n, tk, late[i]) for i, (tk, key, n) in enumerate(notes)]
+        for i, j in enumerate(cut_by):
+            if j is None:
+                continue
+            if notes[j][1] == notes[i][1]:  # its pad's next hit: from that note, over RETRIGGER_S
+                mine[i]["stop"], mine[i]["fade"] = int(round(t[j] * SR)), late_n
+            else:  # another pad of its group: from where that hit starts, over CHOKE_S
+                mine[i]["stop"], mine[i]["fade"] = mine[j]["a"], choke_n
+        hits += mine
+    hits.sort(key=lambda h: h["a"])
     return hits
 
 

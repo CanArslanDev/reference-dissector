@@ -24,7 +24,7 @@ Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode), and the time signature, to the plan's meter (3/4 for meter34), before any locator;
 - locators at section starts, rounded to whole beats; one that Live puts elsewhere is deleted and reported;
 - the view, to the Arrangement with the playhead at 0;
-- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live holds a pad's Volume a display step under the text sent and plays what it holds within 0.003 dB (below).
+- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back (not verified in Live).
 
 After `build_tracks` the build reads back the file each Simpler holds and compares it with the plan's.
 
@@ -40,8 +40,10 @@ After `build_tracks` the build reads back the file each Simpler holds and compar
 3. The one-shot and every pad's file are copied into the User Library (`Samples/AbletonMCP Generated/`) under names of their content, unless a file there holds that content already.
 4. `build_tracks`, with `live.build_spec(plan)`.
 5. `place_locators`, then the cue points read back; a cue Live made elsewhere is deleted.
-6. The read-back of every Simpler's file.
-7. With Glide on, the 808's voices; then the view.
+6. The choke group of each pad that has one, set on its chain with `lom_set_property` and read back (`live.set_chokes`).
+7. Each pad's Volume read back (`live.held_volumes`); a pad that does not hold the number sent gets the display text, as before, and is reported.
+8. The read-back of every Simpler's file.
+9. With Glide on, the 808's voices; then the view.
 
 `live.build_spec(plan)` is the whole spec of the one `build_tracks` call:
 - **808**: `{"sample": "<song> 808 (synth) <digest>.wav", "warping": false}`. `<digest>` is the first 8 hex digits of the one-shot's SHA-1 (`live.sample_808`), and the build refuses a one-shot that changed after the plan named it. Its settings come from `live.simpler_808`:
@@ -50,15 +52,16 @@ After `build_tracks` the build reads back the file each Simpler holds and compar
   - `"Snap": "Off"`, and `"F On": "Off"`, the filter;
   - `"Ve Release": "50.0 ms"`, Live's own default, sent so that `render.py`'s release holds;
   - with Glide, `"Glide Mode": "Glide"` and `"Glide Time": "<ms> ms"`.
-- **Each pad**: `{"sample": "<file name> <digest>.<ext>", "warping": false, "settings": {"Volume": "<x.y> dB", "Transpose": …, "Detune": …, "Vol < Vel": 0.35, "Snap": "Off"}}`.
+- **Each pad**: `{"sample": "<file name> <digest>.<ext>", "warping": false, "settings": {"Volume": <x.y>, "Transpose": …, "Detune": …, "Vol < Vel": 0.35, "Snap": "Off"}}`, and `"choke_group": 1` on a pad of a choke group.
   - The name is the file's own, its spaces run together, with the first 8 hex digits of its SHA-1 (`live.pad_sample`). Live's browser finds a sample by its name, and other files of a pad's name can come first (below).
   - The build refuses a pad whose file cannot be read.
-  - The Volume is the pad's `volume_db`, at most 0 dB (`render.pad_settings`), as display text with one decimal: "-6.5 dB", never "-0.0 dB"; "0.0 dB" for a pad without one.
+  - The Volume is the pad's `volume_db`, at most 0 dB (`render.pad_settings`), as a number in dB (`live.pad_volume`), which `build_tracks` sets as the parameter's value. Sent as display text ("-6.6 dB"), Live held it a display step under the text (−6.605 dB; 0.05 dB from −10 dB down). After the build the value is read back with Live's display of it; where it is not the plan's within 0.001 dB, the pad gets the text as before and is listed under `volumes_not_held`. Not verified in Live: that Simpler's Volume takes a number in dB as its value (the fake Live of the tests assumes it, as ableton-live-mcp's simulator does).
+  - With `--chokes` (off by default), the hat pads, pitched copies aside, go in one choke group where the plan found the closed hats choking the open hats ([12](12-replica-mode.md#the-stages-and-their-files)). ableton-live-mcp 2.2.0's `build_tracks` does not read `choke_group` (its replica-mode branch does), so the build sets it on each pad's chain after the call (`live_set tracks <i> devices 0 drum_pads <note> chains 0`, `choke_group`) and reads it back, under `choke_groups`. The battery set it this way in Live 12.4.6; the build's own call is not verified in Live.
 - **Melodic tracks**: `"instrument": "Drift"`, muted, with their notes.
 - **Stems**: audio tracks with one clip each, warping off.
 - **Faders**: `volume_db` from the plan's levels, at most +6 dB.
 
-On the 96 plans of the suite's m5 and m5-ft, the spec passes a check written against ableton-live-mcp 2.2.0's `build_tracks` code: only keys `build_tracks` reads, no NaN, each of the 456 pads named after its own file's content, and Snap, F On and Ve Release as above. On m4's 96 plans an earlier check of the same kind found pad Volumes from −20.7 to 0.0 dB, the 808's Detune from −8 to +14 cents, and Glide on in none.
+On the 96 plans of the suite's m5 and m5-ft, the spec passes a check written against ableton-live-mcp 2.2.0's `build_tracks` code: only keys `build_tracks` reads (a pad's `choke_group`, which no m5 plan has, is read by its replica-mode branch, not by 2.2.0), no NaN, each of the 456 pads named after its own file's content, and Snap, F On and Ve Release as above. On m4's 96 plans an earlier check of the same kind found pad Volumes from −20.7 to 0.0 dB, the 808's Detune from −8 to +14 cents, and Glide on in none.
 
 **Read-back.** After `build_tracks` the build reads the file each Simpler holds (`lom_get_object`, its sample's `file_path`) and compares it with the plan's file by the first 8 hex digits of their SHA-1s (`live.held_samples`). A Simpler that holds another file is listed under `wrong_samples` and logged.
 
@@ -68,7 +71,7 @@ On the 96 plans of the suite's m5 and m5-ft, the spec passes a check written aga
 
 `voices` is not a Simpler parameter but a property of the device, and `build_tracks` does not read it: after the call the build sets it with `lom_set_property`.
 
-ableton-live-mcp's replica-mode branch adds more to `build_tracks`: files loaded by path (`sample_path`), `playback_mode`, `start_marker`, `choke_group` and the time signature. The build uses none of them yet; ableton-live-mcp 2.2.0, which it depends on, ignores `sample_path`. Loading by path would spare the browser's search: how long the search takes for a content name was not timed.
+ableton-live-mcp's replica-mode branch adds more to `build_tracks`: files loaded by path (`sample_path`), `playback_mode`, `start_marker`, `choke_group` and the time signature. The spec carries `choke_group` on a pad of a choke group, and the build sets it itself as well; it uses none of the others yet; ableton-live-mcp 2.2.0, which it depends on, ignores `sample_path`. Loading by path would spare the browser's search: how long the search takes for a content name was not timed.
 
 ## ableton-live-mcp tools used
 
@@ -81,6 +84,8 @@ ableton-live-mcp's replica-mode branch adds more to `build_tracks`: files loaded
 | a locator Live moved | `transport` (`jump_to`, then `toggle_cue`) |
 | the file each Simpler holds | `lom_get_object` (its sample's `file_path`) |
 | the 808's voices, with Glide on | `lom_set_property` (`voices` on the 808 track's Simpler) |
+| a pad's choke group | `lom_set_property` (`choke_group` on the pad's chain), then `lom_get_object` |
+| each pad's Volume, read back | `lom_get_object` (`value` and `$display`); `run_batch` (`param_set_display`) where the number did not hold |
 | view | `select_in_live`, `transport` |
 
 Until 2026-10-17 the build called `manage_track`, `add_device`, `browser_load`, `edit_clip_notes` (200 notes per call), `set_track_mixer` and the LOM directly, track by track.
@@ -100,7 +105,7 @@ Other ableton-live-mcp tools that fit this work:
 ### Live 12.4, while building PIRAMIT (2026-10-11 to 2026-10-17)
 
 **Simpler:**
-- **Loads samples at −12 dB.** The build sets 0 dB through the display value ("0.0 dB"), so the offline level estimate holds. A pad's own Volume goes the same way ("-6.5 dB"); Live holds it a display step under the text (2026-10-29, below).
+- **Loads samples at −12 dB.** The build sets the 808's 0 dB through the display value ("0.0 dB"), so the offline level estimate holds. A pad's own Volume went the same way ("-6.5 dB"), and Live held it a display step under the text (2026-10-29, below); it now goes as a number and is read back.
 - **Plays a sample at its own pitch on C3 (MIDI 60).** To keep real note numbers, set Transpose to 60 − root; Transpose reaches ±48 semitones.
 
 **Browser:**
@@ -127,7 +132,7 @@ Measured in Live 12.4.6 (Trial) with Remote Script 2.1.0 and ableton-live-mcp's 
 - **Velocity sets the level:** dB = 0.4 × "Vol < Vel" × (velocity − 70) − 0.096 over the Volume, "Vol < Vel" as a fraction. It is 35 % on a Simpler made directly (`insert_device`) and 45 % on a pad loaded through the browser. Velocity 70 plays 0.096 dB under the Volume; velocity 127 adds 7.9 dB at 35 % and 10.2 dB at 45 %. Volume set as "0.0 dB" lands on −0.005 dB.
 - **Defaults depend on how the Simpler was made.** One made directly is Classic with its filter on; a pad loaded through the browser is One-Shot with the filter off. Both start at Volume −12 dB.
 - **Snap**, on by default, stops a sample 10–30 ms before its end with a short fade, the same on every hit: a kick lost 28.8 of its 163.5 ms, a hat 9.9 of 71.4.
-- **A choke group** cuts the sounding pad with a linear 1 ms fade from the new hit's onset.
+- **A choke group** cuts the sounding pad with a linear 1 ms fade from the new hit's onset. Groups 0 (none) to 16 are accepted; 17, 99 and −1 are refused. `render.py` cuts so (`render.CHOKE_S`); it had faded a cut over 5 ms.
 - **Glide.** With one voice and Glide Mode "Glide", overlapping notes slide linearly in semitones over exactly the Glide Time (29.95–249.5 ms for 30–250 ms), for 2 to 12 semitones alike, without starting the sample again. Notes 25 ms apart jump.
 - **Timing.** A note sounds within 0.04 ms of its time (drum hits of a 5-track build: mean +0.017 ms), and a recording adds no offset of its own.
 - **The browser keeps old content.** A pad loaded through the browser by a name Live has loaded before still plays the old file after it is overwritten on disk; a file loaded by path is read again.
@@ -252,7 +257,8 @@ Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 bea
 - **`refdissect live-build` end to end.** Both checks found Live serving 8 clients and sent the build's calls through their own session. The package's read-back, locator deletion and failure messages ran as the same commands, not as its code.
 - **One `build_tracks` call of PIRAMIT's size**, which went as 5, and **a build that stops half way**: no build of the second check failed, so the failure message has not been seen.
 - **How long the browser takes** to find a pad's content name: not timed.
-- **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups**.
+- **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups** as the build sets them: the battery's 1 ms cut is in `render.py`, but no plan with a choke group has been built, and a hit after its pad's choked hit is planned on time (not measured in Live).
+- **A pad's Volume as a number** and its read-back (`live.held_volumes`).
 - **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in, one probe placed such a locator; that is not in the build. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it.
 - **Simpler's top-end loss** per sample rate and transposition, as a curve. `render.py` does not model it: hats played up to 0.97 dB and snares up to 0.16 dB under `render.py`.
