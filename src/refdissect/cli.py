@@ -12,6 +12,7 @@
     refdissect plan work/song
     refdissect live-build work/song          (needs the [live] extra and Live running)
     refdissect live-build work/song --bars 9-16       (bars 9 to 16 only, from 0: a short live check)
+    refdissect blueprint work/song           (work/song/blueprint.json, for ableton-live-mcp's build_from_blueprint)
     refdissect calibrate work/inventory.json --library work/library.npz --out work/calibration
 
   calibration v2, a suite of beats with every answer kept (scenarios.py, suite.py):
@@ -173,6 +174,15 @@ def _build(a):
     work = path if path.is_dir() else path.parent
     out = Path(a.stems_out or work / f"excerpt-{bars[0]}-{bars[1]}") if bars else None
     asyncio.run(build(plan, a.user_library, bars=bars, stems_out=out))
+
+
+def _blueprint(a):
+    from .blueprint import write
+    try:
+        write(a.work, a.out)
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"blueprint: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
 
 
 def _bars(text: str) -> tuple[int, int]:
@@ -485,6 +495,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--stems-out", default=None,
                    help="where the excerpt's stems go (default: excerpt-A-B/ beside the plan)")
     s.set_defaults(run=_build)
+    s = sub.add_parser("blueprint", help="the plan as a blueprint (v1) for ableton-live-mcp's build_from_blueprint")
+    s.add_argument("work", help="the work folder (its plan.json) or a plan.json")
+    s.add_argument("--out", default=None, help="where it goes (default: blueprint.json beside the plan)")
+    s.set_defaults(run=_blueprint)
     s = sub.add_parser("calibrate", help="synthetic beats from known samples, scored")
     s.add_argument("inventory")
     s.add_argument("--library", required=True)

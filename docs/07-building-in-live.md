@@ -234,6 +234,39 @@ Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 
 - **The plan carries its meter**, which the build sets before the locators; a locator Live still moves is deleted, not kept where Live put it.
 - **On the suite** (plan and score again, m4 → m5, htdemucs_ft in brackets; [12](12-replica-mode.md#what-each-stage-measured) has the rest): distance from a perfect kit 1.247 → 1.198 dB [1.231 → 1.152], balance 0.552 → 0.512 dB [0.497 → 0.476]; the plan's meter right 0.909 → 0.955 and its downbeat F 0.892 → 0.924; every F1 the same. m4's own plans, played as Live plays them, would sit at 1.259 [1.242] and 0.566 [0.506] dB.
 
+## A blueprint for `build_from_blueprint`
+
+`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, on its branch `feat/reference-jobs`, PR #3, not merged yet). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
+
+```bash
+uv run refdissect blueprint "$W/song/refdissect"     # no Live, no [live] extra
+```
+
+It is what `live-build` sends, decided without Live, and `live-build` itself is unchanged: it moves to `build_from_blueprint` once that tool is merged and released.
+
+| Blueprint | From |
+|---|---|
+| `format`, `version` | `"ableton-mcp-blueprint"`, `1` |
+| `name` | the song's name, as the plan names the 808's one-shot: the folder that holds the stems' folder (else the work folder's) |
+| `made_by` | `"refdissect <version> <commit>"`, `+` after the commit when the package's files differ from it |
+| `tempo`, `length_beats` | the plan's |
+| `time_signature` | the plan's meter (`live.meter_of`) |
+| `locators` | `{"name", "beat"}` at whole beats, as the build places them |
+| `files["808"]` | the one-shot (source, the name `live.sample_808` gave it, the first 8 hex digits of its SHA-1), when the plan has one |
+| `files["pad-<note>"]` | each pad's file, under the name `live.pad_sample` gives it, with `gain_db` (the pad's `file_db`) only where that is under 0, and its SHA-1's start |
+| `tracks` | `live.build_spec(plan)`, with each sampler naming its file by its key in `files` (`"file": "808"`, `"file": "pad-38"`) in place of `"sample"`; the 808's `voices` only where the plan has them; stems' paths absolute |
+| `meta` | the plan file's name and the first 12 hex digits of its SHA-1 (the build ignores `meta`) |
+
+There is no `checks` field: every read-back is on by default. The command keeps `live-build`'s checks that need no Live: an 808 one-shot whose content is not the one the plan named, and a pad whose file cannot be read, stop it. It also refuses what the format cannot hold: a choke group past 16, a voices count outside 1–32, and a locator at or past the plan's end, which `live-build` would still send and the blueprint's validator refuses. No plan of the suite or PIRAMIT's has one.
+
+Checked on PIRAMIT's plan and on three m5 plans of the suite (v1orig-3, producer-1, glides-1), plus v1orig-3's fs-3 plan, whose kick and snare files peak over full scale (2026-11-14):
+- ableton-live-mcp's validator (`python -m MCP_Server.blueprint`, at 0dcca86 of `feat/reference-jobs`) found no problem in any of the five, files on disk included.
+- Turned back into a `build_tracks` spec by ableton-live-mcp's own `blueprint.build_spec`, every track equals `live.build_spec(plan)`: the same notes (1,881 on PIRAMIT's, 328 to 459 on the others), devices, settings, pad Volumes and faders, with the 808's `voices` the plan's. The only difference is that `build_from_blueprint` adds each copy's `sample_path`, so Live 12.4 and later load the files by path, not through the browser.
+- The copies `build_from_blueprint` writes into the User Library have the names and SHA-1s of the ones `live-build` writes, the two scaled ones (−5.1 and −1.6 dB) included.
+- The m5 plans were made before `file_db` (2026-10-29), so no pad of v1orig-3's m5 plan is scaled; its fs-3 plan carries the scaling.
+
+Not verified in Live: `build_from_blueprint` has not built a blueprint of `refdissect`'s.
+
 ## A short live check
 
 Live has no export API and the Trial cannot export, so a live check records in real time: the two checks so far took about 1 to 1.5 h each. `refdissect live-build work --bars A-B` builds bars A to B of the plan only, counted from 1 on Live's ruler in the plan's meter.

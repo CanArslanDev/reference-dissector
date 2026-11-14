@@ -255,6 +255,8 @@ These are from before replica mode, and still open.
    - new beats generated from those statistics, not from one song.
 5. **Packaging.**
    - Expose `analyze` / `match` / `plan` as jobs in ableton-live-mcp (`analyze_reference`, `build_from_blueprint`), so an AI client can run "make a beat like this song" end to end.
+     - Done here: `refdissect blueprint` writes a plan as ableton-live-mcp's blueprint v1 ([07](07-building-in-live.md#a-blueprint-for-build_from_blueprint)). On PIRAMIT's plan and four suite plans its validator found no problem, and its own conversion gives back `live-build`'s `build_tracks` spec track for track, with the same file copies.
+     - Still to do: `build_from_blueprint` is on ableton-live-mcp's unmerged `feat/reference-jobs` branch; once it is merged and released, `live-build` moves to it, and a blueprint gets built in Live.
    - Run the packaged `live-build` against Live in CI-like checks.
 6. **Style beats** ([11](11-style-beat-lessons.md)).
    - Done: `listening-round` (numbered A/B files and a manifest), `compare`, `space` and `mix-gains` commands.
