@@ -1079,7 +1079,7 @@ def test_an_excerpt_counts_bars_of_the_plans_meter_and_checks_them(tmp_path):
 
 def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
     """build_spec(plan, bars) is the excerpt's spec, clips as long as it;
-    live-build --bars builds it (ableton-live-mcp faked) with the stems cut
+    live-build --direct --bars builds it (ableton-live-mcp faked) with the stems cut
     beside the plan."""
     from refdissect.cli import main
     from refdissect.live import build_spec, excerpt
@@ -1093,7 +1093,7 @@ def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
     (tmp_path / "kick.wav").write_bytes((tmp_path / "drums.wav").read_bytes())
     (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     calls = _fake_live(monkeypatch)
-    assert main(["live-build", str(work), "--bars", "2-4", "--user-library", str(tmp_path / "lib")]) == 0
+    assert main(["live-build", str(work), "--direct", "--bars", "2-4", "--user-library", str(tmp_path / "lib")]) == 0
     sent = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
     assert sent["Drums (library)"]["clips"][0]["length"] == 12.0
     assert sent["REF drums"]["audio_clips"][0]["file"] == str(work / "excerpt-2-4" / "drums.wav")

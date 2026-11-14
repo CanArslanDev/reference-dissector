@@ -134,12 +134,13 @@ m3's regression, bass_low-1 played a median 41.7 cents off, is resolved (m4, abo
 
 Checked on 2026-10-29 by two live checks ([07](07-building-in-live.md#live-behaviour-measured-here); done, above). Still open:
 - `refdissect live-build` end to end. Live's Remote Script served 8 clients on both checks, which sent its calls through their own session: its read-back, locator deletion and failure messages ran as the same commands, not as its code.
+- `live-build` on ableton-live-mcp's `build_from_blueprint` (2026-11-14, [07](07-building-in-live.md#how-live-build-builds)): the plan as a blueprint, every file loaded by path, the read-backs `build_from_blueprint`'s. On its simulator it builds the same set as `--direct` on a synthetic plan, bass_low-1's bars 1–8 and PIRAMIT's plan; not run in Live. `--direct` stays until it is.
 - One `build_tracks` call of a song's size: PIRAMIT's 1,881 notes went as 5 calls. A build that stops half way, and its message.
 - htdemucs_ft plans, a whole plan with Glide (an 8-bar excerpt was built and recorded on 2026-11-05), a plan with a choke group (`--chokes`), and the pads' Volumes sent as numbers and read back.
 - The locators off Live's grid (item 1), and how long the browser's search takes for a content name (not timed).
 - PIRAMIT by ear.
 
-**Measured by:** the recording's scores against the offline render's, read off the audio: strict F1@20 per role, levels (dB), pad and 808 pitch (cents), onset lags (ms); and the read-back of files, settings, notes and locators. Target: within 0.01 F1, 0.5 dB and 1 cent (an estimate), every Simpler holding its file, every locator where planned. Now, on four m5 plans (htdemucs) and PIRAMIT's: F1 equal on every role of the four suite beats; the level scores within 0.40 dB (balance), a bright hat 0.97 dB under per pad; hits within 0.04 ms and 808 notes within 0.11 ms; 30 of 30 files; 26 of 29 locators (3 of meter34-1's deleted). Gap: Simpler's top-end loss, 3 locators, and no build by `live-build` itself.
+**Measured by:** the recording's scores against the offline render's, read off the audio: strict F1@20 per role, levels (dB), pad and 808 pitch (cents), onset lags (ms); and the read-back of files, settings, notes and locators. Target: within 0.01 F1, 0.5 dB and 1 cent (an estimate), every Simpler holding its file, every locator where planned; `live-build` against `--direct` on the same plan, the same files, settings, notes and locators read back. Now, on four m5 plans (htdemucs) and PIRAMIT's: F1 equal on every role of the four suite beats; the level scores within 0.40 dB (balance), a bright hat 0.97 dB under per pad; hits within 0.04 ms and 808 notes within 0.11 ms; 30 of 30 files; 26 of 29 locators (3 of meter34-1's deleted). Gap: Simpler's top-end loss, 3 locators, and no build by `live-build` itself.
 
 ### 4. The closed loop
 
@@ -197,7 +198,7 @@ Measured on m5 where m5 moved a number (the plan's levels, meter and 808 timing)
 | One voice per pad moved dynamics (m4 → m5) | dynamics 1.27 → 2.16 dB from the kit; dynamics-2 0.34 → 2.03 dB | no scenario further off than at m4 |
 | A pad is read against its hits summed, and a late hit where the plan writes it, 1 ms early | read where Live plays them, 37 pad Volumes of 15 m5 plans would move by −0.6 to +0.5 dB (htdemucs_ft 41 of 16, −0.2 to +0.6); against the hits cut, the plans sat 1.30 dB (1.27) from a perfect kit | read where Live plays them, no level worse |
 | The 808 reader and the plan's estimate disagree on short restarted notes | bass_low-1: 64 of 156 notes 63–68 cents flat on the plan's own audio (6 with m4's notes), note F1@50 0.59 against the estimate's 1.0; the reader misreads 92 on the truth's own stem | a reader that reads the truth's stem right, and the estimate checked against it |
-| `refdissect live-build` has not run end to end: Live's Remote Script serves 8 clients (item 3) | no build by the package's own code | a suite plan and PIRAMIT's built by `live-build` |
+| `refdissect live-build` has not run end to end: Live's Remote Script serves 8 clients (item 3); it now goes through `build_from_blueprint`, not run in Live either | no build by the package's own code | a suite plan and PIRAMIT's built by `live-build`, and the same by `--direct` |
 | Locators off Live's Arrangement grid are deleted, not placed | 3 of meter34-1's 5 in Live; 11 of the 169 locators of the m5 plans lie off Live's bar lines (11 of 170 on m5-ft; full, tempo72; not built) | every locator where planned |
 | A note's own cents: one Detune per Simpler (item 2) | full's plan note F1@50 0.851 (0.890), htdemucs_ft 0.890 (0.910); producer's median error 8.2 cents (6.8), htdemucs_ft 21.1 (15.2) | no plan 808 number of any scenario worse than m3's by more than 0.01 (1 cent) |
 | The 20 ms edge: one of swing58-1's 808 notes, 19.981 ms after the truth's at m3, sits 20.001 ms after it at m4, outside 20 ms | plan strict F1@20 0.8756 (0.8757), 808 onset F1@20 0.9344 (0.9348); htdemucs_ft unchanged | – |
@@ -256,7 +257,8 @@ These are from before replica mode, and still open.
 5. **Packaging.**
    - Expose `analyze` / `match` / `plan` as jobs in ableton-live-mcp (`analyze_reference`, `build_from_blueprint`), so an AI client can run "make a beat like this song" end to end.
      - Done here: `refdissect blueprint` writes a plan as ableton-live-mcp's blueprint v1 ([07](07-building-in-live.md#a-blueprint-for-build_from_blueprint)). On PIRAMIT's plan and four suite plans its validator found no problem, and its own conversion gives back `live-build`'s `build_tracks` spec track for track, with the same file copies.
-     - Still to do: `build_from_blueprint` is on ableton-live-mcp's unmerged `feat/reference-jobs` branch; once it is merged and released, `live-build` moves to it, and a blueprint gets built in Live.
+     - Done here: `build_from_blueprint` is merged into ableton-live-mcp's main (7bcfc4b, which the [live] extra pins; no release yet), and `live-build` writes the blueprint and calls it in-process ([07](07-building-in-live.md#how-live-build-builds)). The blueprint also says what loading by path leaves to Live: each Simpler's playback mode and the pads' filter off. The old build stays as `live-build --direct`.
+     - Still to do: a blueprint built in Live, against `--direct`'s build of the same plan; then `--direct` goes, and the pin moves to a release.
    - Run the packaged `live-build` against Live in CI-like checks.
 6. **Style beats** ([11](11-style-beat-lessons.md)).
    - Done: `listening-round` (numbered A/B files and a manifest), `compare`, `space` and `mix-gains` commands.
