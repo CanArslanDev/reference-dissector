@@ -147,6 +147,7 @@ uv run refdissect match "$W/song/refdissect" --library "$W/work/library.npz"
 uv run refdissect fit-808 "$W/song/refdissect" --library-808 "$W/work/library_808.npz"
 uv run refdissect plan "$W/song/refdissect"            # plan.json + midi/drums.mid, midi/808.mid
 uv run --extra live refdissect live-build "$W/song/refdissect"   # into an empty Live set
+uv run refdissect blueprint "$W/song/refdissect"     # blueprint.json for ableton-live-mcp's build_from_blueprint (docs/07)
 
 # comparing and choosing (docs/11)
 uv run refdissect separate rebuild.wav --out "$W/song/rebuild_stems"      # the same model as the reference
@@ -175,6 +176,7 @@ uv run refdissect suite report "$S" --tags mine,mine-b --out "$W/work/mine-b.md"
 
 Every step writes JSON next to its inputs, so you can read what it decided before the next step uses it.
 - `analyze` and `fit-808` keep the 808 reader's result and the 808 fit in the work folder's `cache/`. A later run reads them back where nothing that decides them changed: the stems' or the template's samples, the settings, numpy's, scipy's and soxr's versions, and the `.py` files of the step as the process loaded them: the module that makes the result and every module of the package it imports (an edit elsewhere, to `live.py` say, keeps them). The log names each file read back; `--no-cache` runs them again. `suite run` keeps nothing unless `--cache`, so its seconds are the code's.
+- `blueprint` writes the plan as ableton-live-mcp's blueprint v1 (`blueprint.json`): what `live-build` sends, with the files to copy and their digests, for its `build_from_blueprint` tool (not merged yet). It needs no Live ([07](docs/07-building-in-live.md#a-blueprint-for-build_from_blueprint)).
 - `scripts/export_results.py` turns a work folder into the shareable `results/` and `figures/`: no audio, and no file names from a personal library.
 - `scripts/export_results.py --suite DIR TAG` publishes a suite tag's means per scenario, and nothing else.
 - `--v1-truth` takes the six v1 beats rebuilt with truth stems. No command here makes them: without them the suite has the 42 scenario beats. [12](docs/12-replica-mode.md) has every suite option.
