@@ -1,6 +1,6 @@
 # 07 – Building in Ableton Live
 
-`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. It stays until the new build is verified in Live.
+`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.6 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
 uv sync --extra live          # pulls ableton-live-mcp at 7bcfc4b (its main; no release has build_from_blueprint yet)
@@ -25,7 +25,7 @@ Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode), and the time signature, to the plan's meter (3/4 for meter34), before any locator;
 - locators at section starts, rounded to whole beats; one that Live puts elsewhere is deleted and reported;
 - the view, to the Arrangement with the playhead at 0;
-- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back (not verified in Live).
+- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back: in Live 12.4.6 every pad's held (2026-11-14, [below](#verified-in-live)).
 
 After `build_tracks` the build reads back the file each Simpler holds and compares it with the plan's.
 
@@ -69,9 +69,9 @@ The exit codes are `--direct`'s: 0 once the set is built, also where a read-back
 | | `--direct` | `live-build` | |
 |---|---|---|---|
 | loading a file | through Live's browser, by the copy's name | by its path (Live 12.4+); by name on older Live | accepted |
-| what loading leaves to Live | the browser loads a pad One-Shot with its filter off (the battery, 2026-10-19, below) | a Simpler made with `insert_device` starts Classic with its filter on, so the blueprint says `playback_mode` (pads `one_shot`, the 808 `classic`, as `render.py` plays them) and turns each pad's `F On` off | filled; One-Shot's other settings (fades, Trigger or Gate) not compared in Live |
+| what loading leaves to Live | the browser loads a pad One-Shot with its filter off (the battery, 2026-10-19, below) | a Simpler made with `insert_device` starts Classic with its filter on, so the blueprint says `playback_mode` (pads `one_shot`, the 808 `classic`, as `render.py` plays them) turns each pad's `F On` off and its `Fade In` to 0 (a Simpler made by path starts at 0.1 ms, the browser's at 0) | filled; in Live the rest (Fade Out 0.1 ms, Trigger) came out the same, and so did the audio |
 | names | the Simpler, the pad and its chain named after the file | the Simpler "Simpler"; the pad's and chain's names Live's | not filled: names only |
-| a pad's chain | made by the browser's drop | made with `insert_chain`, its receiving note set; its playing note Live's default | not checked in Live: a playing note other than C3 transposes the pad |
+| a pad's chain | made by the browser's drop | made with `insert_chain`, its receiving note set; its playing note Live's default | checked in Live 12.4.6: every pad's playing note C3 (60), as the browser's |
 | the Arrangement's loop | off, before the build | `build_from_blueprint` leaves it | filled: off after the build |
 | the selected track | the 808's | none | filled |
 | `--user-library` | where the copies go | not used: the User Library ableton-live-mcp finds | not filled; a copy loads by its path wherever it is |
@@ -91,6 +91,20 @@ With `--bars`:
 | locators | moved by bar A's start, then rounded to whole beats | rounded, then moved | the same where bar A starts on a whole beat (every meter in quarters, 6/8); in 7/8 one can fall off a whole beat, which Live refuses (`locators_moved`), and one within half a beat of bar A's start or bar B's end can go in or out |
 
 **Checked without Live** (`tests/test_live_build_blueprint.py`, with the [live] extra; skipped without it): a synthetic plan with a choke group, a pad scaled to full scale and Glide is built by both paths into two empty sets of ableton-live-mcp's simulator (its Remote Script over its fake Live). The fake browser lists the copies and loads a pad One-Shot, as Live's does. The two sets hold the same tracks, devices, parameters, notes, Simpler files, Volumes, choke groups, voices, faders, mutes, audio clips (by content), tempo, signature, locators, loop and selected track. What is left out of the comparison is what the table says differs: names, the pads' `F On` (the fake starts every Simpler with it on), and, with `--bars`, the empty clip and the stems' file names. The same comparison on bass_low-1's m5 plan with `--bars 1-8` and on PIRAMIT's whole plan found the two sets equal (2026-11-14, logged).
+
+### Verified in Live
+
+Live 12.4.6 Trial, 2026-11-14, an empty set, the plan built by `live-build` and by `live-build --direct` in turn, each recorded with `capture_stems` (the 808 track, the drum track and REF other as the clock), 48 kHz:
+
+| plan | build | read-back | the two recordings |
+|---|---|---|---|
+| bass_low-1 (m5), `--bars 1-8` | 4.4 s, 8 tracks, 133 notes | 4 files, 3 of 3 Volumes as numbers, 3 locators, 4/4: nothing moved or wrong | before the `Fade In` fix, the drum track differed only at 36 kick and hat onsets, 4 samples each (residual −68.4 dB); after it, every track equal sample for sample, as the 808's and REF other's already were |
+| PIRAMIT, whole | 7.1 s (`--direct` 7.6 s), 10 tracks, 1,881 notes in one call | 11 files, 10 of 10 Volumes, 8 locators, 4/4: nothing moved or wrong | 128 s, every track equal sample for sample |
+
+- Every pad's chain plays at C3 (60), One-Shot, filter off; the 808 Classic. A pad's other Simpler settings differ from the browser's (voices 6 against 3; LFO and pitch envelope on with no amount; envelope times), none of which a One-Shot pad with no modulation plays.
+- Against `render.py`'s render of the same plan, bass_low-1's first 8 bars: lag 0.021 ms (one sample), the drum track −0.009 dB, the 808 −0.135 dB (residual −26.1 and −18.5 dB, Simpler's filtering and the 808's pitch as measured before, [12](12-replica-mode.md#known-limits)).
+- The Remote Script served 4 clients; `live-build`'s own connection was not refused.
+- The recordings stay outside the repo.
 
 ## What `live-build --direct` sends
 
@@ -316,7 +330,7 @@ It is what `live-build` writes and builds ([above](#how-live-build-builds)): wha
 | `locators` | `{"name", "beat"}` at whole beats, as the build places them |
 | `files["808"]` | the one-shot (source, the name `live.sample_808` gave it, the first 8 hex digits of its SHA-1), when the plan has one |
 | `files["pad-<note>"]` | each pad's file, under the name `live.pad_sample` gives it, with `gain_db` (the pad's `file_db`) only where that is under 0, and its SHA-1's start |
-| `tracks` | `live.build_spec(plan)`, with each sampler naming its file by its key in `files` (`"file": "808"`, `"file": "pad-38"`) in place of `"sample"`, and its `playback_mode` (`render.pad_settings`' for a pad, `one_shot`; `render.settings_808`'s for the 808, `classic`); `"F On": "Off"` in each pad's settings (`blueprint.PAD_OFF`); the 808's `voices` only where the plan has them; stems' paths absolute |
+| `tracks` | `live.build_spec(plan)`, with each sampler naming its file by its key in `files` (`"file": "808"`, `"file": "pad-38"`) in place of `"sample"`, and its `playback_mode` (`render.pad_settings`' for a pad, `one_shot`; `render.settings_808`'s for the 808, `classic`); `"F On": "Off"` and `"Fade In": 0` in each pad's settings (`blueprint.PAD_OFF`; a Simpler made by path starts with a 0.1 ms Fade In, the browser's with none); the 808's `voices` only where the plan has them; stems' paths absolute |
 | `meta` | the plan file's name and the first 12 hex digits of its SHA-1 (the build ignores `meta`) |
 
 There is no `checks` field: every read-back is on by default. The command keeps `live-build`'s checks that need no Live: an 808 one-shot whose content is not the one the plan named, and a pad whose file cannot be read, stop it. It also refuses what the format cannot hold: a choke group past 16, a voices count outside 1–32, and a locator at or past the plan's end, which `live-build` would still send and the blueprint's validator refuses. No plan of the suite or PIRAMIT's has one.
