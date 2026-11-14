@@ -1611,7 +1611,9 @@ async def set_chokes(call, overview: dict, plan: dict) -> dict:
 async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, headroom: bool = True,
                 log=print, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> dict:
     """Build the plan in the open Live set with ableton-live-mcp's build_tracks
-    (one call for every track, device, setting, clip and note). Refuses unless
+    (one call for every track, device, setting, clip and note): live-build
+    --direct, kept until live-build's own path (blueprint.build, through
+    build_from_blueprint) is verified in Live. Refuses unless
     every track in the set is empty; the set's empty tracks are left as they are.
     Refuses an 808 one-shot whose content is not the one the plan named
     (sample_808): fit-808 ran again after plan, and Live, having loaded

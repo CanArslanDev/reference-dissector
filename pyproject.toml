@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Building in Live goes through ableton-live-mcp's tools (it talks to Live's Remote Script)
-live = ["ableton-live-mcp @ git+https://github.com/CanArslanDev/ableton-live-mcp@v2.2.0"]
+live = ["ableton-live-mcp @ git+https://github.com/CanArslanDev/ableton-live-mcp@7bcfc4b5faab98abe0c3cf1be37bbeb961a8314a"]
 
 [project.scripts]
 refdissect = "refdissect.cli:main"
