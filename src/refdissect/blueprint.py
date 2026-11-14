@@ -38,8 +38,12 @@ VOICES = range(1, 33)  # a Simpler's voices
 # What the browser left to Live's defaults the blueprint says itself: the playback mode render.py plays (a
 # pad One-Shot, as Live loads a sample dropped on a Drum Rack pad; the 808 Classic: render.PAD, TRACK_808,
 # a plan's own playback_mode first), and each pad's filter off (PAD_OFF), as the 808's is already
-# (live.simpler_808): render.py plays every Simpler unfiltered
-PAD_OFF = {"F On": "Off"}
+# (live.simpler_808): render.py plays every Simpler unfiltered. A pad made by path also starts with a 0.1 ms
+# Fade In where the browser's starts at 0: in Live 12.4.6 (2026-11-14, bass_low-1 bars 1-8, the two paths
+# recorded) it was the only difference, 4 samples at 48 kHz at each kick's and hat's onset (the drum track's
+# residual -68.4 dB; the 808's and the stems' recordings were equal sample for sample). render.py plays no
+# fade in, so PAD_OFF sets it to 0
+PAD_OFF = {"F On": "Off", "Fade In": 0.0}
 
 
 def made_by() -> str:
@@ -88,7 +92,7 @@ def make_blueprint(plan: dict, name: str, made: str | None = None) -> dict:
     sample named by a key of files ("808", "pad-<note>"), whose entries copy
     the files live-build --direct copies, under the same names (gain_db: a
     pad's file_db, where it is under 0), and each such sampler's
-    playback_mode, with "F On" off on every pad (PAD_OFF). Every file gets
+    playback_mode, with "F On" off and "Fade In" 0 on every pad (PAD_OFF). Every file gets
     its SHA-1's start, so the build refuses a file that changed after this.
     Locators at whole beats, as live-build --direct places them. Checks are
     left out (all on). ValueError for what the blueprint cannot hold (a

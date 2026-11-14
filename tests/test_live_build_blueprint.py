@@ -39,9 +39,19 @@ def live(tmp_path, monkeypatch):
     name, and a file it drops on a pad loads One-Shot from the User Library,
     as Live's browser does (the fake's own browser holds a few fixed items)."""
     from mcp.server.mcpserver import MCPServer
-    from MCP_Server import als, extended_tools
+    from MCP_Server import als, extended_tools, fake_live
     from MCP_Server import server as live_server
     from MCP_Server.fake_live import FakeBrowserItem, FakeSample
+
+    # Live's Simpler has a Fade In (0.1 ms on one made by path, live-check 2026-11-14), the fake's has none
+    simpler_init = fake_live.FakeSimpler.__init__
+
+    def with_fade_in(self, *args, **kwargs):
+        simpler_init(self, *args, **kwargs)
+        if not any(p.name == "Fade In" for p in self.parameters):
+            self.parameters.append(fake_live.FakeParam("Fade In", 0.1, 0.0, 2000.0, display=lambda v: f"{v:.2f} ms"))
+
+    monkeypatch.setattr(fake_live.FakeSimpler, "__init__", with_fade_in)
 
     library = tmp_path / "User Library"
     library.mkdir()
@@ -157,6 +167,7 @@ def comparable(state: dict, *, skip_empty_clips: bool = False) -> dict:
                     for s in c["devices"]:
                         s.pop("name")
                         s["parameters"].pop("F On")
+                        s["parameters"].pop("Fade In", None)
             d.pop("pads", None)
         if skip_empty_clips and "arrangement_clips" in t:
             t["arrangement_clips"] = [c for c in t["arrangement_clips"] if c.get("notes", True)]
@@ -212,6 +223,8 @@ def test_the_new_path_builds_the_same_set_as_direct(both):
     # the pads' filter: off by the blueprint (PAD_OFF)
     rack = next(t for t in s_new["tracks"] if t["name"] == "Drums (library)")["devices"][0]
     assert {c[0]["devices"][0]["parameters"]["F On"] for c in rack["chains"].values()} == {"Off"}
+    # and their Fade In at 0, where a Simpler made by path starts at 0.1 ms in Live 12.4.6
+    assert {c[0]["devices"][0]["parameters"]["Fade In"] for c in rack["chains"].values()} == {"0.00 ms"}
     # the report, in --direct's keys
     for key in ("samples_checked", "volumes_held", "choke_groups"):
         assert r_new[key] == r_direct[key], key

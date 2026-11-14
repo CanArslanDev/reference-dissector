@@ -176,7 +176,7 @@ def as_build_spec(bp: dict) -> list[dict]:
                 s["sample"] = bp["files"][key]["name"]
                 s.pop("playback_mode")
                 if "drum_rack" in inst:
-                    assert s["settings"].pop("F On") == "Off"
+                    assert s["settings"].pop("F On") == "Off" and s["settings"].pop("Fade In") == 0.0
             if "drum_rack" not in inst:
                 t["voices"] = t.get("voices")
     return tracks
@@ -219,7 +219,7 @@ def test_a_plain_beat(tmp_path):
     assert rack["42"] == {"file": "pad-42", "warping": False, "playback_mode": "one_shot",
                           "settings": {"Volume": pad_volume(plan["tracks"]["drums"]["pads"]["42"]),
                                        "Transpose": 0.0, "Detune": -8.0, "Vol < Vel": 0.35, "Snap": "Off",
-                                       "F On": "Off"}}
+                                       "F On": "Off", "Fade In": 0.0}}
     assert all("choke_group" not in p for p in rack.values())
     assert tracks["REF other"]["audio_clips"][0]["file"] == plan["stems"]["other"]["path"]
     _same_as_live_build(plan, bp)
