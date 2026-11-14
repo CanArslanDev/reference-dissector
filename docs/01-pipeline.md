@@ -368,7 +368,7 @@ On the suite (m4 and m5), strict F1@20 over drum hits and 808 onsets is 0.888 at
 
 ## live-build
 
-See [07](07-building-in-live.md). It refuses unless every track in the open set is empty, then builds every track in one `build_tracks` call; empty tracks already in the set are left as they are. Two live checks built suite plans and PIRAMIT's with its calls and recorded them (2026-10-29): on the second, Live played the m5 plans' drum hits within 0.04 ms and their 808 notes within 0.11 ms of `render.py`. `live-build` itself has not run end to end: Live's Remote Script served 8 clients both times.
+See [07](07-building-in-live.md). It writes the plan as a blueprint (`blueprint.json`) and has ableton-live-mcp's `build_from_blueprint` build it; `--direct` is the build from before, kept until the new one is verified in Live. Either refuses unless every track in the open set is empty, then builds every track in one `build_tracks` call; empty tracks already in the set are left as they are. Two live checks built suite plans and PIRAMIT's with its calls and recorded them (2026-10-29): on the second, Live played the m5 plans' drum hits within 0.04 ms and their 808 notes within 0.11 ms of `render.py`. `live-build` itself has not run end to end: Live's Remote Script served 8 clients both times.
 
 ## calibrate and suite
 
