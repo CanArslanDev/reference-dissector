@@ -162,9 +162,11 @@ def plan_for(tmp_path: Path, *, one_shot: bool = True, meter: tuple[int, int] = 
 
 
 def as_build_spec(bp: dict) -> list[dict]:
-    """The blueprint's tracks put back the way live-build sends them: each
-    sampler's file as the name it is copied under (sample), and voices only
-    where the plan has them."""
+    """The blueprint's tracks put back the way live-build --direct sends
+    them: each sampler's file as the name it is copied under (sample),
+    without the playback mode and the pads' "F On" that loading by path
+    leaves to Live and the blueprint says (blueprint.PAD_OFF), and voices
+    only where the plan has them."""
     tracks = json.loads(json.dumps(bp["tracks"]))
     for t in tracks:
         inst = t.get("instrument")
@@ -172,6 +174,9 @@ def as_build_spec(bp: dict) -> list[dict]:
             for s in (inst["drum_rack"].values() if "drum_rack" in inst else [inst]):
                 key = s.pop("file")
                 s["sample"] = bp["files"][key]["name"]
+                s.pop("playback_mode")
+                if "drum_rack" in inst:
+                    assert s["settings"].pop("F On") == "Off" and s["settings"].pop("Fade In") == 0.0
             if "drum_rack" not in inst:
                 t["voices"] = t.get("voices")
     return tracks
@@ -207,13 +212,14 @@ def test_a_plain_beat(tmp_path):
     assert list(tracks) == ["808 (synth)", "Drums (library)", "other (notes)", "REF drums", "REF bass",
                             "REF other", "REF vocals"]
     s808 = tracks["808 (synth)"]
-    assert s808["instrument"] == {"file": "808", "warping": False} and "voices" not in s808
+    assert s808["instrument"] == {"file": "808", "warping": False, "playback_mode": "classic"} and "voices" not in s808
     assert (s808["settings"]["Transpose"], s808["settings"]["Detune"], s808["settings"]["Volume"]) == (
         36.0, -12.0, "0.0 dB")
     rack = tracks["Drums (library)"]["instrument"]["drum_rack"]
-    assert rack["42"] == {"file": "pad-42", "warping": False,
+    assert rack["42"] == {"file": "pad-42", "warping": False, "playback_mode": "one_shot",
                           "settings": {"Volume": pad_volume(plan["tracks"]["drums"]["pads"]["42"]),
-                                       "Transpose": 0.0, "Detune": -8.0, "Vol < Vel": 0.35, "Snap": "Off"}}
+                                       "Transpose": 0.0, "Detune": -8.0, "Vol < Vel": 0.35, "Snap": "Off",
+                                       "F On": "Off", "Fade In": 0.0}}
     assert all("choke_group" not in p for p in rack.values())
     assert tracks["REF other"]["audio_clips"][0]["file"] == plan["stems"]["other"]["path"]
     _same_as_live_build(plan, bp)

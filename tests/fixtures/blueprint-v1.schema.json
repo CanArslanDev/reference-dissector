@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "A copy of ableton-live-mcp's MCP_Server/schemas/blueprint-v1.schema.json at commit 0dcca86d9786f221a0b8b878f148f196a3942ecb (branch feat/reference-jobs, PR #3); only this $comment is added. tests/test_blueprint.py validates refdissect blueprint's output against it.",
+  "$comment": "A copy of ableton-live-mcp's MCP_Server/schemas/blueprint-v1.schema.json at commit 7bcfc4b5faab98abe0c3cf1be37bbeb961a8314a (main, the merge of PR #3, which the [live] extra pins; unchanged since 0dcca86 of feat/reference-jobs); only this $comment is added. tests/test_blueprint.py validates refdissect blueprint's output against it.",
   "$id": "https://github.com/CanArslanDev/ableton-live-mcp/blob/main/MCP_Server/schemas/blueprint-v1.schema.json",
   "title": "ableton-live-mcp blueprint, version 1",
   "description": "Everything build_from_blueprint needs to build a beat in an empty Live set, decided without Live. See docs/blueprint-v1.md.",
