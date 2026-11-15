@@ -3,7 +3,7 @@
 `refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.6 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
-uv sync --extra live          # pulls ableton-live-mcp at 7bcfc4b (its main; no release has build_from_blueprint yet)
+uv sync --extra live          # pulls ableton-live-mcp 2.4.0 (c6fee21), the first release with build_from_blueprint
 uv run refdissect live-build "$W/song/refdissect"
 uv run refdissect live-build "$W/song/refdissect" --direct     # the build from before build_from_blueprint
 ```
@@ -76,6 +76,8 @@ The exit codes are `--direct`'s: 0 once the set is built, also where a read-back
 | the selected track | the 808's | none | filled |
 | `--user-library` | where the copies go | not used: the User Library ableton-live-mcp finds | not filled; a copy loads by its path wherever it is |
 | plans the blueprint cannot hold (a choke group past 16, voices outside 1–32, a locator at or past the end) | built | refused, with a pointer to `--direct` | none in the suite's or PIRAMIT's plans |
+| two locators that round to one beat | both sent; Live keeps one | the first kept, the other logged (Live keeps one cue per beat, and 2.4.0's validator refuses two) | the same locators in Live |
+| a plan without pads | an empty Drums track | no Drums track (an empty `drum_rack` is not a rack to `build_tracks`, and the schema refuses one) | – |
 | a Volume that holds only as text | not held | held within 0.06 dB, listed as `held_by_text` | reported, as before |
 | a copy of the same name with other content | kept for a scaled pad | replaced, and reported (`files.replaced`) | better |
 | a build that stops | the track, pad and file, logged as JSON | `build_from_blueprint`'s message: where, and the tracks it left | reported |
@@ -90,7 +92,7 @@ With `--bars`:
 | a stem that ends before bar A | an empty clip | left out | – |
 | locators | moved by bar A's start, then rounded to whole beats | rounded, then moved | the same where bar A starts on a whole beat (every meter in quarters, 6/8); in 7/8 one can fall off a whole beat, which Live refuses (`locators_moved`), and one within half a beat of bar A's start or bar B's end can go in or out |
 
-**Checked without Live** (`tests/test_live_build_blueprint.py`, with the [live] extra; skipped without it): a synthetic plan with a choke group, a pad scaled to full scale and Glide is built by both paths into two empty sets of ableton-live-mcp's simulator (its Remote Script over its fake Live). The fake browser lists the copies and loads a pad One-Shot, as Live's does. The two sets hold the same tracks, devices, parameters, notes, Simpler files, Volumes, choke groups, voices, faders, mutes, audio clips (by content), tempo, signature, locators, loop and selected track. What is left out of the comparison is what the table says differs: names, the pads' `F On` (the fake starts every Simpler with it on), and, with `--bars`, the empty clip and the stems' file names. The same comparison on bass_low-1's m5 plan with `--bars 1-8` and on PIRAMIT's whole plan found the two sets equal (2026-11-14, logged).
+**Checked without Live** (`tests/test_live_build_blueprint.py`, with the [live] extra; skipped without it): a synthetic plan with a choke group, a pad scaled to full scale and Glide is built by both paths into two empty sets of ableton-live-mcp's simulator (its Remote Script over its fake Live). The fake browser lists the copies and loads a pad One-Shot, as Live's does. The two sets hold the same tracks, devices, parameters, notes, Simpler files, Volumes, choke groups, voices, faders, mutes, audio clips (by content), tempo, signature, locators, loop and selected track. What is left out of the comparison is what the table says differs: names, the pads' `F On` (the fake starts every Simpler with it on) and `Fade In` (0 by the blueprint, Live's own on `--direct`'s pads), and, with `--bars`, the empty clip and the stems' file names. The same comparison on bass_low-1's m5 plan with `--bars 1-8` and on PIRAMIT's whole plan found the two sets equal (2026-11-14, logged).
 
 ### Verified in Live
 
@@ -130,7 +132,7 @@ Live 12.4.6 Trial, 2026-11-14, an empty set, the plan built by `live-build` and 
   - The name is the file's own, its spaces run together, with the first 8 hex digits of its SHA-1 (`live.pad_sample`). Live's browser finds a sample by its name, and other files of a pad's name can come first (below).
   - The build refuses a pad whose file cannot be read.
   - The Volume is the pad's `volume_db`, at most 0 dB (`render.pad_settings`), as a number in dB (`live.pad_volume`), which `build_tracks` sets as the parameter's value. Sent as display text ("-6.6 dB"), Live held it a display step under the text (−6.605 dB; 0.05 dB from −10 dB down). After the build the value is read back with Live's display of it; where it is not the plan's within 0.001 dB, the pad gets the text as before and is listed under `volumes_not_held`. Not verified in Live: that Simpler's Volume takes a number in dB as its value (the fake Live of the tests assumes it, as ableton-live-mcp's simulator does).
-  - With `--chokes` (off by default), the hat pads, pitched copies aside, go in one choke group where the plan found the closed hats choking the open hats ([12](12-replica-mode.md#the-stages-and-their-files)). ableton-live-mcp 2.2.0's `build_tracks` does not read `choke_group` (its replica-mode branch does), so the build sets it on each pad's chain after the call (`live_set tracks <i> devices 0 drum_pads <note> chains 0`, `choke_group`) and reads it back, under `choke_groups`. The battery set it this way in Live 12.4.6; the build's own call is not verified in Live.
+  - With `--chokes` (off by default), the hat pads, pitched copies aside, go in one choke group where the plan found the closed hats choking the open hats ([12](12-replica-mode.md#the-stages-and-their-files)). ableton-live-mcp 2.2.0's `build_tracks` does not read `choke_group` (2.3.0 and later do), so `--direct` sets it on each pad's chain after the call (`live_set tracks <i> devices 0 drum_pads <note> chains 0`, `choke_group`) and reads it back, under `choke_groups`. The battery set it this way in Live 12.4.6; the build's own call is not verified in Live.
 - **Melodic tracks**: `"instrument": "Drift"`, muted, with their notes.
 - **Stems**: audio tracks with one clip each, warping off.
 - **Faders**: `volume_db` from the plan's levels, at most +6 dB.
@@ -312,7 +314,7 @@ Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 
 
 ## A blueprint for `build_from_blueprint`
 
-`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, PR #3, merged into its main at 7bcfc4b, which the [live] extra pins; no release has it yet). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
+`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, released in 2.4.0, which the [live] extra pins at c6fee21). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
 
 ```bash
 uv run refdissect blueprint "$W/song/refdissect"     # no Live, no [live] extra
