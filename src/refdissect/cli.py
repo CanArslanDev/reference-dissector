@@ -373,7 +373,7 @@ def _gains(a):
 def _candidates(a):
     from .candidates import run
     run(a.work, a.out, a.n, a.seed, a.bars, a.section, a.reference_bar, a.stems, a.question, a.max_copy,
-        not a.no_duck, not a.no_compare, a.kick_gap, a.separate, a.lufs, log=_say)
+        not a.no_duck, not a.no_compare, a.kick_gap, a.separate, a.lufs, log=_say, per_bar=not a.copy_mean_only)
     print(f"{a.n} candidates -> {a.out} (candidates.json; round/manifest.md says what each number is)")
 
 
@@ -584,7 +584,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--stems", default=None, help="the reference's stems (default: the plan's)")
     s.add_argument("--question", default=None)
     s.add_argument("--max-copy", type=float, default=0.75,
-                   help="draw again while a candidate's bars match the reference's this much (mean F1; docs/09)")
+                   help="draw again while a candidate's bars match the reference's this much (F1, its mean or "
+                        "any one bar; docs/09)")
+    s.add_argument("--copy-mean-only", action="store_true",
+                   help="hold only the mean to --max-copy, not each bar (the rule before 2026-11)")
     s.add_argument("--no-duck", action="store_true", help="no ducking of the 808 and the chords under the kicks")
     s.add_argument("--no-compare", action="store_true", help="skip measuring the candidates against the reference")
     s.add_argument("--kick-gap", type=float, default=0.2, help="as compare's")

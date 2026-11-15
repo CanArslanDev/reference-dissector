@@ -18,7 +18,8 @@ of a plan (pipeline.plan), not from its notes:
 
 Every candidate uses the plan's own pads, 808 one-shot and faders, so it
 sounds like the rebuild; its notes are new. A candidate that would play the
-reference's bars back (copy_score over max_copy) is drawn again: docs/09,
+reference's bars back (copy_score over max_copy: its mean, or any one bar)
+is drawn again: docs/09,
 no new beat copies the reference's notes. Each candidate is drawn from its
 own generator, seeded by (seed, number): the same seed gives the same
 candidates, and candidate 3 is the same whether 3 or 10 are drawn.
@@ -552,12 +553,23 @@ def reference_events(plan: dict, melodic: dict | None, section: str | None = Non
     return {b: e for b, e in ev.items() if b in bars}
 
 
+def _under(score: dict, max_copy: float, per_bar: bool) -> bool:
+    return score["mean"] <= max_copy and (not per_bar or score["max"] <= max_copy)
+
+
+def _rank(score: dict, per_bar: bool) -> tuple:
+    return (score["max"], score["mean"]) if per_bar else (score["mean"],)
+
+
 def candidate(stats: dict, plan: dict, reference: dict[int, set], seed: int, number: int, bars: int = 8,
-              max_copy: float = MAX_COPY, tries: int = TRIES) -> dict:
-    """draw() until the candidate's copy_score mean is at most max_copy (each
-    try from the same generator, so the result is the seed's), at most
-    `tries` times (tries: how many were drawn; kept: which one is kept),
-    the least like the reference when none is under."""
+              max_copy: float = MAX_COPY, tries: int = TRIES, per_bar: bool = True) -> dict:
+    """draw() until the candidate's copy_score is at most max_copy: its mean
+    and, with per_bar (the default), its highest bar too, so that no one bar
+    is near a reference bar's copy where the others are far from theirs
+    (each try from the same generator, so the result is the seed's), at
+    most `tries` times (tries: how many were drawn; kept: which one is
+    kept), the least like the reference when none is under (the lowest
+    highest bar, then mean; per_bar off: the lowest mean, as before)."""
     rng = np.random.default_rng([seed, number])
     roles, best, k = drum_roles(plan), None, 0
     while k < tries:
@@ -565,13 +577,13 @@ def candidate(stats: dict, plan: dict, reference: dict[int, set], seed: int, num
         notes = _draw(rng, stats, bars)
         score = copy_score(bar_events(notes["drums"], notes["808"], notes["chords"], roles,
                                       stats["steps_per_bar"]), reference)
-        if best is None or score["mean"] < best[1]["mean"]:
+        if best is None or _rank(score, per_bar) < _rank(best[1], per_bar):
             best = (notes, score, k)
-        if score["mean"] <= max_copy:
+        if _under(score, max_copy, per_bar):
             break
     notes, score, kept = best
     return {"number": number, "seed": seed, "tries": k, "kept": kept, "copy": score,
-            "under_max_copy": score["mean"] <= max_copy, "notes": notes}
+            "under_max_copy": _under(score, max_copy, per_bar), "notes": notes}
 
 
 def candidate_plan(plan: dict, stats: dict, notes: dict, bars: int, number: int) -> dict:
@@ -750,7 +762,8 @@ def summary(rows: dict) -> dict:
 def run(work: str | Path, out_dir: str | Path, n: int = 4, seed: int = 1, bars: int = 8,
         section: str | None = None, reference_bar: int | None = None, stems: str | Path | None = None,
         question: str | None = None, max_copy: float = MAX_COPY, duck: bool = True, measure: bool = True,
-        kick_gap: float = 0.2, separate_model: str | None = None, lufs: float = -14.0, log=print) -> dict:
+        kick_gap: float = 0.2, separate_model: str | None = None, lufs: float = -14.0, log=print,
+        per_bar: bool = True) -> dict:
     """n candidates from work's plan.json (with analysis.json's swing and
     melodic.json's chords where there): out/NN/ (plan.json, midi/, render/,
     chords.wav, 808-ducked.wav, candidate-NN.wav: the mix, compare.json),
@@ -797,7 +810,7 @@ def run(work: str | Path, out_dir: str | Path, n: int = 4, seed: int = 1, bars: 
         sf.write(out / "reference.wav", mix.astype(np.float32), SR, subtype="FLOAT")
     rows = []
     for k in range(1, n + 1):
-        c = candidate(stats, plan, reference, seed, k, bars, max_copy)
+        c = candidate(stats, plan, reference, seed, k, bars, max_copy, per_bar=per_bar)
         cdir = out / f"{k:02d}"
         cplan = candidate_plan(plan, stats, c["notes"], bars, k)
         cdir.mkdir(parents=True, exist_ok=True)
@@ -829,6 +842,7 @@ def run(work: str | Path, out_dir: str | Path, n: int = 4, seed: int = 1, bars: 
         log(_line(row))
     manifest = {"work": str(work), "seed": seed, "n": n, "bars": bars, "section": section,
                 "reference_span_s": [round(x, 3) for x in span], "max_copy": max_copy,
+                "max_copy_per_bar": per_bar,
                 "ducking": ducking, "separated": separate_model, "stats": stats, "candidates": rows}
     if ref is not None:
         from .rounds import listening_round
