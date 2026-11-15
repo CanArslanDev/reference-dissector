@@ -39,19 +39,9 @@ def live(tmp_path, monkeypatch):
     name, and a file it drops on a pad loads One-Shot from the User Library,
     as Live's browser does (the fake's own browser holds a few fixed items)."""
     from mcp.server.mcpserver import MCPServer
-    from MCP_Server import als, extended_tools, fake_live
+    from MCP_Server import als, extended_tools
     from MCP_Server import server as live_server
     from MCP_Server.fake_live import FakeBrowserItem, FakeSample
-
-    # Live's Simpler has a Fade In (0.1 ms on one made by path, live-check 2026-11-14), the fake's has none
-    simpler_init = fake_live.FakeSimpler.__init__
-
-    def with_fade_in(self, *args, **kwargs):
-        simpler_init(self, *args, **kwargs)
-        if not any(p.name == "Fade In" for p in self.parameters):
-            self.parameters.append(fake_live.FakeParam("Fade In", 0.1, 0.0, 2000.0, display=lambda v: f"{v:.2f} ms"))
-
-    monkeypatch.setattr(fake_live.FakeSimpler, "__init__", with_fade_in)
 
     library = tmp_path / "User Library"
     library.mkdir()
@@ -224,7 +214,7 @@ def test_the_new_path_builds_the_same_set_as_direct(both):
     rack = next(t for t in s_new["tracks"] if t["name"] == "Drums (library)")["devices"][0]
     assert {c[0]["devices"][0]["parameters"]["F On"] for c in rack["chains"].values()} == {"Off"}
     # and their Fade In at 0, where a Simpler made by path starts at 0.1 ms in Live 12.4.6
-    assert {c[0]["devices"][0]["parameters"]["Fade In"] for c in rack["chains"].values()} == {"0.00 ms"}
+    assert {c[0]["devices"][0]["parameters"]["Fade In"] for c in rack["chains"].values()} == {"0.0 ms"}
     # the report, in --direct's keys
     for key in ("samples_checked", "volumes_held", "choke_groups"):
         assert r_new[key] == r_direct[key], key
@@ -234,6 +224,7 @@ def test_the_new_path_builds_the_same_set_as_direct(both):
         assert key not in r_new and key not in r_direct, key
     assert r_new["808_voices"] == {"want": 1, "live": 1, "same": True}
     assert r_new["time_signature"]["same"] and r_new["ok"] is True
+    assert r_new["tempo"]["same"] is True  # 2.4.0 checks the tempo too
     assert [t["track"] for t in r_new["tracks"]] == [t["track"] for t in r_direct["tracks"]]
     assert json.loads(logged[-1])["ok"] is True and logged[0].startswith("blueprint: ")
     assert (work / "blueprint.json").is_file()
@@ -271,6 +262,24 @@ def test_stems_out_takes_the_excerpts_stems(live, tmp_path):
     live([])
     report = asyncio.run(B.build(work, bars=(1, 2), stems_out=tmp_path / "cuts", log=lambda _: None))
     assert report["ok"] is True and report["excerpt"]["bars"] == [1, 2]
+    assert sorted(p.name.split(" ")[0] for p in (tmp_path / "cuts").iterdir()) == ["bass", "drums", "other",
+                                                                                   "vocals"]
+
+
+def test_a_relative_stems_out(live, tmp_path, monkeypatch):
+    """--stems-out as given on the command line: the excerpt passed as an
+    object names its clips by absolute paths, or none could be resolved."""
+    plan, work = a_plan(tmp_path)
+    live([])
+    from MCP_Server import blueprint as bp
+    made = []
+    excerpt = bp.excerpt
+    monkeypatch.setattr(bp, "excerpt", lambda *a, **k: made.append(excerpt(*a, **k)) or made[-1])
+    monkeypatch.chdir(tmp_path)
+    report = asyncio.run(B.build(work, bars=(1, 2), stems_out="cuts", log=lambda _: None))
+    assert report["ok"] is True
+    files = [c["file"] for t in made[0]["tracks"] for c in t.get("audio_clips") or []]
+    assert files and all(Path(f).is_absolute() for f in files)
     assert sorted(p.name.split(" ")[0] for p in (tmp_path / "cuts").iterdir()) == ["bass", "drums", "other",
                                                                                    "vocals"]
 

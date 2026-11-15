@@ -283,6 +283,64 @@ def test_what_a_blueprint_cannot_hold(tmp_path):
         make_blueprint(plan, "Song")
 
 
+def test_a_plan_without_pads_has_no_drums_track(tmp_path):
+    """build_spec's Drums track with an empty drum_rack: the schema refuses
+    it and build_tracks would not make it a rack, so it is left out."""
+    plan = plan_for(tmp_path)
+    plan["tracks"]["drums"]["pads"] = {}
+    plan["tracks"]["drums"]["notes"] = []
+    bp = make_blueprint(plan, "Song", made="refdissect test")
+    assert_valid(bp)
+    assert "Drums (library)" not in [t["name"] for t in bp["tracks"]]
+    assert not any(k.startswith("pad-") for k in bp["files"])
+
+
+def test_two_locators_on_one_beat_keep_the_first(tmp_path):
+    """Live keeps one cue per beat (ableton-live-mcp 2.4.0 refuses two):
+    after rounding to whole beats the first stays, the other is logged."""
+    plan = plan_for(tmp_path)
+    beat = float(round(plan["locators"][1][1]))
+    plan["locators"].insert(2, ["B2 (3)", beat + 0.3])
+    logged = []
+    bp = make_blueprint(plan, "Song", made="refdissect test", log=logged.append)
+    assert_valid(bp)
+    beats = [loc["beat"] for loc in bp["locators"]]
+    assert len(beats) == len(set(beats)) == len(plan["locators"]) - 1
+    assert "B2 (3)" not in [loc["name"] for loc in bp["locators"]]
+    assert len(logged) == 1 and "'B2 (3)'" in logged[0] and "one cue per beat" in logged[0]
+
+
+def test_made_by_outside_a_checkout(monkeypatch):
+    """No .git: no git (it may open macOS's developer tools dialog), the
+    commit from the install's direct_url.json, as uv --with <archive zip>
+    writes it."""
+    import subprocess
+
+    from refdissect import blueprint
+
+    commit = "21d82d72ee89e21b82a7bff4d8d8805af283bac9"
+
+    class Dist:
+        def __init__(self, found):
+            self.found = found
+
+        def read_text(self, name):
+            return json.dumps(self.found) if name == "direct_url.json" else None
+
+    def no_git(*a, **k):
+        raise AssertionError("git ran")
+
+    real_exists = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda self: False if self.name == ".git" else real_exists(self))
+    monkeypatch.setattr(subprocess, "run", no_git)
+    import importlib.metadata as md
+    for found, want in (({"url": f"https://github.com/o/r/archive/{commit}.zip", "archive_info": {}}, " 21d82d7"),
+                        ({"url": "https://x/r.git", "vcs_info": {"vcs": "git", "commit_id": commit}}, " 21d82d7"),
+                        ({"url": "file:///somewhere/r", "dir_info": {}}, "")):
+        monkeypatch.setattr(md, "distribution", lambda _n, f=found: Dist(f))
+        assert blueprint.made_by() == f"refdissect {blueprint.__version__}{want}"
+
+
 # ── The command ──────────────────────────────────────────────────────────────
 
 def test_the_command_writes_beside_the_plan(tmp_path, capsys):
