@@ -46,10 +46,34 @@ VOICES = range(1, 33)  # a Simpler's voices
 PAD_OFF = {"F On": "Off", "Fade In": 0.0}
 
 
+def _installed_commit() -> str | None:
+    """The commit an install names in its direct_url.json: a git install's
+    commit_id, or an archive's (a URL ending .../<commit>.zip, as the jobs of
+    ableton-live-mcp install it); None for any other install."""
+    try:
+        from importlib.metadata import distribution
+        text = distribution("reference-dissector").read_text("direct_url.json")
+        found = json.loads(text) if text else {}
+    except Exception:
+        return None
+    commit = (found.get("vcs_info") or {}).get("commit_id")
+    if not commit:
+        name = str(found.get("url", "")).rstrip("/").rsplit("/", 1)[-1]
+        stem = name[:-4] if name.endswith(".zip") else ""
+        commit = stem if len(stem) >= 7 and all(c in "0123456789abcdef" for c in stem.lower()) else None
+    return commit[:7] if commit else None
+
+
 def made_by() -> str:
     """"refdissect <version> <commit>": the commit of the checkout the code
-    runs from, where it is one (with "+" when its files differ from it)."""
+    runs from, where it is one (with "+" when its files differ from it),
+    else the commit the install names (_installed_commit). git runs only in
+    a checkout: on a Mac without the Command Line Tools /usr/bin/git may
+    open the "install developer tools" dialog, in a detached job too."""
     root = Path(__file__).resolve().parent
+    if not (Path(__file__).resolve().parents[2] / ".git").exists():
+        commit = _installed_commit()
+        return f"refdissect {__version__}{f' {commit}' if commit else ''}"
     try:
         commit = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"], capture_output=True,
                                 text=True, timeout=10, check=True).stdout.strip()
@@ -87,14 +111,17 @@ def _absolute(path: str | Path) -> str:
     return str(Path(path).expanduser().absolute())
 
 
-def make_blueprint(plan: dict, name: str, made: str | None = None) -> dict:
+def make_blueprint(plan: dict, name: str, made: str | None = None, log=print) -> dict:
     """The plan as a blueprint: build_spec's tracks with each sampler's
     sample named by a key of files ("808", "pad-<note>"), whose entries copy
     the files live-build --direct copies, under the same names (gain_db: a
     pad's file_db, where it is under 0), and each such sampler's
     playback_mode, with "F On" off and "Fade In" 0 on every pad (PAD_OFF). Every file gets
     its SHA-1's start, so the build refuses a file that changed after this.
-    Locators at whole beats, as live-build --direct places them. Checks are
+    Locators at whole beats, as live-build --direct places them, the first
+    of two on one beat kept (Live keeps one cue per beat; the other logged).
+    A plan without pads has no Drums track (an empty drum_rack is not a
+    rack to build_tracks, and the schema refuses one). Checks are
     left out (all on). ValueError for what the blueprint cannot hold (a
     choke group past 16, a locator at or past the end)."""
     check_files(plan)
@@ -102,6 +129,8 @@ def make_blueprint(plan: dict, name: str, made: str | None = None) -> dict:
     t808, pads = plan["tracks"]["808"], plan["tracks"]["drums"]["pads"]
     files: dict = {}
     problems = []
+    if not pads:
+        spec = [t for t in spec if not (isinstance(t.get("instrument"), dict) and "drum_rack" in t["instrument"])]
     for track in spec:
         instrument = track.get("instrument")
         if track["name"] == "808 (synth)":
@@ -131,7 +160,15 @@ def make_blueprint(plan: dict, name: str, made: str | None = None) -> dict:
         for clip in track.get("audio_clips") or []:
             clip["file"] = _absolute(clip["file"])
     length = float(plan["length_beats"])
-    locators = [{"name": str(n), "beat": float(round(b))} for n, b in plan["locators"]]
+    locators: list[dict] = []
+    for n, b in plan["locators"]:
+        loc = {"name": str(n), "beat": float(round(b))}
+        first = next((x for x in locators if x["beat"] == loc["beat"]), None)
+        if first is None:
+            locators.append(loc)
+        else:
+            log(f"locator {loc['name']!r} (beat {float(b):g}) left out: {first['name']!r} is at beat "
+                f"{loc['beat']:g} already (Live keeps one cue per beat)")
     problems += [f"locator {loc['name']!r} at beat {loc['beat']:g}: at or past the end ({length:g})"
                  for loc in locators if loc["beat"] >= length]
     if problems:
@@ -151,7 +188,7 @@ def write(work: str | Path, out: str | Path | None = None, log=print) -> Path:
     data = plan_file.read_bytes()
     plan = json.loads(data)
     folder = plan_file.parent
-    blueprint = make_blueprint(plan, song_name(plan, folder))
+    blueprint = make_blueprint(plan, song_name(plan, folder), log=log)
     blueprint["meta"] = {"plan": plan_file.name, "plan_sha1": hashlib.sha1(data).hexdigest()[:12]}
     target = Path(out) if out else folder / "blueprint.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -181,8 +218,8 @@ def as_live_build(found: dict, blueprint: dict, log=print) -> dict:
     volumes_not_held (a pad that held its Volume only once sent again as
     text: text and held_by_text), samples_checked and wrong_samples ("plan":
     the copy in the User Library the Simpler is to hold), 808_voices; and
-    what --direct did not check or report: time_signature (Live's against
-    the plan's), files (the copies), excerpt and ok, false where anything
+    what --direct did not check or report: time_signature and tempo (Live's
+    against the plan's), files (the copies), excerpt and ok, false where anything
     differs. The whole report is under build_from_blueprint."""
     checks = found.get("checks") or {}
     report: dict = {"tracks": found.get("tracks", [])}
@@ -244,6 +281,11 @@ def as_live_build(found: dict, blueprint: dict, log=print) -> dict:
         report["808_voices"] = voices
         if not voices.get("same"):
             log(f"the 808 has {voices.get('live')} voices, not the plan's {voices.get('want')}")
+    tempo = checks.get("tempo")
+    if tempo is not None:
+        report["tempo"] = tempo
+        if not tempo.get("same"):
+            log(f"Live's tempo is {tempo.get('live')} BPM, not the plan's {tempo.get('want')}")
     signature = checks.get("time_signature")
     if signature is not None:
         report["time_signature"] = signature
@@ -298,7 +340,7 @@ async def build(work: str | Path, bars: tuple[int, int] | None = None, stems_out
         a, b = (int(v) for v in bars)
         if stems_out is not None:
             from MCP_Server import blueprint as bp
-            folder = Path(stems_out)
+            folder = Path(stems_out).expanduser().absolute()
             args["blueprint"] = bp.excerpt(blueprint, (a, b), path.parent, folder)
         else:
             folder = path.parent / f"excerpt-{a}-{b}"

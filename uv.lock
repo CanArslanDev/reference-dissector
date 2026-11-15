@@ -9,9 +9,10 @@ resolution-markers = [
 
 [[package]]
 name = "ableton-live-mcp"
-version = "2.3.0"
-source = { git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=7bcfc4b5faab98abe0c3cf1be37bbeb961a8314a#7bcfc4b5faab98abe0c3cf1be37bbeb961a8314a" }
+version = "2.4.0"
+source = { git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=c6fee21b3cd2a62d18ce7190ce12b5d4bb145824#c6fee21b3cd2a62d18ce7190ce12b5d4bb145824" }
 dependencies = [
+    { name = "jsonschema" },
     { name = "mcp" },
     { name = "mido" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -1877,7 +1878,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ableton-live-mcp", marker = "extra == 'live'", git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=7bcfc4b5faab98abe0c3cf1be37bbeb961a8314a" },
+    { name = "ableton-live-mcp", marker = "extra == 'live'", git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=c6fee21b3cd2a62d18ce7190ce12b5d4bb145824" },
     { name = "librosa", specifier = ">=0.10" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mido", specifier = ">=1.3" },

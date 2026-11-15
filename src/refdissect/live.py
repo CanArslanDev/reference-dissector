@@ -1327,7 +1327,7 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     vol_vel (VOL_VEL), so velocities play the levels the plan assumes, Snap
     off (LIVE_OFF), and faders from the plan's levels. A pad's Volume goes
     as a number (pad_volume), and a pad of a choke group carries its group
-    (choke_group: ableton-live-mcp's replica-mode build_tracks reads it,
+    (choke_group: ableton-live-mcp's build_tracks reads it from 2.3.0,
     2.2.0 does not, and build sets it on the pad's chain, set_chokes). With bars (a, b),
     the spec of excerpt(plan, bars, stems_out): bars a to b, from 0."""
     if bars:
@@ -1589,7 +1589,7 @@ async def set_chokes(call, overview: dict, plan: dict) -> dict:
     """Each pad of a choke group put in it (its chain's choke_group, which
     ableton-live-mcp's battery set and read back in Live 12.4.6: 0 none, 1
     to 16) and read back, per pad note: the plan's group, Live's and
-    whether they agree. build_tracks (2.2.0) does not set it. Not verified
+    whether they agree. build_tracks 2.2.0 does not set it (2.3.0 and later do). Not verified
     in Live by this build."""
     index = {t["name"]: t["index"] for t in overview["tracks"]}
     pads = {note: choke_of(pad) for note, pad in plan["tracks"]["drums"]["pads"].items() if choke_of(pad)}
