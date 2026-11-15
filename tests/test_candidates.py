@@ -202,6 +202,26 @@ def test_copy_score_and_drawing_again(work):
     assert loose["tries"] == 1 and loose["under_max_copy"]
 
 
+def test_one_bar_near_a_copy_is_drawn_again(work, monkeypatch):
+    """The mean under max_copy with one bar over it: drawn again (per_bar,
+    the default), kept with the mean alone (per_bar=False, the rule before)."""
+    plan = _plan(work)
+    ref = cd.reference_events(plan, melodic())
+    s = cd.style_stats(plan, None, melodic(), "A")
+    scores = iter([{"mean": 0.5, "max": 0.86}, {"mean": 0.6, "max": 0.7}] * 2)
+    monkeypatch.setattr(cd, "copy_score", lambda c, r: next(scores))
+    strict = cd.candidate(s, plan, ref, 1, 1, tries=5)
+    assert (strict["tries"], strict["kept"], strict["copy"]) == (2, 2, {"mean": 0.6, "max": 0.7})
+    assert strict["under_max_copy"]
+    loose = cd.candidate(s, plan, ref, 1, 1, tries=5, per_bar=False)
+    assert (loose["tries"], loose["copy"]["max"]) == (1, 0.86) and loose["under_max_copy"]
+    # none under: the lowest highest bar is kept
+    scores = iter([{"mean": 0.5, "max": 0.9}, {"mean": 0.7, "max": 0.8}, {"mean": 0.4, "max": 0.95}])
+    monkeypatch.setattr(cd, "copy_score", lambda c, r: next(scores))
+    none = cd.candidate(s, plan, ref, 1, 1, tries=3)
+    assert none["kept"] == 2 and not none["under_max_copy"]
+
+
 def test_duck_gain_follows_the_curve_from_each_kick():
     curve = {"s": [0.0, 0.02, 0.1], "db": [0.0, -12.0, 0.0]}
     g = 20 * np.log10(cd.duck_gain(SR, [0.1, 0.15], curve))
