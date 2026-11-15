@@ -3,7 +3,7 @@
 `refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.6 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
-uv sync --extra live          # pulls ableton-live-mcp 2.4.0 (c6fee21), the first release with build_from_blueprint
+uv sync --extra live          # pulls ableton-live-mcp v2.4.0, the first release with build_from_blueprint
 uv run refdissect live-build "$W/song/refdissect"
 uv run refdissect live-build "$W/song/refdissect" --direct     # the build from before build_from_blueprint
 ```
@@ -314,7 +314,7 @@ Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 
 
 ## A blueprint for `build_from_blueprint`
 
-`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, released in 2.4.0, which the [live] extra pins at c6fee21). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
+`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, released in v2.4.0, which the [live] extra pins). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
 
 ```bash
 uv run refdissect blueprint "$W/song/refdissect"     # no Live, no [live] extra
