@@ -39,7 +39,7 @@ VOICES = range(1, 33)  # a Simpler's voices
 # pad One-Shot, as Live loads a sample dropped on a Drum Rack pad; the 808 Classic: render.PAD, TRACK_808,
 # a plan's own playback_mode first), and each pad's filter off (PAD_OFF), as the 808's is already
 # (live.simpler_808): render.py plays every Simpler unfiltered. A pad made by path also starts with a 0.1 ms
-# Fade In where the browser's starts at 0: in Live 12.4.6 (2026-11-14, bass_low-1 bars 1-8, the two paths
+# Fade In where the browser's starts at 0: in Live 12.4.16 (2026-11-14, a suite plan's bars 1-8, the two paths
 # recorded) it was the only difference, 4 samples at 48 kHz at each kick's and hat's onset (the drum track's
 # residual -68.4 dB; the 808's and the stems' recordings were equal sample for sample). render.py plays no
 # fade in, so PAD_OFF sets it to 0
@@ -119,11 +119,13 @@ def make_blueprint(plan: dict, name: str, made: str | None = None, log=print) ->
     playback_mode, with "F On" off and "Fade In" 0 on every pad (PAD_OFF). Every file gets
     its SHA-1's start, so the build refuses a file that changed after this.
     Locators at whole beats, as live-build --direct places them, the first
-    of two on one beat kept (Live keeps one cue per beat; the other logged).
-    A plan without pads has no Drums track (an empty drum_rack is not a
-    rack to build_tracks, and the schema refuses one). Checks are
-    left out (all on). ValueError for what the blueprint cannot hold (a
-    choke group past 16, a locator at or past the end)."""
+    of two on one beat kept (Live keeps one cue per beat; the other logged),
+    and one that rounds to the end or past it left out and logged (a
+    blueprint's locators fall before its end; a section that starts in the
+    plan's last half beat has nothing to mark). A plan without pads has no
+    Drums track (an empty drum_rack is not a rack to build_tracks, and the
+    schema refuses one). Checks are left out (all on). ValueError for what
+    the blueprint cannot hold (a choke group past 16, voices outside 1-32)."""
     check_files(plan)
     spec = build_spec(plan)
     t808, pads = plan["tracks"]["808"], plan["tracks"]["drums"]["pads"]
@@ -164,13 +166,14 @@ def make_blueprint(plan: dict, name: str, made: str | None = None, log=print) ->
     for n, b in plan["locators"]:
         loc = {"name": str(n), "beat": float(round(b))}
         first = next((x for x in locators if x["beat"] == loc["beat"]), None)
-        if first is None:
+        if loc["beat"] >= length:
+            log(f"locator {loc['name']!r} (beat {float(b):g}) left out: beat {loc['beat']:g} is at or past the "
+                f"plan's end ({length:g})")
+        elif first is None:
             locators.append(loc)
         else:
             log(f"locator {loc['name']!r} (beat {float(b):g}) left out: {first['name']!r} is at beat "
                 f"{loc['beat']:g} already (Live keeps one cue per beat)")
-    problems += [f"locator {loc['name']!r} at beat {loc['beat']:g}: at or past the end ({length:g})"
-                 for loc in locators if loc["beat"] >= length]
     if problems:
         raise ValueError("The plan does not make a blueprint: " + "; ".join(problems))
     out = {"format": FORMAT, "version": VERSION, "name": name, "made_by": made or made_by(),
@@ -298,6 +301,19 @@ def as_live_build(found: dict, blueprint: dict, log=print) -> dict:
     return report
 
 
+def _server():
+    """ableton-live-mcp's MCP server, imported with its full profile, where
+    build_from_blueprint is (the profile is read once, as MCP_Server.server
+    registers its tools; set after that import, it changes nothing)."""
+    os.environ["ABLETON_MCP_PROFILE"] = "full"
+    try:
+        from MCP_Server.server import mcp
+    except ImportError as e:
+        raise RuntimeError("Building in Live needs ableton-live-mcp: "
+                           "pip install 'reference-dissector[live]' (and Live with its Remote Script)") from e
+    return mcp
+
+
 async def build(work: str | Path, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None,
                 log=print) -> dict:
     """live-build: WORK's plan as a blueprint (write: WORK/blueprint.json,
@@ -320,12 +336,7 @@ async def build(work: str | Path, bars: tuple[int, int] | None = None, stems_out
     except ValueError as e:
         raise ValueError(f"{e} (live-build --direct builds such a plan the way it did before)") from e
     blueprint = json.loads(path.read_text(encoding="utf-8"))
-    os.environ["ABLETON_MCP_PROFILE"] = "full"  # build_from_blueprint is a tool of the full profile
-    try:
-        from MCP_Server.server import mcp
-    except ImportError as e:
-        raise RuntimeError("Building in Live needs ableton-live-mcp: "
-                           "pip install 'reference-dissector[live]' (and Live with its Remote Script)") from e
+    mcp = _server()
 
     async def call(tool_name, **args):
         r = await mcp.call_tool(tool_name, args)

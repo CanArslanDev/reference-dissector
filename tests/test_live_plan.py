@@ -1198,3 +1198,37 @@ def test_a_pads_volume_goes_as_a_number_and_is_read_back(tmp_path, monkeypatch):
     assert {"path": "live_set tracks 0 devices 0 drum_pads 42 chains 0 devices 0 parameters Volume",
             "value": f"{pads['42']['volume_db']:.1f} dB"} in sent
     assert any(line.startswith("pad 42 holds Volume") and line.endswith("sent as text") for line in logged)
+
+
+def test_live_sr_reaches_the_plan_and_every_level_reading(tmp_path, monkeypatch):
+    """plan --live-sr: the command passes the rate to pipeline.plan, the plan
+    carries it, and estimate_levels reads every pad through Simpler's
+    resampler at it (pad_shot), in the unity drum track and in pad_levels;
+    without it, pad_levels reads ideally and the unity track never asks."""
+    from refdissect import live, pipeline
+    from refdissect.cli import main
+
+    passed = []
+    monkeypatch.setattr(pipeline, "plan", lambda work, **k: passed.append(k))
+    main(["plan", str(tmp_path), "--live-sr", "48000"])
+    main(["plan", str(tmp_path)])
+    assert [k.get("live_sr") for k in passed] == [48000, None]
+    monkeypatch.undo()
+
+    import sys
+
+    calls = []
+    shot = live.pad_shot
+
+    def spy(path, start_s, semitones, live_sr=None):
+        calls.append((sys._getframe(1).f_code.co_name, live_sr))
+        return shot(path, start_s, semitones, live_sr)
+
+    monkeypatch.setattr(live, "pad_shot", spy)
+    analysis, matches, synth = _fixture(tmp_path)
+    plan = make_plan(analysis, matches, synth, tmp_path, live_sr=48000)
+    assert plan["live_sr"] == 48000
+    assert {name for name, _ in calls} == {"_unity_drums", "pad_levels"} and {sr for _, sr in calls} == {48000}
+    calls.clear()
+    assert "live_sr" not in make_plan(analysis, matches, synth, tmp_path)
+    assert {name for name, _ in calls} == {"pad_levels"} and {sr for _, sr in calls} == {None}
