@@ -3,7 +3,7 @@
 `refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.16 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
-uv sync --extra live          # pulls ableton-live-mcp v2.4.1 (build_from_blueprint since v2.4.0)
+uv sync --extra live          # pulls ableton-live-mcp v2.4.2 (build_from_blueprint since v2.4.0)
 uv run refdissect live-build "$W/song/refdissect"
 uv run refdissect live-build "$W/song/refdissect" --direct     # the build from before build_from_blueprint
 ```

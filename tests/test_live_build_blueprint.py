@@ -127,7 +127,10 @@ def copies(plan: dict) -> list[str]:
 
 def simplers(sim) -> dict:
     """Each Simpler of the set, by "808" or pad note: its playback mode, the
-    file it holds, its voices, and its chain's choke group (a pad's)."""
+    file it holds, its voices (the 808's), and its chain's choke group (a
+    pad's). A pad's voices differ by how it was loaded, in Live 12.4.16 as in
+    the fake from ableton-live-mcp 2.4.2: 3 through the browser, 6 by path;
+    a One-Shot pad plays one hit at a time either way."""
     out = {}
     for track in sim.song.tracks:
         for device in track.devices:
@@ -135,9 +138,9 @@ def simplers(sim) -> dict:
                 out[track.name] = {"mode": device.playback_mode, "file": device.sample.file_path,
                                    "voices": device.voices}
             for pad in getattr(device, "drum_pads", []) or []:
-                for chain in pad.chains:
+                for chain in pad.chains:  # a pad's voices: below
                     s = chain.devices[0]
-                    out[str(pad.note)] = {"mode": s.playback_mode, "file": s.sample.file_path, "voices": s.voices,
+                    out[str(pad.note)] = {"mode": s.playback_mode, "file": s.sample.file_path,
                                           "choke_group": chain.choke_group}
     return out
 
@@ -146,7 +149,7 @@ def comparable(state: dict, *, skip_empty_clips: bool = False) -> dict:
     """The set as describe_song gives it, without what differs by how a file
     was loaded rather than what plays: a Simpler's and a pad chain's name
     (Live names them after the file through the browser; "Simpler" and no
-    name by path), the rack's pad names (its chains'), each pad's "F On"
+    name by path), its voices, the rack's pad names (its chains'), each pad's "F On"
     (the blueprint turns it off, PAD_OFF; the browser leaves Live's
     default), and the undo history and browser log."""
     out = {k: state[k] for k in ("tempo", "signature", "loop", "locators", "selected_track")}
@@ -161,6 +164,7 @@ def comparable(state: dict, *, skip_empty_clips: bool = False) -> dict:
                     c.pop("name")
                     for s in c["devices"]:
                         s.pop("name")
+                        s.pop("voices", None)  # 3 through the browser, 6 by path (simplers)
                         s["parameters"].pop("F On")
                         s["parameters"].pop("Fade In", None)
             d.pop("pads", None)
