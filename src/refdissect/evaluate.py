@@ -39,6 +39,7 @@ from .render import (
     fader_db,
     glide_s,
     late_808,
+    moved_beats,
     pad_hits,
     pad_settings,
     pitch_808,
@@ -46,6 +47,7 @@ from .render import (
     resolve,
     settings_808,
     takes_over,
+    unaligned,
     velocity_gain,
     voices_808,
 )
@@ -458,8 +460,14 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     own grid, bar 1 at 0 s at the plan's tempo, in the plan's meter (the
     build sets Live's time signature to it; 4/4 for a plan without one);
     the plan puts notes at their seconds, so the song's bars fall on it
-    only when the song's first bar line is at 0 s."""
+    only when the song's first bar line is at 0 s. A plan moved onto Live's
+    bars (plan --align-bar1, render.moved_beats) is read at the song's
+    seconds (render.unaligned: its notes as without the move), Live's grid
+    moved back with it: its bar 1 that many seconds before 0 s, its bar
+    lines where the analysis put the song's."""
     bps = plan["tempo"] / 60
+    first = 0.0 - moved_beats(plan) / bps  # Live's bar 1 at the song's seconds
+    plan = unaligned(plan)
     track = plan["tracks"]["drums"]
     sounds, settings, shots, missing = {}, {}, {}, []
     for note, pad in track["pads"].items():
@@ -483,7 +491,7 @@ def estimate_from_plan(plan: dict, root: str | Path | None = None, scenario: str
     length = plan.get("length_beats", 0.0) / bps
     return _events(scenario, {"from": "plan", "velocity_curve": str(velocity_curve), "missing": missing},
                    audio={"sr": SR, "n_samples": int(round(length * SR))},
-                   time=_grid_time(plan["tempo"], 0.0, int(plan.get("beats_per_bar", 4)), length,
+                   time=_grid_time(plan["tempo"], first, int(plan.get("beats_per_bar", 4)), length,
                                    int(plan.get("beat_unit", 4))),
                    sounds=sounds, drums=drums, bass808=bass, **_plan_melodic(plan, bps))
 

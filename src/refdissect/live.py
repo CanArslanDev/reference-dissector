@@ -35,7 +35,8 @@ docs/07-building-in-live.md):
 - Reference stems go in as Arrangement audio clips with warping off, so they
   play at their own speed and line up with notes placed at their seconds,
   once their start (moved to the first transient by Live's warp analysis)
-  is put back at 0.
+  is put back at 0. plan --align-bar1 moves the notes and the clips alike
+  (onto_live_bars).
 - Locators at fractional beats were refused ("Live did not create it");
   whole beats work, but Live moves one off its grid (beat 9 went to 8 in
   4/4, to 12 after 3/4, in the live check): the build sets the plan's
@@ -85,11 +86,13 @@ from .render import (
     glide_s,
     grouped,
     late_808,
+    moved_beats,
     pad_hits,
     pad_settings,
     pad_shot,
     pad_track,
     render_808,
+    shift_notes,
     takes_over,
     voices_808,
 )
@@ -130,6 +133,9 @@ CLEAR_MS, CLEAR_HITS, CLEAR_IQR_DB, CLEAR_GAP_DB = 50.0, 3, 3.0, 6.0
 # open hat's tail alone would ring there, on CHOKE_LEAST hits or more and on at least half the hits whose window is
 # not masked (louder than that tail by over CHOKE_MASKED_DB: another sound plays there). They go in CHOKE_GROUP.
 CHOKE_WINDOW_S, CHOKE_DB, CHOKE_LEAST, CHOKE_MASKED_DB, CHOKE_GROUP = (0.04, 0.15), -6.0, 2, 3.0, 1
+# plan --align-bar1 (off by default) moves a plan whose grid's first bar line lies more than ALIGN_MS from 0 s
+# onto Live's bars (onto_live_bars): Live's bar 1 starts at 0 s, so the plan's bars lie that far off Live's
+ALIGN_MS = 20.0
 
 
 def no_overlaps(notes: list[dict], longest: float | None) -> list[dict]:
@@ -440,7 +446,8 @@ def _one_voice(out: list[dict], order: list[int], slid: list[bool], bps: float) 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
               headroom_db: float = 4.0, min_hits: int | None = None, min_clean: float = 0.5,
               min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5,
-              chokes: bool = False, scale_files: bool = True, live_sr: int | None = None) -> dict:
+              chokes: bool = False, scale_files: bool = True, live_sr: int | None = None,
+              align_bar1: bool = False) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad on evidence that it is one:
@@ -533,7 +540,10 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     balance 0.472 -> 0.506 dB [0.500 -> 0.487]. Within each stem group
     (evaluate.level_scores' balance_in_group_db; the same plans scored
     again, hf-0g -> hf-1g) it is worse on both models, a median over the
-    48 beats of 0.190 -> 0.240 dB [0.195 -> 0.245]: off."""
+    48 beats of 0.190 -> 0.240 dB [0.195 -> 0.245]: off.
+
+    With align_bar1 (off by default) the plan is then moved onto Live's
+    bars (onto_live_bars), the levels read before, at the song's seconds."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -636,7 +646,60 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     plan["levels"] = estimate_levels(plan, analysis, headroom_db)
     if scale_files:
         scale_files_to_full(plan)
+    if align_bar1:
+        onto_live_bars(plan, analysis)
     return plan
+
+
+def bar1_move(phase: float, bar_s: float, within_ms: float = ALIGN_MS) -> float:
+    """Seconds that move a grid's first bar line (phase, s from the audio's
+    start) onto a bar line of Live's ruler, whose bar 1 starts at 0 s: a bar
+    less the phase where the line lies after 0 s (onto bar 2: bar 1 holds
+    the pickup), the phase's own size where it lies before (onto bar 1),
+    and 0 within within_ms of 0 s. Never earlier, so every note keeps its
+    place and the stems need no cut. grid.estimate puts the line from
+    BAR_SLACK (50 ms) before the audio to under a bar into it."""
+    if phase > within_ms / 1000:
+        return (bar_s - phase) % bar_s
+    if phase < -within_ms / 1000:
+        return -phase
+    return 0.0
+
+
+def onto_live_bars(plan: dict, analysis: dict, within_ms: float = ALIGN_MS) -> None:
+    """plan --align-bar1: make_plan's plan, at the song's seconds, moved
+    later in place by bar1_move of the analysis' first bar line, in the
+    plan's beats (4 decimals), so that the grid's bar lines fall on Live's,
+    which count bar 1 from 0 s (a plan at the song's seconds has its bars
+    that far off Live's: full's first bar line, 0.4 s in, 400 ms).
+    - Every drum, 808 and melodic note and the 808's slides move by it, and
+      so do the reference stems: build_spec starts their clips there
+      (moved_beats). A note make_plan held at 0 s, its sample's lead-in
+      starting before the audio, moves with the rest.
+    - The plan ends on the first bar line of Live's at or after the moved
+      song's end.
+    - The locators are the sections' starts counted from the moved first
+      bar line, so on Live's bar lines: from bar 2 where the line came
+      after 0 s, from bar 1 where it came before (make_plan had put them
+      there already, the line itself at 0 s; the notes and stems now meet
+      them).
+    Within within_ms of 0 s nothing moves. The plan records align_bar1:
+    the first bar line (s), the move (s and beats) and the bar of Live's it
+    lands on. render.unaligned takes the move back for whatever plays the
+    plan against the reference (render_plan, evaluate.estimate_from_plan,
+    candidates)."""
+    bps, bar = plan["tempo"] / 60, bar_beats(plan)
+    phase = float(analysis["grid"].get("phase", 0.0))
+    moved = round(bar1_move(phase, bar / bps, within_ms) * bps, 4) + 0.0
+    if moved:
+        shift_notes(plan, moved)
+        end = analysis["source"]["duration_s"] * bps + moved
+        plan["length_beats"] = float(bar * math.ceil(end / bar - 1e-9))
+        first = phase * bps + moved  # the grid's first bar line, on a bar line of Live's
+        plan["locators"] = [[f"{s['name']} ({s['start_bar']})", round(first + bar * (s["start_bar"] - 1), 3) + 0.0]
+                            for s in analysis.get("sections", [])]
+    plan["align_bar1"] = {"first_bar_line_s": phase, "moved_s": round(moved / bps, 6), "moved_beats": moved,
+                          "lands_on_bar": int(round((phase * bps + moved) / bar)) + 1}
 
 
 def scale_files_to_full(plan: dict) -> None:
@@ -1334,7 +1397,9 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     the drums on a Drum Rack (one pad per sound, its file by the name build
     copies it under, pad_sample: scaled by its file_db where it has one),
     the melodic notes on MIDI
-    tracks (muted), the reference stems as audio tracks; Simplers with
+    tracks (muted), the reference stems as audio tracks (their clips at
+    beat 0, or where a plan moved onto Live's bars moved them, moved_beats:
+    the song's 0 s); Simplers with
     warping off, the 808's at 0 dB and each pad's at its volume_db
     (estimate_levels; never over 0 dB, 0 dB without one), each sound's
     transposition (a pad's Transpose and Detune), "Vol < Vel" at the plan's
@@ -1377,7 +1442,7 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     for stem, info in plan["stems"].items():
         spec.append({"name": f"REF {stem}", "kind": "audio", "mute": bool(info["mute"]),
                      "volume_db": round(min(6.0, levels["stems_track_db"]), 1),
-                     "audio_clips": [{"file": info["path"], "start": 0.0, "warping": False}]})
+                     "audio_clips": [{"file": info["path"], "start": moved_beats(plan), "warping": False}]})
     return spec
 
 

@@ -771,12 +771,16 @@ def run(work: str | Path, out_dir: str | Path, n: int = 4, seed: int = 1, bars: 
     and out/candidates.json with the statistics, each candidate's seed,
     tries, copy score, digest and compare summary. The reference stems
     (plan's stems folder or `stems`) give the round's reference bars, the
-    ducking fit and the comparison; without them, neither."""
+    ducking fit and the comparison; without them, neither. A plan moved
+    onto Live's bars (plan --align-bar1) is read at the song's seconds, as
+    the reference stems and melodic.json's chords are (render.unaligned)."""
     from .live import write_midi
+    from .render import unaligned
     work, out = Path(work), Path(out_dir)
     plan = _load(work / "plan.json")
     if plan is None:
         raise FileNotFoundError(f"No plan.json in {work} (run refdissect plan first)")
+    plan = unaligned(plan)
     analysis, melodic = _load(work / "analysis.json"), _load(work / "melodic.json")
     stats = style_stats(plan, analysis, melodic, section)
     reference = reference_events(plan, melodic, section)

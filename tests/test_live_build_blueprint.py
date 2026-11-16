@@ -306,6 +306,42 @@ def test_the_command_and_a_set_that_is_not_empty(live, tmp_path, capsys):
         main(["live-build", str(work)])
 
 
+def test_a_plan_moved_onto_lives_bars(live, tmp_path):
+    """A plan made with --align-bar1 (live.onto_live_bars): a_plan's first
+    bar line, 0.053 beats in (its locators), lies 22.7 ms after 0 s, so it
+    moves 3.947 beats later onto bar 2. Built by build_from_blueprint, the
+    stems' clips start there, the notes and locators moved alike; bars 2-3
+    of it start on the first bar line, the stems cut from it."""
+    plan, work = a_plan(tmp_path)
+    bps = plan["tempo"] / 60
+    analysis = {"grid": {"phase": 0.053 / bps}, "source": {"duration_s": 16 / bps},
+                "sections": [{"name": "A", "start_bar": 1}, {"name": "B", "start_bar": 3}]}
+    L.onto_live_bars(plan, analysis)
+    assert plan["align_bar1"]["moved_beats"] == 3.947 and plan["length_beats"] == 20.0
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    sim = live([])
+    report = asyncio.run(B.build(work, log=lambda _: None))
+    assert report["ok"] is True and "locators_moved" not in report
+    state = sim.state()
+    assert state["locators"] == [{"name": "A (1)", "time": 4}, {"name": "B (3)", "time": 12}]
+    refs = [c for t in state["tracks"] if t["name"].startswith("REF ") for c in t["arrangement_clips"]]
+    assert len(refs) == 4 and {c["start_time"] for c in refs} == {3.947}
+    drums = next(t for t in state["tracks"] if t["name"] == "Drums (library)")["arrangement_clips"][0]
+    assert sorted(n[1] for n in drums["notes"]) == pytest.approx([3.947, 4.447, 4.947, 7.947, 8.947])
+    sim = live([])
+    report = asyncio.run(B.build(work, bars=(2, 3), log=lambda _: None))
+    assert report["ok"] is True and report["excerpt"]["beats"] == [4.0, 12.0]
+    state = sim.state()
+    assert state["locators"] == [{"name": "A (1)", "time": 0}]  # B, on bar 4, is past the excerpt
+    refs = [c for t in state["tracks"] if t["name"].startswith("REF ") for c in t["arrangement_clips"]]
+    assert {c["start_time"] for c in refs} == {0.0}
+    source = sf.read(next(iter(plan["stems"].values()))["path"], dtype="float64")[0]
+    cut = sf.read(next(c["file_path"] for c in refs if Path(c["file_path"]).name.startswith("drums")),
+                  dtype="float64")[0]
+    a = int(round((4.0 - 3.947) / bps * SR))
+    assert np.array_equal(cut, source[a:a + int(round(8.0 / bps * SR))])
+
+
 def test_the_server_is_imported_with_the_full_profile():
     """live-build sets ABLETON_MCP_PROFILE=full before it imports
     MCP_Server.server, which registers its tools once, on import: in a fresh
