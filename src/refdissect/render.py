@@ -51,7 +51,11 @@ check:
 - a pad cut by its note's end (Classic) fades out along a straight line
   over fade_ms [5 ms] from the cut (not measured in Live);
 - no effects; the reference stems Live plays beside these are the
-  reference's own and are not rendered.
+  reference's own and are not rendered;
+- a plan moved onto Live's bars (plan --align-bar1, which moves its stems'
+  clips alike) plays at the song's seconds, its move taken back
+  (unaligned), so a render lines up with the reference stems as they are
+  on disk.
 
 live.estimate_levels makes the same assumptions for its level estimate
 (velocity_db, One-Shot pads of one voice, the 808 per note released at its
@@ -61,6 +65,7 @@ each pad's lead-in, which Live plays (it moves a hit, not its level).
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -105,6 +110,44 @@ RELEASE_S = 60.0 / RELEASE_DB_MS / 1000
 # its kernel's cutoff as a share of the source rate
 LIVE_SR = 48000
 SIMPLER_FC = 0.45
+
+
+def moved_beats(plan: dict) -> float:
+    """Beats plan --align-bar1 moved the plan later onto Live's bars (its
+    align_bar1 record, live.onto_live_bars), 0 for any other plan."""
+    return float((plan.get("align_bar1") or {}).get("moved_beats", 0.0))
+
+
+def shift_notes(plan: dict, beats: float) -> None:
+    """Moves every note of the plan (drums, 808, melodic) and the 808's
+    slides by beats (earlier where negative), in place, at the plan's 4
+    decimals."""
+    tracks = plan["tracks"]
+    for track in [tracks.get("drums") or {}, tracks.get("808") or {}, *(tracks.get("melodic") or {}).values()]:
+        for n in [*(track.get("notes") or []), *(track.get("slides") or [])]:
+            n["start_time"] = round(n["start_time"] + beats, 4) + 0.0
+
+
+def unaligned(plan: dict) -> dict:
+    """The plan at the song's seconds, where the reference stems play from
+    0 s. A plan moved onto Live's bars (moved_beats) comes back as a copy
+    without its record, its notes and slides moved back (they are then the
+    ones the plan made without the option has), its length and locators
+    too: the length still covers the song, and no locator goes before 0 s,
+    where make_plan puts a first bar line that comes before the audio. The
+    locators lie within 0.001 beat of the unmoved plan's where the first
+    bar line came after 0 s; where it came before, on the song's bar lines,
+    which the unmoved plan's lie that far after. Any other plan comes back
+    as it is."""
+    beats = moved_beats(plan)
+    if not beats:
+        return plan
+    out = copy.deepcopy(plan)
+    del out["align_bar1"]
+    shift_notes(out, -beats)
+    out["length_beats"] = round(float(plan["length_beats"]) - beats, 4)
+    out["locators"] = [[name, max(0.0, round(beat - beats, 3))] for name, beat in plan.get("locators") or []]
+    return out
 
 
 def resolve(path: str | Path, root: str | Path | None = None) -> Path:
@@ -496,7 +539,9 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
     own velocity_curve field overrides the argument. A file that cannot be
     read plays nothing, as in Live, and is listed under "missing". mono:
     each pad one voice, as Live plays it (pad_hits); False sums a pad's
-    hits. The 808's notes end in Live's release (render_808)."""
+    hits. The 808's notes end in Live's release (render_808). A plan moved
+    onto Live's bars plays at the song's seconds (unaligned)."""
+    plan = unaligned(plan)
     out = Path(out_dir)
     bps = plan["tempo"] / 60
     fade = samples(fade_ms)

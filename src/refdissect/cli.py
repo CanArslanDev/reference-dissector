@@ -10,6 +10,7 @@
     refdissect match work/song --library work/library.npz
     refdissect fit-808 work/song --library-808 work/library_808.npz
     refdissect plan work/song
+    refdissect plan work/song --align-bar1    (moved onto Live's bars where the first bar line is over 20 ms off 0 s)
     refdissect live-build work/song          (needs the [live] extra and Live 12.4+ running: build_from_blueprint)
     refdissect live-build work/song --bars 9-16       (bars 9 to 16 only, from 0: a short live check)
     refdissect live-build work/song --direct          (the build before build_from_blueprint, until it is verified)
@@ -159,17 +160,25 @@ def _plan_options(s) -> None:
                    help="the rate of the audio device Live plays at (48000 measured): the plan's levels, and "
                         "its renders, play each pad through Simpler's resampler at it (render.simpler_play), "
                         "which takes highs off; off by default (docs/07)")
+    s.add_argument("--align-bar1", action="store_true",
+                   help="move the plan later onto Live's bars where the grid's first bar line lies more than 20 ms "
+                        "from 0 s: by a bar less that line (bar 1 holds the pickup), or by its distance where it "
+                        "comes before 0 s; notes, the stems' clips, locators and the end alike (live.onto_live_bars; "
+                        "off by default: docs/01)")
 
 
 def _plan_kwargs(a) -> dict:
     """plan's options as `suite run` passes them on: none unless given."""
     out = {**({"chokes": True} if a.chokes else {}), **({"live_sr": a.live_sr} if a.live_sr else {})}
+    if a.align_bar1:
+        out["align_bar1"] = True
     return {"plan": out} if out else {}
 
 
 def _plan(a):
     from .pipeline import plan
-    plan(a.work, chokes=a.chokes, live_sr=a.live_sr)
+    plan(a.work, chokes=a.chokes, live_sr=a.live_sr,
+         align_bar1=a.align_bar1)
 
 
 def _build(a):

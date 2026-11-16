@@ -756,21 +756,33 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
 
 
 def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = False,
-         live_sr: int | None = None) -> dict:
-    from .live import make_plan, write_midi
+         live_sr: int | None = None,
+         align_bar1: bool = False) -> dict:
+    """plan.json and midi/ from the work folder's analysis (live.make_plan,
+    live.write_midi). align_bar1: moved onto Live's bars where the grid's
+    first bar line lies more than live.ALIGN_MS from 0 s (off by default:
+    live.onto_live_bars)."""
+    from .live import ALIGN_MS, make_plan, write_midi
     work = Path(work)
     analysis = _load(work / "analysis.json")
     matches = _load(work / "matches.json") if (work / "matches.json").is_file() else {}
     synth = _load(work / "synth808.json") if (work / "synth808.json").is_file() else None
     melodic_notes = _load(work / "melodic.json") if (work / "melodic.json").is_file() else None
     p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes,
-                  chokes=chokes, live_sr=live_sr)
+                  chokes=chokes, live_sr=live_sr,
+                  align_bar1=align_bar1)
     _save(work / "plan.json", p)
     written = write_midi(p, work / "midi")
     tonal = ", ".join(f"{len(t['notes'])} {s}" for s, t in p["tracks"].get("melodic", {}).items())
     log(f"plan: {len(p['tracks']['drums']['notes'])} drum notes on {len(p['tracks']['drums']['pads'])} pads, "
         f"{len(p['tracks']['808']['notes'])} 808 notes" + (f", notes: {tonal}" if tonal else "")
         + f"; MIDI: {', '.join(str(w) for w in written)}")
+    moved = p.get("align_bar1")
+    if moved:
+        log(f"  the first bar line, at {moved['first_bar_line_s']} s, "
+            + (f"moved {moved['moved_s']} s ({moved['moved_beats']} beats) later, onto Live's bar "
+               f"{moved['lands_on_bar']}: notes, stems, locators and the end alike" if moved["moved_beats"]
+               else f"lies within {ALIGN_MS:g} ms of Live's bar 1: nothing moved"))
     return p
 
 
