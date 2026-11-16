@@ -396,7 +396,7 @@ The plan carries every setting below, and `live.build_spec` sends it to `build_t
 - One `build_tracks` call of PIRAMIT's size (it went as 5), and a build that stops half way.
 - htdemucs_ft plans, a whole plan with Glide (an excerpt was built), one voice taking over a release at another pitch under Glide, and choke groups. A choke group cuts with a 1 ms fade (the battery), and `render.py` now cuts so; with `--chokes` the plan sets one and the build sets it on each pad's chain, but no plan with one has been built. A hit after its pad's choked hit is planned on time, which Live has not been measured doing.
 - A pad's Volume sent as a number: that Simpler takes a number in dB as its value, and the build's read-back of it.
-- Locators off the Arrangement's grid: Live moves them, and the build deletes them (3 of meter34-1's 5). Zoomed in with `zoom_view(3, "Arranger", False)`, 25 steps or more, every whole beat lands (probes, 2026-11-16); the build does not zoom yet.
+- Locators off the Arrangement's grid: Live moves them, and the build deletes them (3 of meter34-1's 5). Zoomed in with `zoom_view(3, "Arranger", False)`, 25 steps or more, every whole beat lands (probes, 2026-11-16); ableton-live-mcp v2.4.1 zooms in before placing them (`build_from_blueprint`, so `live-build`): a 3/4 blueprint's locators on beats 0, 9, 21, 33 and 45 all landed (Live 12.4.16, 2026-11-16); `live-build --direct` does not zoom.
 - Bar 1: Live's bar 1 sits at 0 s, so full's first bar line, 0.4 s in, lands 400 ms off it. The LOM cannot move it; only shifting the plan can.
 - A plan made with `--live-sr`, built and recorded.
 
@@ -498,7 +498,7 @@ All measured on the suite (m5 unless named; m4 equals m3 on everything but the p
 ## Next
 
 In order ([10](10-roadmap.md) has the metrics, targets and gaps):
-1. **The plan with Live's measured behaviour:** Simpler's top-end loss on by default (now `--live-sr`), choke groups on by default (now `--chokes`), bar 1 and the locators off Live's grid; the levels per beat (the kick against the snare, dynamics) and balance within each stem group. Velocities follow Live's law (m2g-vel), pads are given on evidence (m3), each pad has a level of its own (m4), and Snap, one voice per pad, the 808's release and the meter follow Live (m5).
+1. **The plan with Live's measured behaviour:** Simpler's top-end loss on by default (now `--live-sr`), choke groups on by default (now `--chokes`), bar 1 (the locators land since ableton-live-mcp v2.4.1); the levels per beat (the kick against the snare, dynamics) and balance within each stem group. Velocities follow Live's law (m2g-vel), pads are given on evidence (m3), each pad has a level of its own (m4), and Snap, one voice per pad, the 808's release and the meter follow Live (m5).
 2. **The 808 in the plan:** slides on by default once no beat without a slide gets one (`--slides`), a note's own cents (full, producer), the reader against the estimate on short restarted notes, and the one-shot's head by ear. Its pitch on short, low notes is done (m4).
 3. **The build in Live:** `refdissect live-build` end to end, one `build_tracks` call of a song's size, htdemucs_ft plans, a whole plan with Glide and a build that fails. Suite plans and PIRAMIT's were built, recorded and scored as the plan is scored on 2026-10-29 ([In Live](#in-live)).
 4. **The closed loop:** measure the recording, correct levels, pitch and timing, rebuild, and stop when the distance stops falling.
