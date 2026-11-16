@@ -13,7 +13,6 @@
     refdissect plan work/song --align-bar1    (moved onto Live's bars where the first bar line is over 20 ms off 0 s)
     refdissect live-build work/song          (needs the [live] extra and Live 12.4+ running: build_from_blueprint)
     refdissect live-build work/song --bars 9-16       (bars 9 to 16 only, from 0: a short live check)
-    refdissect live-build work/song --direct          (the build before build_from_blueprint, until it is verified)
     refdissect blueprint work/song           (work/song/blueprint.json, for ableton-live-mcp's build_from_blueprint)
     refdissect calibrate work/inventory.json --library work/library.npz --out work/calibration
 
@@ -182,20 +181,9 @@ def _plan(a):
 
 
 def _build(a):
-    path = Path(a.plan)
-    bars = _bars(a.bars) if a.bars else None
-    if not a.direct:  # the plan as a blueprint, built by ableton-live-mcp's build_from_blueprint
-        from .blueprint import build
-        if a.user_library is not None:
-            print("live-build: --user-library is --direct's; build_from_blueprint copies the files into the User "
-                  "Library it finds (where its Remote Script is installed) and loads them by path", file=sys.stderr)
-        asyncio.run(build(path, bars=bars, stems_out=a.stems_out))
-        return
-    from .live import build
-    plan = json.loads((path / "plan.json" if path.is_dir() else path).read_text(encoding="utf-8"))
-    work = path if path.is_dir() else path.parent
-    out = Path(a.stems_out or work / f"excerpt-{bars[0]}-{bars[1]}") if bars else None
-    asyncio.run(build(plan, a.user_library or str(USER_LIBRARY), bars=bars, stems_out=out))
+    """The plan as a blueprint, built by ableton-live-mcp's build_from_blueprint (blueprint.build)."""
+    from .blueprint import build
+    asyncio.run(build(Path(a.plan), bars=_bars(a.bars) if a.bars else None, stems_out=a.stems_out))
 
 
 def _blueprint(a):
@@ -510,13 +498,8 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(run=_plan)
     s = sub.add_parser("live-build", help="build the plan in the open (empty) Live set: the plan as a blueprint "
                                           "(blueprint.json beside it), built by ableton-live-mcp's "
-                                          "build_from_blueprint; --direct for the build before it")
+                                          "build_from_blueprint (docs/07)")
     s.add_argument("plan", help="plan.json or the work folder")
-    s.add_argument("--direct", action="store_true",
-                   help="the build before build_from_blueprint (build_tracks, samples loaded through Live's "
-                        "browser by name), unchanged; kept until the new build is verified in Live (docs/07)")
-    s.add_argument("--user-library", default=None,
-                   help=f"--direct only: the User Library the files are copied into (default: {USER_LIBRARY})")
     s.add_argument("--bars", default=None, metavar="A-B",
                    help="build bars A to B only (Live's ruler, from 1), moved to start at 0, with the stems cut "
                         "to them: a short live check")

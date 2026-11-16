@@ -328,18 +328,13 @@ def test_locators_on_the_bar_lines(tmp_path):
     assert plan["locators"] == [["A (1)", 2.0], ["B (3)", 8.0]]
 
 
-def test_a_3_4_plan_is_built_in_3_4_and_a_locator_live_moves_is_deleted(tmp_path, monkeypatch):
+def test_a_3_4_plan_lasts_whole_bars_of_it_and_is_built_in_it(tmp_path):
     """The plan carries the grid's meter and lasts whole bars of it, and
-    estimate_from_plan times it in that meter; the build sets Live's time
-    signature before it places the locators. A locator Live puts elsewhere
-    (in the live check one asked at beat 9 went to 8) is deleted there and
-    reported, not left stray; the set's own cues stay."""
-    import asyncio
-    import json
-    import sys
-
+    estimate_from_plan times it in that meter; its blueprint sets Live's
+    time signature to it (build_from_blueprint sets it before the locators:
+    test_live_build_blueprint)."""
     from refdissect import evaluate
-    from refdissect.live import build
+    from refdissect.blueprint import make_blueprint
     analysis, matches, synth = _fixture(tmp_path)
     analysis["grid"].update(beats_per_bar=3, beat_unit=4)
     analysis["sections"] = [{"name": "A", "start_bar": 1, "end_bar": 4}, {"name": "B", "start_bar": 4, "end_bar": 5}]
@@ -348,35 +343,7 @@ def test_a_3_4_plan_is_built_in_3_4_and_a_locator_live_moves_is_deleted(tmp_path
     time = evaluate.estimate_from_plan(plan, root=tmp_path)["time"]
     assert time["beats_per_bar"] == 3 and time["downbeats_s"][:3] == [0.0, 1.5, 3.0]
     assert plan["locators"] == [["A (1)", 0.0], ["B (4)", 9.0]]
-    live = {"cues": [{"name": "mine", "time": 40.0}], "at": 0.0}  # a cue the set held before
-
-    def overview(args, calls):
-        return json.dumps({"tracks": [], "cue_points": live["cues"]})
-
-    def transport(args, calls):
-        if args["action"] == "jump_to":
-            live["at"] = args["time"]
-        elif args["action"] == "toggle_cue":
-            live["cues"] = [c for c in live["cues"] if c["time"] != live["at"]]
-        return "{}"
-
-    calls = _fake_live(monkeypatch, tmp_path / "lib", answers={"get_session_overview": overview,
-                                                               "transport": transport})
-
-    def place_locators(cues):  # Live moves the one at beat 9 to 8
-        calls.append(("place_locators", cues))
-        live["cues"] += [{"name": n if t != 9.0 else "1", "time": 8.0 if t == 9.0 else t} for n, t in cues]
-        return [{"name": n, "time": t, **({"error": "Live did not create it"} if t == 9.0 else {})} for n, t in cues]
-
-    monkeypatch.setattr(sys.modules["MCP_Server.extended_tools"], "place_locators", place_locators)
-    logged = []
-    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
-    names = [n for n, _ in calls]
-    assert names.index("set_song_properties") < names.index("place_locators")
-    assert dict(calls)["set_song_properties"]["time_signature"] == "3/4"
-    assert report["locators_moved"] == [{"name": "B (4)", "asked": 9.0, "live": 8.0, "deleted": True}]
-    assert sorted(c["time"] for c in live["cues"]) == [0.0, 40.0]
-    assert "Live put it at beat 8 for locator 'B (4)' at beat 9.0: deleted" in logged
+    assert make_blueprint(plan, "Song", made="refdissect test", log=lambda _: None)["time_signature"] == "3/4"
 
 
 def test_midi_files(tmp_path):
@@ -458,187 +425,44 @@ def test_an_808_note_live_restarts_late_is_planned_1_ms_early(tmp_path):
     assert {t["name"]: t for t in build_spec(plan)}["808 (synth)"]["settings"]["Ve Release"] == "50.0 ms"
 
 
-def _fake_live(monkeypatch, library=None, held=None, answers=None, volume_held=None) -> list:
-    """ableton-live-mcp faked for build: an empty set, build_tracks building
-    every track it is sent, each Simpler holding the User Library copy its
-    spec names (held: another file, by pad note or "808"); answers: a tool's
-    own answer, answers[name](args, calls), which may raise as the server
-    does; a pad's Volume held as its number is sent (volume_held: what a
-    number sent leaves instead), and a choke group as set. Returns the list
-    of (tool, arguments) calls."""
-    import json
-    import sys
-    import types
-
-    calls, chokes, shown = [], {}, {}
-
-    def volume(path: str) -> dict:
-        """A pad's Volume as Live holds it: the number sent (by its value), or
-        what a display text left; Live's display, two decimals."""
-        spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
-        sent = spec["Drums (library)"]["instrument"]["drum_rack"][re.search(r"drum_pads (\d+)", path).group(1)]
-        value = shown.get(path, sent["settings"]["Volume"])
-        value = (volume_held or (lambda v: v))(value) if path not in shown else value
-        return {"value": value, "$display": f"{value:.2f} dB"}
-
-    def holds(path: str) -> str | None:
-        spec = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
-        pad = re.search(r"drum_pads (\d+)", path)
-        key = pad.group(1) if pad else "808"
-        sample = (spec["Drums (library)"]["instrument"]["drum_rack"][key] if pad
-                  else spec["808 (synth)"]["instrument"])["sample"]
-        copy = Path(library) / "Samples" / "AbletonMCP Generated" / sample if library else None
-        return (held or {}).get(key) or (str(copy) if copy else None)
-
-    async def call_tool(name, args):
-        calls.append((name, args))
-        if name in (answers or {}):
-            text = answers[name](args, calls)
-        elif name == "get_session_overview":
-            built = any(c[0] == "build_tracks" for c in calls)
-            tracks = [{"name": "Drums (library)", "index": 0}, {"name": "808 (synth)", "index": 1}] if built else []
-            text = json.dumps({"tracks": tracks})
-        elif name == "build_tracks":
-            text = json.dumps({"tracks": [{"track": t["name"], "problems": []} for t in args["tracks"]]})
-        elif name == "lom_get_object" and args["path"].endswith("parameters Volume"):
-            text = json.dumps(volume(args["path"]))
-        elif name == "lom_get_object" and args["path"].endswith("chains 0"):
-            text = json.dumps({"choke_group": chokes.get(args["path"], 0)})
-        elif name == "lom_get_object":
-            text = json.dumps({"file_path": holds(args["path"])})
-        elif name == "lom_set_property" and args["property"] == "choke_group":
-            chokes[args["path"]] = args["value"]
-            text = "{}"
-        elif name == "run_batch":
-            for c in args["commands"]:  # param_set_display: Live holds a display step under the text
-                shown[c["params"]["path"]] = float(c["params"]["value"].removesuffix(" dB")) - 0.005
-            text = "{}"
-        else:
-            text = "{}"
-        return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)], is_error=False)
-
-    server = types.ModuleType("MCP_Server.server")
-    server.mcp = types.SimpleNamespace(call_tool=call_tool)
-    tools = types.ModuleType("MCP_Server.extended_tools")
-    tools.place_locators = lambda cues: [{"name": n, "time": t} for n, t in cues]  # as 2.2.0 answers
-    package = types.ModuleType("MCP_Server")
-    package.extended_tools, package.server = tools, server
-    for name, module in (("MCP_Server", package), ("MCP_Server.server", server),
-                         ("MCP_Server.extended_tools", tools)):
-        monkeypatch.setitem(sys.modules, name, module)
-    return calls
-
-
-def test_build_gives_the_808_simpler_one_voice(tmp_path, monkeypatch):
-    """build (ableton-live-mcp faked) sends the spec to build_tracks, then
-    sets the 808 Simpler's voices to 1 by its LOM property."""
-    import asyncio
-
-    from refdissect.live import build
-    analysis, matches, synth = _fixture(tmp_path)
-    plan = make_plan(analysis, matches, synth, tmp_path)
-    plan["tracks"]["808"].update(detune_cents=7, voices=1, glide_mode="Glide", glide_time_ms=80.0)
-    calls = _fake_live(monkeypatch)
-    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
-    spec = next(a for n, a in calls if n == "build_tracks")["tracks"]
-    assert next(t for t in spec if t["name"] == "808 (synth)")["settings"]["Detune"] == 7.0
-    assert ("lom_set_property", {"path": "live_set tracks 1 devices 0", "property": "voices", "value": 1}) in calls
-    assert "808_voices" in report and (tmp_path / "lib" / "Samples" / "AbletonMCP Generated").is_dir()
-
-
-def test_the_808_one_shot_is_named_by_its_content(tmp_path, monkeypatch):
+def test_the_808_one_shot_is_named_by_its_content(tmp_path):
     """Live keeps playing a sample loaded through the browser under its name
     after the file changes on disk, so the one-shot's name carries its
-    content's digest: fitted again, it gets another name. build copies it
-    into the User Library under that name, and refuses a one-shot that
-    changed after the plan named it."""
-    import asyncio
-
-    from refdissect.live import build, one_shot_digest
+    content's digest: fitted again, it gets another name. The blueprint
+    copies it into the User Library under that name, and refuses a one-shot
+    that changed after the plan named it (so does live-build, which writes
+    the blueprint first)."""
+    from refdissect.blueprint import make_blueprint
+    from refdissect.live import one_shot_digest
     analysis, matches, synth = _fixture(tmp_path)
     plan = make_plan(analysis, matches, synth, tmp_path)
     first = plan["tracks"]["808"]["sample"]
     assert first.endswith(f" 808 (synth) {one_shot_digest(synth['file'])}.wav")
-    _fake_live(monkeypatch)
-    asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
-    copied = tmp_path / "lib" / "Samples" / "AbletonMCP Generated" / first
-    assert copied.read_bytes() == Path(synth["file"]).read_bytes()
+    copy = make_blueprint(plan, "Song", made="refdissect test", log=lambda _: None)["files"]["808"]
+    assert (copy["name"], copy["source"], copy["sha1"]) == (first, synth["file"], one_shot_digest(synth["file"]))
     sf.write(synth["file"], np.sin(2 * np.pi * 36.7 * np.arange(SR) / SR) * 0.9, SR)  # fit-808 ran again
     assert make_plan(analysis, matches, synth, tmp_path)["tracks"]["808"]["sample"] != first
     with pytest.raises(RuntimeError, match="plan again"):
-        asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+        make_blueprint(plan, "Song", made="refdissect test", log=lambda _: None)
 
 
-def test_each_pad_loads_its_own_file_by_its_content(tmp_path, monkeypatch):
-    """build_tracks loads a pad through Live's browser by file name, and the
-    browser holds other files of a pad's name (the live check: an 808 on
-    v1orig-3's open-hat pad): each pad's file goes into the User Library
-    under its name and its content's digest, the spec loads that copy, and
-    the build reads back the file every Simpler holds and names a pad that
-    holds another."""
-    import asyncio
-
-    from refdissect.live import build, build_spec, one_shot_digest
+def test_each_pad_loads_its_own_file_by_its_content(tmp_path):
+    """Live's browser loads a pad by file name, and it holds other files of
+    a pad's name (the live check: an 808 on v1orig-3's open-hat pad): each
+    pad's file goes into the User Library under its name and its content's
+    digest, the spec names that copy, and the blueprint copies the pad's
+    file under it (build_from_blueprint then loads it by path and reads back
+    the file every Simpler holds: test_live_build_blueprint; a pad that
+    holds another is reported, test_blueprint)."""
+    from refdissect.blueprint import make_blueprint
+    from refdissect.live import build_spec, one_shot_digest
     analysis, matches, synth = _fixture(tmp_path)
     plan = make_plan(analysis, matches, synth, tmp_path)
     snare = plan["tracks"]["drums"]["pads"]["38"]["path"]
     pad = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]["38"]
     assert pad["sample"] == f"snare {one_shot_digest(snare)}.wav"
-    lib = tmp_path / "lib"
-    _fake_live(monkeypatch, lib)
-    report = asyncio.run(build(plan, user_library=lib, log=lambda s: None))
-    assert (lib / "Samples" / "AbletonMCP Generated" / pad["sample"]).read_bytes() == Path(snare).read_bytes()
-    assert report["samples_checked"] == 2 and "wrong_samples" not in report  # the pad and the 808
-    other = tmp_path / "kit" / "snare.wav"  # another file of the pad's name, as the browser found one
-    other.parent.mkdir()
-    sf.write(other, np.random.default_rng(5).standard_normal(SR // 8) * 0.5, SR)
-    _fake_live(monkeypatch, lib, held={"38": str(other)})
-    logged = []
-    report = asyncio.run(build(plan, user_library=lib, log=logged.append))
-    assert list(report["wrong_samples"]) == ["38"] and report["wrong_samples"]["38"]["live"] == str(other)
-    assert any(line.startswith(f"pad 38 holds {other}") for line in logged)
-
-
-def test_a_build_that_stops_says_where_and_what_it_left(tmp_path, monkeypatch):
-    """In the live check build_tracks raised at a pad whose file Live's
-    browser did not list, after the 808 track and an empty Drum Rack were
-    made, and only the error was said: the build names the pad, its file
-    and the tracks it left. A connection Live refuses says that its Remote
-    Script serves at most 8 clients."""
-    import asyncio
-    import json
-
-    from refdissect.live import build
-    analysis, matches, synth = _fixture(tmp_path)
-    plan = make_plan(analysis, matches, synth, tmp_path)
-
-    def stop(args, calls):
-        name = next(t for t in args["tracks"] if t["name"] == "Drums (library)")["instrument"]["drum_rack"]["38"]
-        raise RuntimeError(f"Live's browser does not list {name['sample']!r}")
-
-    def overview(args, calls):
-        made = [{"name": "808 (synth)", "index": 4, "devices": ["Simpler"]},
-                {"name": "5-MIDI", "index": 5, "devices": ["Drum Rack"]}]
-        before = [{"name": f"{k}-MIDI", "index": k - 1, "devices": [], "session_clips": [], "arrangement_clip_count": 0}
-                  for k in range(1, 5)]  # the set's own empty tracks stay
-        return json.dumps({"tracks": before + (made if any(c[0] == "build_tracks" for c in calls) else [])})
-
-    logged = []
-    _fake_live(monkeypatch, tmp_path / "lib", answers={"build_tracks": stop, "get_session_overview": overview})
-    with pytest.raises(RuntimeError) as e:
-        asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
-    said = str(e.value)
-    assert "pad 38" in said and plan["tracks"]["drums"]["pads"]["38"]["path"] in said
-    assert "'808 (synth)' (Simpler), '5-MIDI' (Drum Rack)" in said and "1-MIDI" not in said
-    assert json.loads(logged[0])["tracks_made"][1]["devices"] == ["Drum Rack"]
-
-    def reset(args, calls):  # the 2.2.0 server's words, with 8 other clients connected
-        raise RuntimeError("Could not connect to Ableton Live. Is Live open, with AbletonMCP chosen as a Control "
-                           "Surface? ([Errno 54] Connection reset by peer)")
-
-    _fake_live(monkeypatch, answers={"get_session_overview": reset})
-    with pytest.raises(RuntimeError, match="serves at most 8 clients"):
-        asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
+    copy = make_blueprint(plan, "Song", made="refdissect test", log=lambda _: None)["files"]["pad-38"]
+    assert (copy["name"], copy["source"], copy["sha1"]) == (pad["sample"], snare, one_shot_digest(snare))
 
 
 def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
@@ -754,9 +578,11 @@ def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
     peaks over full scale ahead of the drum fader. With the kick's file
     over full scale too, the loudest pad (+10.9 dBFS), what its Volume
     cannot take, over 0 dB, the drum fader takes, every other pad's Volume
-    as much lower. The build copies each file scaled so, a float WAV at
-    full scale named with the gain."""
-    from refdissect.live import build_spec, file_db, pad_copy, pad_sample
+    as much lower. The blueprint copies each file scaled so, named with the
+    gain (build_from_blueprint writes the copy, a float WAV at full scale:
+    test_live_build_blueprint)."""
+    from refdissect.blueprint import make_blueprint
+    from refdissect.live import build_spec, file_db, pad_sample
     from refdissect.render import render_plan
     for k in "abcd":
         (tmp_path / k).mkdir()
@@ -783,24 +609,12 @@ def test_a_file_over_full_scale_plays_a_copy_scaled_to_it(tmp_path):
                for k, p in zip("abcd", (unscaled, hot, both_off, both))]
     for a, b in ((0, 1), (2, 3)):
         assert np.max(np.abs(renders[b] - renders[a])) < 1e-5 * np.max(np.abs(renders[a]))
-    copy = pad_copy(pads["42"], tmp_path / "lib")
-    x = sf.read(copy, dtype="float32")[0]
-    assert copy.name == pad_sample(hats, pads["42"]["file_db"]) and copy.name.endswith(" -17.20dB.wav")
-    assert 0.988 < np.max(np.abs(x)) <= 1.0 and sf.info(copy).subtype == "FLOAT"
-    assert pad_copy(pads["36"], tmp_path / "lib").name == pad_sample(tmp_path / "b" / "kick.wav")
+    files = make_blueprint(hot, "Song", made="refdissect test", log=lambda _: None)["files"]
+    assert files["pad-42"]["name"] == pad_sample(hats, pads["42"]["file_db"]) and files["pad-42"]["gain_db"] == -17.2
+    assert files["pad-42"]["name"].endswith(" -17.20dB.wav") and files["pad-42"]["source"] == str(hats)
+    assert files["pad-36"]["name"] == pad_sample(tmp_path / "b" / "kick.wav") and "gain_db" not in files["pad-36"]
     rack = {t["name"]: t for t in build_spec(hot)}["Drums (library)"]["instrument"]["drum_rack"]
-    assert rack["42"]["sample"] == copy.name and rack["36"]["sample"] == pad_sample(tmp_path / "b" / "kick.wav")
-
-    import asyncio
-
-    from refdissect.live import held_samples
-    held_by = {"36": tmp_path / "lib" / "Samples" / "AbletonMCP Generated" / rack["36"]["sample"], "42": copy}
-
-    async def call(tool, path, properties):  # Live holds each pad's copy
-        return json.dumps({"file_path": str(held_by[path.split(" drum_pads ")[1].split()[0]])})
-    overview = {"tracks": [{"name": "Drums (library)", "index": 0}]}
-    held = asyncio.run(held_samples(call, overview, hot, tmp_path / "lib"))
-    assert held["36"]["same"] and held["42"]["same"] and held["42"]["plan"] == str(hats)
+    assert rack["42"]["sample"] == files["pad-42"]["name"] and rack["36"]["sample"] == files["pad-36"]["name"]
 
 
 def _volume(spec_pad: dict) -> float:
@@ -1079,8 +893,10 @@ def test_an_excerpt_counts_bars_of_the_plans_meter_and_checks_them(tmp_path):
 
 def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
     """build_spec(plan, bars) is the excerpt's spec, clips as long as it;
-    live-build --direct --bars builds it (ableton-live-mcp faked) with the stems cut
-    beside the plan."""
+    live-build --bars and --stems-out go to blueprint.build, which has
+    build_from_blueprint build the excerpt (test_live_build_blueprint). The
+    build before it, --direct, and its --user-library are gone."""
+    from refdissect import blueprint
     from refdissect.cli import main
     from refdissect.live import build_spec, excerpt
     plan = _long_plan(tmp_path)
@@ -1092,12 +908,19 @@ def test_build_spec_and_live_build_take_bars(tmp_path, monkeypatch):
     work.mkdir()
     (tmp_path / "kick.wav").write_bytes((tmp_path / "drums.wav").read_bytes())
     (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
-    calls = _fake_live(monkeypatch)
-    assert main(["live-build", str(work), "--direct", "--bars", "2-4", "--user-library", str(tmp_path / "lib")]) == 0
-    sent = {t["name"]: t for t in next(a for n, a in calls if n == "build_tracks")["tracks"]}
-    assert sent["Drums (library)"]["clips"][0]["length"] == 12.0
-    assert sent["REF drums"]["audio_clips"][0]["file"] == str(work / "excerpt-2-4" / "drums.wav")
-    assert ("set_song_properties", {"tempo": 120.0, "loop": False, "time_signature": "4/4"}) in calls
+    calls = []
+
+    async def build(work, bars=None, stems_out=None, log=print):
+        calls.append((work, bars, stems_out))
+
+    monkeypatch.setattr(blueprint, "build", build)
+    assert main(["live-build", str(work), "--bars", "2-4"]) == 0
+    assert main(["live-build", str(work / "plan.json"), "--bars", "3", "--stems-out", "cuts"]) == 0
+    assert main(["live-build", str(work)]) == 0
+    assert calls == [(work, (2, 4), None), (work / "plan.json", (3, 3), "cuts"), (work, None, None)]
+    for gone in (["--direct"], ["--user-library", str(tmp_path / "lib")]):
+        with pytest.raises(SystemExit):
+            main(["live-build", str(work), *gone])
 
 
 def _hats(tmp_path, choked: bool):
@@ -1133,16 +956,14 @@ def _hats(tmp_path, choked: bool):
     return analysis, matches
 
 
-def test_hats_the_stem_shows_choked_go_in_one_choke_group(tmp_path, monkeypatch):
+def test_hats_the_stem_shows_choked_go_in_one_choke_group(tmp_path):
     """Where the drum stem holds each open hat cut by the closed hat after
-    it, the plan puts the hat pads in one choke group (choked_hats), the
-    build spec carries it and the build sets it on the pads' chains and
-    reads it back, so Live cuts the open hat where render_plan does; where
-    the stem lets the open hat ring, no group. Off by default (chokes):
-    make_plan without it plans none."""
-    import asyncio
-
-    from refdissect.live import CHOKE_GROUP, build, build_spec
+    it, the plan puts the hat pads in one choke group (choked_hats) and the
+    build spec carries it (build_from_blueprint sets it and reads it back:
+    test_live_build_blueprint), so Live cuts the open hat where render_plan
+    does; where the stem lets the open hat ring, no group. Off by default
+    (chokes): make_plan without it plans none."""
+    from refdissect.live import CHOKE_GROUP, build_spec
     from refdissect.render import render_plan
     analysis, matches = _hats(tmp_path, choked=True)
     plan = make_plan(analysis, matches, None, tmp_path, min_hits=1, chokes=True)
@@ -1155,12 +976,6 @@ def test_hats_the_stem_shows_choked_go_in_one_choke_group(tmp_path, monkeypatch)
     m = render_plan(plan, tmp_path / "r", n_samples=4 * SR)
     x = sf.read(tmp_path / "r" / m["tracks"][opened], dtype="float32")[0]
     assert np.abs(x[int(0.602 * SR):int(0.98 * SR)]).max() == 0.0  # cut at the closed hat (0.6 s, 1 ms fade)
-    calls = _fake_live(monkeypatch, tmp_path / "lib")
-    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
-    for note in pads:
-        assert ("lom_set_property", {"path": f"live_set tracks 0 devices 0 drum_pads {note} chains 0",
-                                     "property": "choke_group", "value": CHOKE_GROUP}) in calls
-    assert all(c["same"] for c in report["choke_groups"].values()) and len(report["choke_groups"]) == 2
     assert "choke_group" not in str(make_plan(analysis, matches, None, tmp_path, min_hits=1)["tracks"]
                                     ["drums"]["pads"])
     analysis, matches = _hats(tmp_path, choked=False)
@@ -1171,33 +986,18 @@ def test_hats_the_stem_shows_choked_go_in_one_choke_group(tmp_path, monkeypatch)
                ["instrument"]["drum_rack"].values())
 
 
-def test_a_pads_volume_goes_as_a_number_and_is_read_back(tmp_path, monkeypatch):
+def test_a_pads_volume_goes_as_a_number(tmp_path):
     """Sent as display text ("-20.0 dB"), Live 12.4.6 held a pad's Volume a
-    display step under it (0.05 dB from -10 dB down): the build sends it as
-    a number and reads back each pad's value. A pad whose value is not the
-    plan's (a Live that took the number otherwise) gets the text, Live's
-    way before, and is reported."""
-    import asyncio
-
-    from refdissect.live import build, build_spec
+    display step under it (0.05 dB from -10 dB down): the spec sends it as a
+    number. build_from_blueprint reads back each pad's value and sends the
+    text where it did not hold (test_live_build_blueprint; such a pad
+    reported, test_blueprint)."""
+    from refdissect.live import build_spec
     plan = _kit(tmp_path)
     pads = plan["tracks"]["drums"]["pads"]
     rack = {t["name"]: t for t in build_spec(plan)}["Drums (library)"]["instrument"]["drum_rack"]
     assert {k: p["settings"]["Volume"] for k, p in rack.items()} == {k: p["volume_db"] for k, p in pads.items()}
     assert all(isinstance(p["settings"]["Volume"], float) for p in rack.values())
-    _fake_live(monkeypatch, tmp_path / "lib")
-    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=lambda s: None))
-    assert report["volumes_held"] == 2 and "volumes_not_held" not in report
-    calls = _fake_live(monkeypatch, tmp_path / "lib", volume_held=lambda v: v - 0.3)
-    logged = []
-    report = asyncio.run(build(plan, user_library=tmp_path / "lib", log=logged.append))
-    assert report["volumes_held"] == 0 and sorted(report["volumes_not_held"]) == sorted(pads)
-    hat = report["volumes_not_held"]["42"]
-    assert hat["text"] and hat["then"]["value"] == pytest.approx(pads["42"]["volume_db"] - 0.005)
-    sent = [c["params"] for n, a in calls if n == "run_batch" for c in a["commands"]]
-    assert {"path": "live_set tracks 0 devices 0 drum_pads 42 chains 0 devices 0 parameters Volume",
-            "value": f"{pads['42']['volume_db']:.1f} dB"} in sent
-    assert any(line.startswith("pad 42 holds Volume") and line.endswith("sent as text") for line in logged)
 
 
 def test_live_sr_reaches_the_plan_and_every_level_reading(tmp_path, monkeypatch):

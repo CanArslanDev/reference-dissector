@@ -2,16 +2,16 @@
 build_from_blueprint builds in an empty Live set, and live-build, which
 writes one and has build_from_blueprint build it (build).
 
-The blueprint holds what live-build --direct sends Live, decided here
-without Live: the tempo, the meter, the locators, the build_tracks spec
-(live.build_spec) and the files to copy into the User Library under the
-names live-build --direct copies them by (sample_808, pad_sample, scaled by
-a pad's file_db). Its format is ableton-live-mcp's docs/blueprint-v1.md and
-its JSON Schema, schemas/blueprint-v1.schema.json (a copy, with the commit
-it came from, in tests/fixtures). The tracks are build_spec's, but for how a
-sampler names its sample: "file", a key of files, in place of "sample" (the
-copy's name), so the build copies and checks the file itself; and for what
-loading a file by path leaves to Live's defaults (playback_mode, PAD_OFF).
+The blueprint holds what live-build has Live build, decided here without
+Live: the tempo, the meter, the locators, the build_tracks spec
+(live.build_spec) and the files to copy into the User Library under names of
+their content (sample_808, pad_sample, scaled by a pad's file_db). Its
+format is ableton-live-mcp's docs/blueprint-v1.md and its JSON Schema,
+schemas/blueprint-v1.schema.json (a copy, with the commit it came from, in
+tests/fixtures). The tracks are build_spec's, but for how a sampler names
+its sample: "file", a key of files, in place of "sample" (the copy's name),
+so the build copies and checks the file itself; and for what loading a file
+by path leaves to Live's defaults (playback_mode, PAD_OFF).
 
     refdissect blueprint work/song                       (work/song/blueprint.json)
     refdissect live-build work/song [--bars A-B]         (the blueprint, built in Live)
@@ -33,16 +33,16 @@ FORMAT = "ableton-mcp-blueprint"
 VERSION = 1
 CHOKE_GROUPS = range(1, 17)  # a Drum Rack chain's choke group in Live: 1 to 16 (0 none)
 VOICES = range(1, 33)  # a Simpler's voices
-# build_from_blueprint loads a file by path (Live 12.4+): a Simpler made with insert_device, then
-# replace_sample, where live-build --direct dropped each file on its pad or track through Live's browser.
-# What the browser left to Live's defaults the blueprint says itself: the playback mode render.py plays (a
-# pad One-Shot, as Live loads a sample dropped on a Drum Rack pad; the 808 Classic: render.PAD, TRACK_808,
-# a plan's own playback_mode first), and each pad's filter off (PAD_OFF), as the 808's is already
-# (live.simpler_808): render.py plays every Simpler unfiltered. A pad made by path also starts with a 0.1 ms
-# Fade In where the browser's starts at 0: in Live 12.4.16 (2026-11-14, a suite plan's bars 1-8, the two paths
-# recorded) it was the only difference, 4 samples at 48 kHz at each kick's and hat's onset (the drum track's
-# residual -68.4 dB; the 808's and the stems' recordings were equal sample for sample). render.py plays no
-# fade in, so PAD_OFF sets it to 0
+# build_from_blueprint loads a file by path (Live 12.4+): a Simpler made with insert_device, then replace_sample,
+# where the build before it (live-build --direct, gone on 2026-11-16) dropped each file on its pad or track
+# through Live's browser. What the browser left to Live's defaults the blueprint says itself: the playback mode
+# render.py plays (a pad One-Shot, as Live loads a sample dropped on a Drum Rack pad; the 808 Classic:
+# render.PAD, TRACK_808, a plan's own playback_mode first), and each pad's filter off (PAD_OFF), as the 808's is
+# already (live.simpler_808): render.py plays every Simpler unfiltered. A pad made by path also starts with a
+# 0.1 ms Fade In where the browser's starts at 0: in Live 12.4.16 (2026-11-14, a suite plan's bars 1-8, the two
+# paths recorded) it was the only difference, 4 samples at 48 kHz at each kick's and hat's onset (the drum
+# track's residual -68.4 dB; the 808's and the stems' recordings were equal sample for sample). render.py plays
+# no fade in, so PAD_OFF sets it to 0
 PAD_OFF = {"F On": "Off", "Fade In": 0.0}
 
 
@@ -96,7 +96,7 @@ def check_files(plan: dict) -> None:
     """live-build's checks that need no Live: the 808's one-shot is the one
     the plan named (its digest in the name: fit-808 ran again after plan,
     and the plan's Transpose and Detune were made for the old one), and
-    every pad's file can be read. RuntimeError otherwise, as live.build."""
+    every pad's file can be read. RuntimeError otherwise."""
     t808 = plan["tracks"]["808"]
     if "sample_path" in t808 and one_shot_digest(t808["sample_path"]) not in t808["sample"]:
         raise RuntimeError(f"{t808['sample_path']} changed after the plan named it {t808['sample']!r}: "
@@ -114,11 +114,11 @@ def _absolute(path: str | Path) -> str:
 def make_blueprint(plan: dict, name: str, made: str | None = None, log=print) -> dict:
     """The plan as a blueprint: build_spec's tracks with each sampler's
     sample named by a key of files ("808", "pad-<note>"), whose entries copy
-    the files live-build --direct copies, under the same names (gain_db: a
-    pad's file_db, where it is under 0), and each such sampler's
+    the files under names of their content (sample_808, pad_sample; gain_db:
+    a pad's file_db, where it is under 0), and each such sampler's
     playback_mode, with "F On" off and "Fade In" 0 on every pad (PAD_OFF). Every file gets
     its SHA-1's start, so the build refuses a file that changed after this.
-    Locators at whole beats, as live-build --direct places them, the first
+    Locators at whole beats (Live refused fractional ones), the first
     of two on one beat kept (Live keeps one cue per beat; the other logged),
     and one that rounds to the end or past it left out and logged (a
     blueprint's locators fall before its end; a section that starts in the
@@ -208,21 +208,20 @@ def write(work: str | Path, out: str | Path | None = None, log=print) -> Path:
 
 def _key(name: str) -> str:
     """build_from_blueprint's name of a sampler ("808 (synth)", "Drums
-    (library) pad 36") as live-build --direct's report names it ("808",
-    "36")."""
+    (library) pad 36") as live-build's report names it ("808", "36")."""
     return "808" if name == "808 (synth)" else name.rsplit(" pad ", 1)[-1]
 
 
 def as_live_build(found: dict, blueprint: dict, log=print) -> dict:
-    """build_from_blueprint's report in live-build --direct's keys, each
-    difference logged as live-build --direct logs it: tracks (its rows) and
-    problems per track, locators (how many Live placed) and locators_moved,
-    choke_groups per pad (plan, live, same), volumes_held and
-    volumes_not_held (a pad that held its Volume only once sent again as
-    text: text and held_by_text), samples_checked and wrong_samples ("plan":
-    the copy in the User Library the Simpler is to hold), 808_voices; and
-    what --direct did not check or report: time_signature and tempo (Live's
-    against the plan's), files (the copies), excerpt and ok, false where anything
+    """build_from_blueprint's report in the keys live-build reports (those
+    of the build before build_from_blueprint, kept), each difference
+    logged: tracks (its rows) and problems per track, locators (how many
+    Live placed) and locators_moved, choke_groups per pad (plan, live,
+    same), volumes_held and volumes_not_held (a pad that held its Volume
+    only once sent again as text: text and held_by_text), samples_checked
+    and wrong_samples ("plan": the copy in the User Library the Simpler is
+    to hold), 808_voices, time_signature and tempo (Live's against the
+    plan's), files (the copies), excerpt and ok, false where anything
     differs. The whole report is under build_from_blueprint."""
     checks = found.get("checks") or {}
     report: dict = {"tracks": found.get("tracks", [])}
@@ -324,17 +323,14 @@ async def build(work: str | Path, bars: tuple[int, int] | None = None, stems_out
     a to b from 0 and cuts the stems to them into excerpt-a-b/ beside the
     blueprint, named by their content; with stems_out too, the excerpt is
     made here by ableton-live-mcp's own blueprint.excerpt, its stems cut
-    into stems_out, and built as it is. After it, as live-build --direct
-    did: the Arrangement's loop off and the 808's track selected (the
-    playhead at 0 and the Arrangement shown are build_from_blueprint's).
-    Returns its report in live-build --direct's keys (as_live_build). A
-    connection Live refuses, and a build that stops, end in a RuntimeError
-    that says why (live.refused; build_from_blueprint names the tracks it
-    left in the set)."""
-    try:
-        path = write(work, log=log)
-    except ValueError as e:
-        raise ValueError(f"{e} (live-build --direct builds such a plan the way it did before)") from e
+    into stems_out, and built as it is. After it: the Arrangement's loop
+    off and the 808's track selected (the playhead at 0 and the
+    Arrangement shown are build_from_blueprint's). Returns its report in
+    live-build's keys (as_live_build). A plan the blueprint cannot hold
+    ends in write's ValueError; a connection Live refuses, and a build that
+    stops, in a RuntimeError that says why (live.refused;
+    build_from_blueprint names the tracks it left in the set)."""
+    path = write(work, log=log)
     blueprint = json.loads(path.read_text(encoding="utf-8"))
     mcp = _server()
 

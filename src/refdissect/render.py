@@ -78,7 +78,7 @@ from .audio import SR, read, samples, transpose
 
 # Simpler's "Vol < Vel" (0..1) the build sets on every pad and on the 808, so that velocity_db holds however
 # the Simpler was made: Live 12.4.6 starts it at 0.35 on a Simpler made with insert_device and at 0.45 on a
-# pad loaded through the browser, ableton-live-mcp 2.2.0's only way to load a pad (live-build --direct's)
+# pad loaded through the browser (ableton-live-mcp 2.2.0's only way to load a pad; still its way on Live before 12.4)
 VOL_VEL = 0.35
 PAD = {"start_s": 0.0, "detune_cents": 0.0, "playback_mode": "one_shot", "choke_group": None, "volume_db": 0.0,
        "velocity_curve": None, "vol_vel": VOL_VEL, "file_db": 0.0}

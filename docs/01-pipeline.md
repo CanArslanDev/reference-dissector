@@ -378,7 +378,7 @@ Live counts bar 1 from 0 s, and the plan puts everything at the song's seconds, 
 
 ## live-build
 
-See [07](07-building-in-live.md). It writes the plan as a blueprint (`blueprint.json`) and has ableton-live-mcp's `build_from_blueprint` build it; `--direct` is the build from before, kept until the new one is verified in Live. Either refuses unless every track in the open set is empty, then builds every track in one `build_tracks` call; empty tracks already in the set are left as they are. Two live checks built suite plans and PIRAMIT's with its calls and recorded them (2026-10-29): on the second, Live played the m5 plans' drum hits within 0.04 ms and their 808 notes within 0.11 ms of `render.py`. `live-build` itself has not run end to end: Live's Remote Script served 8 clients both times.
+See [07](07-building-in-live.md). It writes the plan as a blueprint (`blueprint.json`) and has ableton-live-mcp's `build_from_blueprint` build it. The build from before, `--direct`, was removed on 2026-11-16, after the two had built the same audio in Live 12.4.16. It refuses unless every track in the open set is empty, then builds every track in one `build_tracks` call; empty tracks already in the set are left as they are. Two live checks built suite plans and PIRAMIT's with its calls and recorded them (2026-10-29): on the second, Live played the m5 plans' drum hits within 0.04 ms and their 808 notes within 0.11 ms of `render.py`. `live-build` itself could not run end to end then (Live's Remote Script served 8 clients both times); it did on 2026-11-14 ([07](07-building-in-live.md#verified-in-live)).
 
 ## calibrate and suite
 

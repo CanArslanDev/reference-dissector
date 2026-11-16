@@ -1,5 +1,6 @@
 """From an analysis to Ableton Live: a plan (notes in beats, sounds, levels,
-locators), MIDI files, and the build itself through ableton-live-mcp.
+locators), MIDI files, and the build_tracks spec that blueprint.py writes as
+a blueprint for ableton-live-mcp's build_from_blueprint (live-build).
 
 The plan is plain JSON, so it can be read, edited and rebuilt: Live's Trial
 cannot save, and a rebuild takes about five seconds.
@@ -24,14 +25,13 @@ docs/07-building-in-live.md):
   the live check they read back as sent, and a probe's slide played within
   1.04 cents (p90) of render.py's. No plan of the suite or PIRAMIT turns
   Glide on.
-- A new file in the User Library shows up in Live's browser after a few
-  seconds; samples load onto Drum Rack pads through the browser, by file
-  name. A file loaded through the browser keeps playing what Live loaded
-  under its name after it is overwritten on disk (Live 12.4.6), and the
-  browser holds other files of a pad's name: the 808's one-shot and every
-  pad's file go into the User Library under a name of their content
-  (sample_808, pad_sample), and the build reads back the file each Simpler
-  holds.
+- Live's browser loads a sample by its file name: a file loaded through it
+  keeps playing what Live loaded under its name after it is overwritten on
+  disk (Live 12.4.6), and the browser holds other files of a pad's name.
+  The 808's one-shot and every pad's file go into the User Library under a
+  name of their content (sample_808, pad_sample); build_from_blueprint
+  loads each copy by its path (Live 12.4+; through the browser by that
+  name on older Live) and reads back the file each Simpler holds.
 - Reference stems go in as Arrangement audio clips with warping off, so they
   play at their own speed and line up with notes placed at their seconds,
   once their start (moved to the first transient by Live's warp analysis)
@@ -40,8 +40,9 @@ docs/07-building-in-live.md):
 - Locators at fractional beats were refused ("Live did not create it");
   whole beats work, but Live moves one off its grid (beat 9 went to 8 in
   4/4, to 12 after 3/4, in the live check): the build sets the plan's
-  meter first, and deletes and reports a locator Live moved
-  (moved_locators).
+  meter first, build_from_blueprint (ableton-live-mcp v2.4.1+) zooms the
+  Arrangement in before it places them, and a locator Live still moves is
+  deleted and reported (locators_moved).
 - Velocity sets a Simpler's level, dB = 0.4 x "Vol < Vel" x (velocity - 70)
   - 0.096 over its Volume (Live 12.4.6), and "Vol < Vel" starts at 35 % or
   45 % by how the Simpler was made: the build sets it on every Simpler
@@ -63,11 +64,9 @@ docs/07-building-in-live.md):
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import math
-import shutil
 from pathlib import Path
 
 import mido
@@ -102,8 +101,6 @@ PADS = {"kick": [36, 35, 47, 45], "snare": [38, 40, 39, 37, 41], "hat": [42, 44,
 # a pitched copy of a sound (detect: events with semitones) plays on a pad of its own, transposed
 PITCHED_PADS = list(range(54, 82))
 STEMS_MUTED = {"drums", "bass", "vocals"}  # replaced by ours, or not part of the beat
-DEFAULT_USER_LIBRARY = Path.home() / "Music" / "Ableton" / "User Library"
-GENERATED = Path("Samples") / "AbletonMCP Generated"
 CLIENTS = 8  # the most MCP clients Live's Remote Script serves at once (AbletonMCP 2.1.0's MAX_CLIENTS)
 # Simpler's Snap, on by default, stops a sample 10-30 ms before its file ends (ableton-live-mcp's battery,
 # 2026-10-19: a kick 28.8 ms of its 163.5, a hat 9.9 of 71.4; with Snap off it plays to the last frame); in the
@@ -244,7 +241,7 @@ def file_db(path: str | Path) -> float:
     scale. The plan gives such a pad file_db, plays its file that much
     lower everywhere (render.pad_hits) and makes it up in the pad's Volume
     and the drum fader (scale_files_to_full), and the build copies it
-    scaled (pad_copy)."""
+    scaled (the blueprint's gain_db)."""
     try:
         import soundfile as sf
 
@@ -259,8 +256,8 @@ def pad_sample(path: str | Path, gain_db: float = 0.0) -> str:
     """A pad's file name in the User Library: the file's own name (its
     spaces run together) and its content's digest, as sample_808 names the
     808's one-shot; with gain_db (a pad's file_db, under 0) that gain after
-    the digest ("-7.31dB"), for the copy pad_copy writes scaled by it, as a
-    WAV. build_tracks (ableton-live-mcp 2.2.0) loads a pad
+    the digest ("-7.31dB"), for the copy scaled by it (the blueprint's
+    gain_db). build_tracks (ableton-live-mcp 2.2.0) loads a pad
     through Live's browser by file name, and the browser holds other files
     of a pad's name: in the live check (Live 12.4.6, 2026-10-29) v1orig-3's
     open-hat pad played an 808 of the same name and PIRAMIT's closed-hat pad
@@ -513,8 +510,8 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     pad whose file peaks over full scale gets file_db, the scale that
     brings it to full scale: it plays that much lower in every estimate
     and render of the plan, its Volume and the drum fader make it up
-    (scale_files_to_full), and the build plays a copy scaled so
-    (pad_copy). With melodic
+    (scale_files_to_full), and the build plays a copy scaled so (the
+    blueprint's gain_db). With melodic
     (melodic.json), each tonal stem's notes get a MIDI track. The plan
     carries the grid's meter (beats_per_bar, beat_unit), which the build
     sets as Live's time signature, and lasts whole bars of it. With chokes
@@ -1282,7 +1279,7 @@ def write_midi(plan: dict, out_dir: str | Path, ppq: int = 480) -> list[Path]:
     return written
 
 
-# ── The build (needs ableton-live-mcp: pip install "reference-dissector[live]") ──
+# ── The build's spec, which blueprint.py writes as a blueprint for build_from_blueprint ──
 
 def simpler_808(t808: dict) -> dict:
     """The 808 Simpler's parameters as build_tracks sets them: Volume 0 dB,
@@ -1290,8 +1287,8 @@ def simpler_808(t808: dict) -> dict:
     Live 12.4.6 keeps as given), "Vol < Vel" (vol_vel, the velocity law's
     amount, a raw 0..1), and with Glide on (voices 1) Glide Mode "Glide"
     and the Glide Time. These are what render_plan and estimate_from_plan
-    assume; voices is a property of the device, not a parameter (build
-    sets it). Snap and the filter go off (LIVE_OFF): loaded through the
+    assume; voices is a property of the device, not a parameter
+    (build_from_blueprint sets it from the blueprint). Snap and the filter go off (LIVE_OFF): loaded through the
     browser, the 808's Simpler had its filter on, a 22.0 kHz lowpass whose
     cutoff follows the note ("Filt < Key" 100 %), and in the live check
     (Live 12.4.6, 2026-10-29) it delayed the 808's notes by 0.13 to 0.46 ms,
@@ -1381,8 +1378,9 @@ def pad_volume(pad: dict) -> float:
     render.pad_settings), a number in dB, which build_tracks sets as the
     parameter's value. Sent as display text ("-6.6 dB"), Live 12.4.6 held a
     display step under it (-6.605 dB; from -10 dB down 0.05 dB: "-14.9 dB"
-    held -14.95) in the live check (2026-10-29); the build reads the value
-    back and sends the text where the number did not hold (held_volumes)."""
+    held -14.95) in the live check (2026-10-29); build_from_blueprint reads
+    the value back and sends the text where the number did not hold
+    (volumes_not_held)."""
     return float(pad_settings(pad)["volume_db"]) + 0.0
 
 
@@ -1393,10 +1391,10 @@ def choke_of(pad: dict) -> int:
 
 def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> list[dict]:
     """The plan as ableton-live-mcp's build_tracks spec: the 808 on a Simpler
-    (simpler_808; "voices" for build, which build_tracks does not read),
-    the drums on a Drum Rack (one pad per sound, its file by the name build
-    copies it under, pad_sample: scaled by its file_db where it has one),
-    the melodic notes on MIDI
+    (simpler_808; "voices", which build_tracks does not read and the
+    blueprint carries for build_from_blueprint), the drums on a Drum Rack
+    (one pad per sound, its file by the name of its copy, pad_sample:
+    scaled by its file_db where it has one), the melodic notes on MIDI
     tracks (muted), the reference stems as audio tracks (their clips at
     beat 0, or where a plan moved onto Live's bars moved them, moved_beats:
     the song's 0 s); Simplers with
@@ -1406,9 +1404,9 @@ def build_spec(plan: dict, bars: tuple[int, int] | None = None, stems_out: str |
     vol_vel (VOL_VEL), so velocities play the levels the plan assumes, Snap
     off (LIVE_OFF), and faders from the plan's levels. A pad's Volume goes
     as a number (pad_volume), and a pad of a choke group carries its group
-    (choke_group: ableton-live-mcp's build_tracks reads it from 2.3.0,
-    2.2.0 does not, and build sets it on the pad's chain, set_chokes). With bars (a, b),
-    the spec of excerpt(plan, bars, stems_out): bars a to b, from 0."""
+    (choke_group: ableton-live-mcp's build_tracks reads it from 2.3.0).
+    With bars (a, b), the spec of excerpt(plan, bars, stems_out): bars a to
+    b, from 0."""
     if bars:
         plan = excerpt(plan, bars, stems_out)
     levels = plan["levels"]
@@ -1463,345 +1461,7 @@ def refused(error: Exception) -> str:
     return text
 
 
-def stopped_at(error: Exception, spec: list[dict], plan: dict) -> dict:
-    """The track, pad and file a build_tracks error names: a sample it could
-    not load (by the name the spec sends) or an audio clip's file."""
-    text, pads = str(error), plan["tracks"]["drums"]["pads"]
-    for track in spec:
-        instrument = track.get("instrument")
-        if isinstance(instrument, dict) and instrument.get("drum_rack"):
-            for note, pad in instrument["drum_rack"].items():
-                if pad["sample"] in text:
-                    return {"track": track["name"], "pad": note, "sample": pad["sample"], "file": pads[note]["path"]}
-        elif isinstance(instrument, dict) and instrument.get("sample") and instrument["sample"] in text:
-            return {"track": track["name"], "sample": instrument["sample"],
-                    "file": plan["tracks"]["808"].get("sample_path")}
-        for clip in track.get("audio_clips") or []:
-            if str(clip["file"]) in text or Path(clip["file"]).name in text:
-                return {"track": track["name"], "file": clip["file"]}
-    return {}
-
-
-async def failed_build(call, error: Exception, spec: list[dict], plan: dict, before: int) -> dict:
-    """What a build_tracks call that raised leaves: the error, the track,
-    pad and file it names (stopped_at), and the tracks it had made, those
-    after the set's first `before` (build_tracks adds each at the end). In
-    the live check, PIRAMIT's build stopped at a pad whose file Live's
-    browser did not list and left the 808 track and an unnamed empty Drum
-    Rack, with only the error said."""
-    report = {"failed": "build_tracks", "error": str(error), **stopped_at(error, spec, plan)}
-    try:
-        tracks = json.loads(await call("get_session_overview"))["tracks"][before:]
-        report["tracks_made"] = [{"index": t.get("index"), "name": t.get("name"), "devices": t.get("devices")}
-                                 for t in tracks]
-    except Exception as e:  # Live is gone too
-        report["tracks_made"] = f"unknown: {e}"
-    return report
-
-
-def stopped_message(failed: dict) -> str:
-    """failed_build's report in a sentence: where the build stopped, why,
-    and what it left in the set."""
-    where = " ".join(f"{k} {failed[k]}" for k in ("track", "pad", "file") if k in failed)
-    made = failed["tracks_made"]
-    if isinstance(made, list):
-        made = ", ".join(f"{t['name']!r} ({', '.join(t['devices'] or []) or 'no device'})" for t in made) or "no track"
-    return (f"build_tracks stopped{' at ' + where if where else ''}: {failed['error']}. It left {made} in the set: "
-            "delete them, or open a new set, before building again")
-
-
 def meter_of(plan: dict) -> str:
     """The plan's meter as Live's time signature ("3/4"); 4/4 for a plan
     from before plans carried one."""
     return f"{int(plan.get('beats_per_bar', 4))}/{int(plan.get('beat_unit', 4))}"
-
-
-async def moved_locators(call, placed: list[dict], before: list[float], log=print) -> list[dict]:
-    """The locators Live did not make where asked (place_locators' "Live
-    did not create it"), each deleted where Live put it instead (a cue that
-    is neither asked for nor one the set held before the build) and
-    reported: name, the beat asked, the beat Live chose (None where it made
-    none of its own) and whether the cue is gone. In the live check a 3/4
-    plan built in 4/4 asked for locators at beats 9, 21 and 33 and got cues
-    at 8, 20 and 32, left in the set; with 3/4 set, 9 went to 12. Live
-    snaps a new cue to the Arrangement's grid, which the LOM does not show,
-    and a cue's time cannot be set, so the build sets the plan's meter
-    first and deletes what still moves: jump to the cue, then toggle it
-    (two calls: a playhead moved in the same call is not in effect yet)."""
-    asked = [p["time"] for p in placed]
-    cues = json.loads(await call("get_session_overview")).get("cue_points") or []
-    stray = [c for c in cues if all(abs(c["time"] - t) > 1e-3 for t in asked + list(before))]
-    failed = [p for p in placed if p.get("error")]
-    out = []
-    for c in stray:
-        p = min(failed, key=lambda p: abs(p["time"] - c["time"]), default=None)
-        if p is not None:
-            failed.remove(p)
-        await call("transport", action="jump_to", time=float(c["time"]))
-        await asyncio.sleep(0.05)
-        await call("transport", action="toggle_cue")
-        out.append({"name": p["name"] if p else c["name"], "asked": p["time"] if p else None, "live": c["time"]})
-    out += [{"name": p["name"], "asked": p["time"], "live": None} for p in failed]
-    left = (json.loads(await call("get_session_overview")).get("cue_points") or []) if stray else cues
-    for o in out:
-        o["deleted"] = o["live"] is not None and all(abs(c["time"] - o["live"]) > 1e-3 for c in left)
-        where = "made none" if o["live"] is None else f"put it at beat {o['live']:g}"
-        log(f"Live {where} for locator {o['name']!r} at beat {o['asked']}"
-            + ("" if o["live"] is None else ": deleted" if o["deleted"] else ": left there"))
-    return out
-
-
-def library_copy(src: str | Path, user_library: str | Path, name: str) -> Path:
-    """src in the User Library's GENERATED folder under name, copied unless
-    a file there holds its content already (the names carry a digest)."""
-    target = Path(user_library).expanduser() / GENERATED / name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.is_file() or one_shot_digest(target) != one_shot_digest(src):
-        shutil.copyfile(src, target)
-    return target
-
-
-def pad_copy(pad: dict, user_library: str | Path) -> Path:
-    """A pad's file in the User Library's GENERATED folder under its
-    pad_sample name: copied as it is (library_copy), or with a file_db
-    under 0 written scaled by it as a 32-bit float WAV at its own rate and
-    channels, unless that name is there already (it carries the file's
-    digest and the gain, so it holds this content)."""
-    gain = float(pad.get("file_db") or 0.0)
-    if gain >= 0:
-        return library_copy(pad["path"], user_library, pad_sample(pad["path"]))
-    import soundfile as sf
-
-    target = Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], gain)
-    if not target.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        x, rate = sf.read(str(pad["path"]), dtype="float64", always_2d=True)
-        sf.write(str(target), (x * 10 ** (gain / 20)).astype(np.float32), rate, subtype="FLOAT")
-    return target
-
-
-async def held_samples(call, overview: dict, plan: dict, user_library: str | Path | None = None) -> dict:
-    """The file each Simpler of the build holds, read back from Live (its
-    sample's file_path), per pad note and "808", beside the plan's file:
-    same when their contents' digests agree. A pad with a file_db under 0
-    holds its scaled copy (pad_copy in user_library), checked against
-    that copy."""
-    index = {t["name"]: t["index"] for t in overview["tracks"]}
-    pads, t808 = plan["tracks"]["drums"]["pads"], plan["tracks"]["808"]
-    where = {}
-    if "808 (synth)" in index and "sample_path" in t808:
-        where["808"] = (f"live_set tracks {index['808 (synth)']} devices 0 sample", t808["sample_path"],
-                        t808["sample_path"])
-    if "Drums (library)" in index:
-        for note, pad in pads.items():
-            scaled = float(pad.get("file_db") or 0.0) < 0 and user_library is not None
-            where[str(note)] = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 "
-                                "devices 0 sample", pad["path"],
-                                Path(user_library).expanduser() / GENERATED / pad_sample(pad["path"], pad["file_db"])
-                                if scaled else pad["path"])
-    out = {}
-    for key, (path, want, copy) in where.items():
-        try:
-            held = json.loads(await call("lom_get_object", path=path, properties=["file_path"])).get("file_path")
-        except Exception as e:  # no Simpler, or one without a sample
-            out[key] = {"plan": want, "live": None, "same": False, "error": str(e)}
-            continue
-        try:
-            same = bool(held) and one_shot_digest(held) == one_shot_digest(copy)
-        except OSError:
-            same = False
-        out[key] = {"plan": want, "live": held, "same": same}
-    return out
-
-
-def _db_of(text) -> float | None:
-    """The number in a parameter's display text ("-6.60 dB"), None for none."""
-    try:
-        return float(str(text).replace("dB", "").strip())
-    except ValueError:
-        return float("-inf") if "inf" in str(text) else None
-
-
-async def held_volumes(call, overview: dict, plan: dict) -> dict:
-    """Each pad's Volume read back from Live (its Simpler's Volume: the
-    value and Live's display of it), per pad note, against the plan's
-    (pad_volume): held when the value is the plan's dB within 0.001 and,
-    where Live shows it, the display within 0.006 dB (two decimals from
-    -10 dB up). A pad that does not hold it gets its Volume again as
-    display text, Live's way before (a display step under it), and is
-    listed with "text" True and what Live holds then. Not verified in Live:
-    that Simpler's Volume takes a number in dB as its value."""
-    index = {t["name"]: t["index"] for t in overview["tracks"]}
-    if "Drums (library)" not in index:
-        return {}
-    out = {}
-    for note, pad in plan["tracks"]["drums"]["pads"].items():
-        path = (f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0 devices 0 "
-                "parameters Volume")
-        want = pad_volume(pad)
-
-        async def read_back(path: str = path) -> dict:
-            try:
-                got = json.loads(await call("lom_get_object", path=path, properties=["value", "$display"]))
-            except Exception as e:  # no Simpler on the pad
-                return {"error": str(e)}
-            return {"value": got.get("value"), "display": got.get("$display")}
-
-        got = await read_back()
-        shown = _db_of(got["display"]) if isinstance(got.get("display"), str) else None
-        held = (isinstance(got.get("value"), int | float) and abs(float(got["value"]) - want) <= 1e-3
-                and (shown is None or abs(shown - want) <= 0.006))
-        row = {"plan": want, **got, "held": bool(held)}
-        if not held and "error" not in got:
-            try:
-                await call("run_batch", commands=[{"type": "param_set_display",
-                                                   "params": {"path": path, "value": f"{want:.1f} dB"}}],
-                           stop_on_error=False)
-                row |= {"text": True, "then": await read_back()}
-            except Exception as e:
-                row["text_error"] = str(e)
-        out[str(note)] = row
-    return out
-
-
-async def set_chokes(call, overview: dict, plan: dict) -> dict:
-    """Each pad of a choke group put in it (its chain's choke_group, which
-    ableton-live-mcp's battery set and read back in Live 12.4.6: 0 none, 1
-    to 16) and read back, per pad note: the plan's group, Live's and
-    whether they agree. build_tracks 2.2.0 does not set it (2.3.0 and later do). Not verified
-    in Live by this build."""
-    index = {t["name"]: t["index"] for t in overview["tracks"]}
-    pads = {note: choke_of(pad) for note, pad in plan["tracks"]["drums"]["pads"].items() if choke_of(pad)}
-    if "Drums (library)" not in index or not pads:
-        return {}
-    out = {}
-    for note, group in pads.items():
-        path = f"live_set tracks {index['Drums (library)']} devices 0 drum_pads {note} chains 0"
-        try:
-            await call("lom_set_property", path=path, property="choke_group", value=int(group))
-            live = json.loads(await call("lom_get_object", path=path, properties=["choke_group"])).get("choke_group")
-        except Exception as e:
-            out[str(note)] = {"plan": group, "live": None, "same": False, "error": str(e)}
-            continue
-        out[str(note)] = {"plan": group, "live": live, "same": live == group}
-    return out
-
-
-async def build(plan: dict, user_library: str | Path = DEFAULT_USER_LIBRARY, headroom: bool = True,
-                log=print, bars: tuple[int, int] | None = None, stems_out: str | Path | None = None) -> dict:
-    """Build the plan in the open Live set with ableton-live-mcp's build_tracks
-    (one call for every track, device, setting, clip and note): live-build
-    --direct, kept until live-build's own path (blueprint.build, through
-    build_from_blueprint) is verified in Live. Refuses unless
-    every track in the set is empty; the set's empty tracks are left as they are.
-    Refuses an 808 one-shot whose content is not the one the plan named
-    (sample_808): fit-808 ran again after plan, and Live, having loaded
-    that name before, could play the old one-shot; so would the plan's
-    Transpose and Detune, made for the old one. Refuses a pad whose file
-    cannot be read. The one-shot and every pad's file are copied into the
-    User Library under the names the spec loads them by (sample_808,
-    pad_sample), and after build_tracks the build reads back the file each
-    Simpler holds (held_samples): a pad or 808 that holds another file is
-    listed under wrong_samples and logged. A connection Live refuses, and a
-    build_tracks call that raises, end in a RuntimeError that says why
-    (refused) or where the build stopped and which tracks it left in the set
-    (failed_build, also logged). Live's time signature goes to the plan's
-    meter (meter_of) before the locators, and a locator Live puts elsewhere
-    is deleted and listed under locators_moved (moved_locators). Each pad
-    of a choke group goes in it after build_tracks (set_chokes; under
-    choke_groups), and each pad's Volume, sent as a number, is read back
-    (held_volumes: volumes_held, and volumes_not_held, sent again as
-    text). With
-    bars (a, b), bars a to b of the plan are built, from 0, with the stems
-    cut to them in stems_out (excerpt)."""
-    if bars:
-        plan = excerpt(plan, bars, stems_out)
-        log(f"excerpt: bars {bars[0]}-{bars[1]}, {plan['excerpt']['seconds'][0]:.2f}-"
-            f"{plan['excerpt']['seconds'][1]:.2f} s of the plan, stems cut into {stems_out}")
-    try:
-        from MCP_Server import extended_tools as et
-        from MCP_Server.server import mcp
-    except ImportError as e:
-        raise RuntimeError("Building in Live needs ableton-live-mcp: "
-                           "pip install 'reference-dissector[live]' (and Live with its Remote Script)") from e
-
-    async def call(tool_name, **args):
-        r = await mcp.call_tool(tool_name, args)
-        text = "".join(getattr(c, "text", "") for c in r.content)
-        if getattr(r, "is_error", False):
-            raise RuntimeError(f"{tool_name}: {text}")
-        return text
-
-    t808 = plan["tracks"]["808"]
-    if "sample_path" in t808 and one_shot_digest(t808["sample_path"]) not in t808["sample"]:
-        raise RuntimeError(f"{t808['sample_path']} changed after the plan named it {t808['sample']!r}: "
-                           "run refdissect plan again")
-    pads = plan["tracks"]["drums"]["pads"]
-    unread = [f"pad {note}: {pad['path']}" for note, pad in pads.items() if not Path(pad["path"]).is_file()]
-    if unread:
-        raise RuntimeError(f"Cannot read the files of {'; '.join(unread)}")
-    try:
-        overview = json.loads(await call("get_session_overview"))
-    except Exception as e:
-        raise RuntimeError(refused(e)) from e
-    busy = [t["name"] for t in overview["tracks"]
-            if t["devices"] or t["session_clips"] or t["arrangement_clip_count"]]
-    if busy:
-        raise RuntimeError(f"The set is not empty ({', '.join(busy)}); open a new set first")
-    before, cues = len(overview["tracks"]), [c["time"] for c in overview.get("cue_points") or []]
-    # the meter before any locator: Live moves a locator off its grid (moved_locators)
-    await call("set_song_properties", tempo=plan["tempo"], loop=False, time_signature=meter_of(plan))
-    # Live's browser lists a file a few seconds after it lands in the User Library (build_tracks waits for it)
-    if "sample_path" in t808:
-        library_copy(t808["sample_path"], user_library, t808["sample"])
-    for pad in pads.values():
-        pad_copy(pad, user_library)
-    spec = build_spec(plan)
-    try:
-        built = json.loads(await call("build_tracks", tracks=spec))
-    except Exception as e:
-        failed = await failed_build(call, e, spec, plan, before)
-        log(json.dumps(failed, ensure_ascii=False, default=str))
-        raise RuntimeError(stopped_message(failed)) from e
-    report: dict = {"tracks": built["tracks"]}
-    problems = {r["track"]: r["problems"] for r in built["tracks"] if r["problems"]}
-    if problems:
-        report["problems"] = problems
-    if plan["locators"]:
-        report["locators"] = et.place_locators([(n, float(round(b))) for n, b in plan["locators"]])
-        moved = await moved_locators(call, report["locators"], cues, log)
-        if moved:
-            report["locators_moved"] = moved
-    overview = json.loads(await call("get_session_overview"))
-    chokes = await set_chokes(call, overview, plan)
-    if chokes:
-        report["choke_groups"] = chokes
-        for key, c in chokes.items():
-            if not c["same"]:
-                log(f"pad {key} is in choke group {c['live']}, not the plan's {c['plan']}"
-                    + (f" ({c['error']})" if "error" in c else ""))
-    volumes = await held_volumes(call, overview, plan)
-    report["volumes_held"] = sum(v["held"] for v in volumes.values())
-    unheld = {key: v for key, v in volumes.items() if not v["held"]}
-    if unheld:
-        report["volumes_not_held"] = unheld
-        for key, v in unheld.items():
-            log(f"pad {key} holds Volume {v.get('value')} ({v.get('display')}), not the plan's {v['plan']} dB"
-                + (": sent as text" if v.get("text") else ""))
-    held = await held_samples(call, overview, plan, user_library)
-    report["samples_checked"] = len(held)
-    wrong = {key: h for key, h in held.items() if not h["same"]}
-    if wrong:
-        report["wrong_samples"] = wrong
-        for key, h in wrong.items():
-            log(f"{'the 808' if key == '808' else f'pad {key}'} holds {h['live']}, not the plan's {h['plan']}"
-                + (f" ({h['error']})" if "error" in h else ""))
-    first = next((t["index"] for t in overview["tracks"] if t["name"] == "808 (synth)"), None)
-    voices = next((s.get("voices") for s in spec if s["name"] == "808 (synth)"), None)
-    if voices and first is not None:  # one voice, so overlapping notes glide (the battery set it this way)
-        report["808_voices"] = json.loads(await call("lom_set_property", path=f"live_set tracks {first} devices 0",
-                                                     property="voices", value=int(voices)))
-    await call("select_in_live", view="arrangement", track=first or 0)
-    await call("transport", action="jump_to", time=0.0)
-    log(json.dumps(report, ensure_ascii=False, default=str))
-    return report
