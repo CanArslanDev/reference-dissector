@@ -1,21 +1,20 @@
 # 07 – Building in Ableton Live
 
-`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.16 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
+`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. Until 2026-11-16, `live-build --direct` kept the build from before `build_from_blueprint` ([below](#the-build-before-build_from_blueprint)); in Live 12.4.16 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample, and `--direct` was removed.
 
 ```bash
 uv sync --extra live          # pulls ableton-live-mcp v2.4.2 (build_from_blueprint since v2.4.0)
 uv run refdissect live-build "$W/song/refdissect"
-uv run refdissect live-build "$W/song/refdissect" --direct     # the build from before build_from_blueprint
 ```
 
-Live must be running with the AbletonMCP Remote Script selected as a control surface (see ableton-live-mcp's README). `build_from_blueprint` loads each file by its path, which needs Live 12.4 or later; on older Live, `build_tracks` loads it through the browser by its name, and the report says so (`loaded_by_name`). The server holds one connection to Live, as `--direct`'s did. The Remote Script serves at most 8 clients at once: with 8 MCP servers of other sessions connected, Live refuses the build's connection, and `live-build` says so. The build refuses unless every track in the set is empty. `build_tracks` adds every track in one call; empty tracks already in the set are left as they are.
+Live must be running with the AbletonMCP Remote Script selected as a control surface (see ableton-live-mcp's README). `build_from_blueprint` loads each file by its path, which needs Live 12.4 or later; on older Live, `build_tracks` loads it through the browser by its name, and the report says so (`loaded_by_name`). The server holds one connection to Live. The Remote Script serves at most 8 clients at once: with 8 MCP servers of other sessions connected, Live refuses the build's connection, and `live-build` says so. The build refuses unless every track in the set is empty. `build_tracks` adds every track in one call; empty tracks already in the set are left as they are.
 
 ## What gets built
 
 | track | content |
 |---|---|
 | 808 (synth) | Simpler with the one-shot (the fitted voice on the template's own periods, [05](05-808-synthesis.md#in-live)), Volume 0 dB, "Vol < Vel" 35 %, warping off, Snap and its filter off, Ve Release at Live's own 50 ms, at the plan's Transpose and Detune (whole numbers, `live.tune_808`). With Glide on, also Glide Mode "Glide", the Glide Time and one voice. An Arrangement clip holds every 808 note at its written pitch and length, each starting so that the one-shot's attack lands on the note's attack; a note that comes while the voice of its pitch still sounds starts 1 ms earlier, as Live starts it 1 ms late. |
-| Drums (library) | Drum Rack: one pad per sound the plan gives one on evidence ([01](01-pipeline.md#plan)), each a Simpler with a copy of its file named by its content (a file that peaks over full scale copied scaled to it, a float WAV named with the gain, `file_db`), at a Volume of its own (at most 0 dB), "Vol < Vel" 35 %, Snap off and One-Shot, with its match's Transpose and Detune (whole cents). `live-build` also turns each pad's filter off and says One-Shot itself; `--direct` left both to the browser, which loads a pad One-Shot with its filter off (below). The backbone's kick and snare take the first pads of their roles (36, 38). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note as much before its hit's attack as its pad's sample takes to attack, and 1 ms more where the hit cuts its pad's sounding hit; a pad plays each strike once. |
+| Drums (library) | Drum Rack: one pad per sound the plan gives one on evidence ([01](01-pipeline.md#plan)), each a Simpler with a copy of its file named by its content (a file that peaks over full scale copied scaled to it, a float WAV named with the gain, `file_db`), at a Volume of its own (at most 0 dB), "Vol < Vel" 35 %, Snap off and One-Shot, with its match's Transpose and Detune (whole cents). `live-build` also turns each pad's filter off and says One-Shot itself, as Live's browser loads a pad (below). The backbone's kick and snare take the first pads of their roles (36, 38). A pitched copy, or the same file found at another pitch, plays on a pad of its own from note 54 up. An Arrangement clip holds every hit, each note as much before its hit's attack as its pad's sample takes to attack, and 1 ms more where the hit cuts its pad's sounding hit; a pad plays each strike once. |
 | other / piano / guitar / vocals (notes) | a MIDI track per tonal stem with `melodic`'s notes, Drift as a placeholder instrument, muted |
 | REF drums / bass / other / piano / vocals | the stems as Arrangement audio clips from beat 0 (from the plan's move with `plan --align-bar1`, [01](01-pipeline.md#bar-1-on-request)), warping off; drums, bass and vocals muted |
 
@@ -36,7 +35,7 @@ After `build_tracks` the build reads back the file each Simpler holds and compar
 ## How `live-build` builds
 
 `blueprint.build(work)`, in order:
-1. The blueprint, written to `blueprint.json` beside the plan, with `refdissect blueprint`'s checks: an 808 one-shot fitted again after the plan, or a pad file that cannot be read, stops it. So does a plan the blueprint cannot hold (below); `--direct` builds such a plan.
+1. The blueprint, written to `blueprint.json` beside the plan, with `refdissect blueprint`'s checks: an 808 one-shot fitted again after the plan, or a pad file that cannot be read, stops it. So does a plan the blueprint cannot hold (below).
 2. One `build_from_blueprint` call (ableton-live-mcp's `docs/blueprint-v1.md`), with `bars="A-B"` under `--bars`. It:
    - validates the blueprint and checks its files on disk, by SHA-1, before it touches Live;
    - with `--bars`, makes the excerpt ([below](#a-short-live-check));
@@ -47,24 +46,26 @@ After `build_tracks` the build reads back the file each Simpler holds and compar
    - sets the 808's voices, places the locators and deletes a cue Live moved;
    - reads back the time signature, every Simpler's file (by SHA-1), each pad's Volume (sent again as text where the number did not hold), each pad's choke group (set again where it differs) and the voices;
    - puts the playhead at 0 and shows the Arrangement.
-3. Then, as `--direct` did: the Arrangement's loop off (`set_song_properties`) and the 808's track selected (`select_in_live`).
+3. Then the Arrangement's loop off (`set_song_properties`) and the 808's track selected (`select_in_live`).
 
-The report is one JSON line in `--direct`'s keys (`blueprint.as_live_build`), with each difference logged as `--direct` logs it:
+The report is one JSON line in the keys the build before `build_from_blueprint` reported (`blueprint.as_live_build`), with each difference logged:
 
 | key | from `build_from_blueprint`'s report |
 |---|---|
 | `tracks`, `problems` | its rows per track, and their `problems` |
-| `locators`, `locators_moved` | how many Live placed (`--direct` listed them), and the ones it moved: name, the beat asked, Live's beat, deleted |
+| `locators`, `locators_moved` | how many Live placed, and the ones it moved: name, the beat asked, Live's beat, deleted |
 | `choke_groups` | per pad of a group: plan, live, same |
 | `volumes_held`, `volumes_not_held` | Volumes held as the number sent; a pad that held only its text is listed with `held_by_text` |
 | `samples_checked`, `wrong_samples` | per `808` or pad note; `plan` is the copy the Simpler is to hold |
 | `808_voices` | want, live, same |
-| `time_signature`, `files`, `excerpt`, `ok` | new: Live's signature against the plan's, the copies, the excerpt's bars, beats and seconds, and `ok`, false where anything differs |
+| `time_signature`, `tempo`, `files`, `excerpt`, `ok` | Live's signature and tempo against the plan's, the copies, the excerpt's bars, beats and seconds, and `ok`, false where anything differs |
 | `build_from_blueprint` | its whole report |
 
-The exit codes are `--direct`'s: 0 once the set is built, also where a read-back differs (it is logged and in the report); a build that cannot start or stops ends in an error.
+The exit code is 0 once the set is built, also where a read-back differs (it is logged and in the report); a build that cannot start or stops ends in an error.
 
-### What differs from `--direct`
+### What changed from `--direct`
+
+`live-build --direct` was the build before `build_from_blueprint` ([below](#the-build-before-build_from_blueprint)), removed on 2026-11-16 once the two had built the same audio in Live ([below](#verified-in-live)). What changed:
 
 | | `--direct` | `live-build` | |
 |---|---|---|---|
@@ -74,8 +75,8 @@ The exit codes are `--direct`'s: 0 once the set is built, also where a read-back
 | a pad's chain | made by the browser's drop | made with `insert_chain`, its receiving note set; its playing note Live's default | checked in Live 12.4.16 (2026-11-14): every pad's playing note C3 (60), as the browser's |
 | the Arrangement's loop | off, before the build | `build_from_blueprint` leaves it | filled: off after the build |
 | the selected track | the 808's | none | filled |
-| `--user-library` | where the copies go | not used: the User Library ableton-live-mcp finds | not filled; a copy loads by its path wherever it is |
-| plans the blueprint cannot hold (a choke group past 16, voices outside 1–32) | built | refused, with a pointer to `--direct` | none in the suite's or PIRAMIT's plans |
+| where the copies go | the User Library `--user-library` named | the User Library ableton-live-mcp finds (where its Remote Script is installed) | not filled; a copy loads by its path wherever it is |
+| plans the blueprint cannot hold (a choke group past 16, voices outside 1–32) | built | refused | none in the suite's or PIRAMIT's plans |
 | a locator that rounds to the plan's end or past it | sent; Live refuses a playhead past the song's end | left out and logged, so a job's `blueprint` step does not fail | none in the suite's or PIRAMIT's plans |
 | two locators that round to one beat | both sent; Live keeps one | the first kept, the other logged (Live keeps one cue per beat, and 2.4.0's validator refuses two) | the same locators in Live |
 | a plan without pads | an empty Drums track | no Drums track (an empty `drum_rack` is not a rack to `build_tracks`, and the schema refuses one) | – |
@@ -93,7 +94,7 @@ With `--bars`:
 | a stem that ends before bar A | an empty clip | left out | – |
 | locators | moved by bar A's start, then rounded to whole beats | rounded, then moved | the same where bar A starts on a whole beat (every meter in quarters, 6/8); in 7/8 one can fall off a whole beat, which Live refuses (`locators_moved`), and one within half a beat of bar A's start or bar B's end can go in or out |
 
-**Checked without Live** (`tests/test_live_build_blueprint.py`, with the [live] extra; skipped without it): a synthetic plan with a choke group, a pad scaled to full scale and Glide is built by both paths into two empty sets of ableton-live-mcp's simulator (its Remote Script over its fake Live). The fake browser lists the copies and loads a pad One-Shot, as Live's does. The two sets hold the same tracks, devices, parameters, notes, Simpler files, Volumes, choke groups, voices, faders, mutes, audio clips (by content), tempo, signature, locators, loop and selected track. What is left out of the comparison is what the table says differs: names, the pads' `F On` (the fake starts every Simpler with it on) and `Fade In` (0 by the blueprint, Live's own on `--direct`'s pads), and, with `--bars`, the empty clip and the stems' file names. The same comparison on bass_low-1's m5 plan with `--bars 1-8` and on PIRAMIT's whole plan found the two sets equal (2026-11-14, logged).
+**Checked without Live** (`tests/test_live_build_blueprint.py`, with the [live] extra; skipped without it): a synthetic plan with a choke group, a pad scaled to full scale and Glide is built into an empty set of ableton-live-mcp's simulator (its Remote Script over its fake Live), whole, as an excerpt (`--bars 2-3`) and in 3/4, and the set is read back. Its tracks, devices, parameters, notes, Simpler files, Volumes, choke groups, voices, faders, mutes, audio clips (by content), tempo, signature, locators, loop and selected track are what `--direct` built of the same plan in the same simulator: until 2026-11-16 the test built the plan by both paths into two sets and compared them. What it left out of the comparison is what the table says differs: names, the pads' `F On` (the fake starts every Simpler with it on, and the browser's One-Shot pads had it off in Live) and `Fade In` (0 by the blueprint, Live's own on `--direct`'s pads), and, with `--bars`, the empty clip and the stems' file names. The same comparison on a suite plan's m5 plan with `--bars 1-8` and on PIRAMIT's whole plan found the two sets equal (2026-11-14, logged).
 
 ### Verified in Live
 
@@ -109,20 +110,9 @@ Live 12.4.16 Trial, 2026-11-14 (Live's own log: 12.4.16 ran from 16:02 that day,
 - The Remote Script served 4 clients; `live-build`'s own connection was not refused.
 - The recordings stay outside the repo.
 
-## What `live-build --direct` sends
+## The `build_tracks` spec
 
-`live.build(plan)`, in order:
-1. `get_session_overview`: every track must be empty. A connection Live refuses ends here, with the reason (`live.refused`: the Remote Script serves at most 8 clients).
-2. `set_song_properties`: the tempo, loop off, and the plan's meter as the time signature (`live.meter_of`; 4/4 for a plan written before plans carried one).
-3. The one-shot and every pad's file are copied into the User Library (`Samples/AbletonMCP Generated/`) under names of their content, unless a file there holds that content already.
-4. `build_tracks`, with `live.build_spec(plan)`.
-5. `place_locators`, then the cue points read back; a cue Live made elsewhere is deleted.
-6. The choke group of each pad that has one, set on its chain with `lom_set_property` and read back (`live.set_chokes`).
-7. Each pad's Volume read back (`live.held_volumes`); a pad that does not hold the number sent gets the display text, as before, and is reported.
-8. The read-back of every Simpler's file.
-9. With Glide on, the 808's voices; then the view.
-
-`live.build_spec(plan)` is the whole spec of the one `build_tracks` call:
+`live.build_spec(plan)` is the whole spec of the one `build_tracks` call, which the blueprint carries as its tracks ([below](#a-blueprint-for-build_from_blueprint)):
 - **808**: `{"sample": "<song> 808 (synth) <digest>.wav", "warping": false}`. `<digest>` is the first 8 hex digits of the one-shot's SHA-1 (`live.sample_808`), and the build refuses a one-shot that changed after the plan named it. Its settings come from `live.simpler_808`:
   - `"Volume": "0.0 dB"`;
   - `"Transpose"`, `"Detune"` and `"Vol < Vel"` (0.35, raw) as numbers;
@@ -132,27 +122,35 @@ Live 12.4.16 Trial, 2026-11-14 (Live's own log: 12.4.16 ran from 16:02 that day,
 - **Each pad**: `{"sample": "<file name> <digest>.<ext>", "warping": false, "settings": {"Volume": <x.y>, "Transpose": …, "Detune": …, "Vol < Vel": 0.35, "Snap": "Off"}}`, and `"choke_group": 1` on a pad of a choke group.
   - The name is the file's own, its spaces run together, with the first 8 hex digits of its SHA-1 (`live.pad_sample`). Live's browser finds a sample by its name, and other files of a pad's name can come first (below).
   - The build refuses a pad whose file cannot be read.
-  - The Volume is the pad's `volume_db`, at most 0 dB (`render.pad_settings`), as a number in dB (`live.pad_volume`), which `build_tracks` sets as the parameter's value. Sent as display text ("-6.6 dB"), Live held it a display step under the text (−6.605 dB; 0.05 dB from −10 dB down). After the build the value is read back with Live's display of it; where it is not the plan's within 0.001 dB, the pad gets the text as before and is listed under `volumes_not_held`. Not verified in Live: that Simpler's Volume takes a number in dB as its value (the fake Live of the tests assumes it, as ableton-live-mcp's simulator does).
-  - With `--chokes` (off by default), the hat pads, pitched copies aside, go in one choke group where the plan found the closed hats choking the open hats ([12](12-replica-mode.md#the-stages-and-their-files)). ableton-live-mcp 2.2.0's `build_tracks` does not read `choke_group` (2.3.0 and later do), so `--direct` sets it on each pad's chain after the call (`live_set tracks <i> devices 0 drum_pads <note> chains 0`, `choke_group`) and reads it back, under `choke_groups`. The battery set it this way in Live 12.4.6; the build's own call is not verified in Live.
+  - The Volume is the pad's `volume_db`, at most 0 dB (`render.pad_settings`), as a number in dB (`live.pad_volume`), which `build_tracks` sets as the parameter's value. Sent as display text ("-6.6 dB"), Live held it a display step under the text (−6.605 dB; 0.05 dB from −10 dB down). After the build `build_from_blueprint` reads the value back; where it is not the plan's, the pad gets the text as before and is listed under `volumes_not_held`. In Live 12.4.16 every pad held the number (2026-11-14, [above](#verified-in-live)).
+  - With `--chokes` (off by default), the hat pads, pitched copies aside, go in one choke group where the plan found the closed hats choking the open hats ([12](12-replica-mode.md#the-stages-and-their-files)). `build_tracks` reads `choke_group` from ableton-live-mcp 2.3.0 (2.2.0 did not, and `--direct` set it on each pad's chain after the call: `live_set tracks <i> devices 0 drum_pads <note> chains 0`, `choke_group`); `build_from_blueprint` reads it back and sets it again where it differs, under `choke_groups`. The battery set it on a chain in Live 12.4.6; no plan with a choke group has been built in Live.
 - **Melodic tracks**: `"instrument": "Drift"`, muted, with their notes.
 - **Stems**: audio tracks with one clip each, warping off.
 - **Faders**: `volume_db` from the plan's levels, at most +6 dB.
+- **The 808's `voices`**, with Glide on: not a Simpler parameter but a property of the device, which `build_tracks` does not read. The blueprint carries it, and `build_from_blueprint` sets it after the call.
 
 On the 96 plans of the suite's m5 and m5-ft, the spec passes a check written against ableton-live-mcp 2.2.0's `build_tracks` code: only keys `build_tracks` reads (a pad's `choke_group`, which no m5 plan has, is read by its replica-mode branch, not by 2.2.0), no NaN, each of the 456 pads named after its own file's content, and Snap, F On and Ve Release as above. On m4's 96 plans an earlier check of the same kind found pad Volumes from −20.7 to 0.0 dB, the 808's Detune from −8 to +14 cents, and Glide on in none.
 
-**Read-back.** After `build_tracks` the build reads the file each Simpler holds (`lom_get_object`, its sample's `file_path`) and compares it with the plan's file by the first 8 hex digits of their SHA-1s (`live.held_samples`). A Simpler that holds another file is listed under `wrong_samples` and logged.
+ableton-live-mcp's replica-mode branch, merged into its main, adds more to `build_tracks`: files loaded by path (`sample_path`), `playback_mode`, `start_marker`, `choke_group` and the time signature. The spec carries `choke_group` on a pad of a choke group and uses none of the others; the blueprint has `build_from_blueprint` load every file by path and says each Simpler's `playback_mode` ([above](#what-changed-from---direct)). Loading by path spares the browser's search: how long the search takes for a content name was not timed.
 
-**Meter and locators.** The time signature is set before the locators, since Live moves a locator off its grid. After `place_locators` the build reads the cue points back. A cue that is neither asked for nor one the set held before is deleted (`transport`: `jump_to` it, then `toggle_cue`) and listed under `locators_moved`, with the beat asked and the beat Live chose (`live.moved_locators`). A cue's time cannot be set through the LOM.
+## The build before `build_from_blueprint`
 
-**When it fails.** A `build_tracks` call that raises ends the build with the track, pad and file it stopped at, and the tracks it left in the set: delete them, or open a new set, before building again (`live.failed_build`).
+Until 2026-11-16, `live-build --direct` (`live.build`) sent the spec itself, with calls of its own:
+1. `get_session_overview`: every track had to be empty. A connection Live refused ended here, with the reason (`live.refused`, which `live-build` still gives).
+2. `set_song_properties`: the tempo, loop off, and the plan's meter as the time signature (`live.meter_of`).
+3. The one-shot and every pad's file copied into the User Library (`Samples/AbletonMCP Generated/`, or `--user-library`) under names of their content, unless a file there held that content already.
+4. `build_tracks`, with `live.build_spec(plan)`: every file loaded through Live's browser by its copy's name. A call that raised ended the build with the track, pad and file it stopped at, and the tracks it left in the set.
+5. `place_locators`, with the Arrangement as Live had it (no zoom), then the cue points read back; a cue Live made elsewhere was deleted (`transport`: `jump_to` it, then `toggle_cue`; a cue's time cannot be set through the LOM) and listed under `locators_moved`.
+6. The choke group of each pad that had one, set on its chain with `lom_set_property` and read back.
+7. Each pad's Volume read back; a pad that did not hold the number sent got the display text and was listed under `volumes_not_held`.
+8. Every Simpler's file read back (`lom_get_object`, its sample's `file_path`) and compared with the plan's by the first 8 hex digits of their SHA-1s; one that held another file was listed under `wrong_samples`.
+9. With Glide on, the 808's voices; then the view.
 
-`voices` is not a Simpler parameter but a property of the device, and `build_tracks` does not read it: after the call the build sets it with `lom_set_property`.
-
-ableton-live-mcp's replica-mode branch, merged into its main, adds more to `build_tracks`: files loaded by path (`sample_path`), `playback_mode`, `start_marker`, `choke_group` and the time signature. `--direct`'s spec carries `choke_group` on a pad of a choke group, and `--direct` sets it itself as well; it uses none of the others. `live-build`'s blueprint has `build_from_blueprint` load every file by path and says each Simpler's `playback_mode` ([above](#what-differs-from---direct)). Loading by path spares the browser's search: how long the search takes for a content name was not timed.
+`build_from_blueprint` does each of these now ([above](#how-live-build-builds)), and in Live 12.4.16 the two builds played the same audio sample for sample ([above](#verified-in-live)). The report keeps `--direct`'s keys.
 
 ## ableton-live-mcp tools used
 
-`live-build`: `build_from_blueprint` (one call), then `set_song_properties` (loop off), `get_session_overview` and `select_in_live` (the 808's track). `--direct`:
+`live-build`: `build_from_blueprint` (one call), then `set_song_properties` (loop off), `get_session_overview` and `select_in_live` (the 808's track). Until 2026-11-16, `--direct` called these itself:
 
 | step | tool or command |
 |---|---|
@@ -295,7 +293,7 @@ Kicks played within 0.004 dB of `render.py` and the 808 within 0.022 dB; snares 
 
 ### Live 12.4.6, a plan with Glide (2026-11-05)
 
-Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 s of the plan) at 1c29335, built with the calls `live.build` sends for the excerpt (`live.build_spec`), through the check's own session: Live's Remote Script served 8 clients, so `live-build`'s own client could not connect. 8 tracks, no problem reported; the 808's Simpler set from 6 voices to 1.
+Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 s of the plan) at 1c29335, built with the calls `live.build` sent for the excerpt (`live.build_spec`), through the check's own session: Live's Remote Script served 8 clients, so `live-build`'s own client could not connect. 8 tracks, no problem reported; the 808's Simpler set from 6 voices to 1.
 - **Read back:** Glide Mode "Glide", Glide Time 163.0 ms shown for 162.5 ms sent, Transpose 36, the filter off, Ve Release 50 ms, "Vol < Vel" 35 %, the fader −16.3 dB.
 - **The 808 alone, recorded** (34 beats, 15.0 s, 48 kHz, resampled to 44.1 kHz), against `render.py`'s render of the same excerpt plan: aligned at 0 ms, the same RMS (−13.14 dB), the difference 31.5 dB under the render, each note's first 100 ms within 0.76 dB (median 0.0 dB, 30 notes).
 - **The slides.** The excerpt holds 5 legato notes: 4 slide inside it, and the fifth is cut by the excerpt's end and slides in neither. Over the 4 slides' 102 periods Live's pitch lies within 1.21 cents of `render.py`'s (p90; median 0.0), 1.18–3.5 cents per slide (p90 over the ramp; 3.5 on the 9-semitone one), and each slide starts and ends within 0.3 ms of `render.py`'s.
@@ -366,7 +364,7 @@ Over scenarios the balance within the group is better on 9, worse on 12 and equa
 uv run refdissect blueprint "$W/song/refdissect"     # no Live, no [live] extra
 ```
 
-It is what `live-build` writes and builds ([above](#how-live-build-builds)): what `--direct` sends, decided without Live, plus what loading by path leaves to Live, each Simpler's `playback_mode` and each pad's filter off.
+It is what `live-build` writes and builds ([above](#how-live-build-builds)): the tempo, the meter, the locators and `live.build_spec`'s tracks, decided without Live, plus what loading by path leaves to Live, each Simpler's `playback_mode` and each pad's filter off.
 
 | Blueprint | From |
 |---|---|
@@ -381,26 +379,26 @@ It is what `live-build` writes and builds ([above](#how-live-build-builds)): wha
 | `tracks` | `live.build_spec(plan)`, with each sampler naming its file by its key in `files` (`"file": "808"`, `"file": "pad-38"`) in place of `"sample"`, and its `playback_mode` (`render.pad_settings`' for a pad, `one_shot`; `render.settings_808`'s for the 808, `classic`); `"F On": "Off"` and `"Fade In": 0` in each pad's settings (`blueprint.PAD_OFF`; a Simpler made by path starts with a 0.1 ms Fade In, the browser's with none); the 808's `voices` only where the plan has them; stems' paths absolute, their clips' `start` the plan's move (`render.moved_beats`: 0 unless the plan was made with `--align-bar1`) |
 | `meta` | the plan file's name and the first 12 hex digits of its SHA-1 (the build ignores `meta`) |
 
-There is no `checks` field: every read-back is on by default. The command keeps `live-build`'s checks that need no Live: an 808 one-shot whose content is not the one the plan named, and a pad whose file cannot be read, stop it. It also refuses what the format cannot hold: a choke group past 16, a voices count outside 1–32, and a locator at or past the plan's end, which `live-build` would still send and the blueprint's validator refuses. No plan of the suite or PIRAMIT's has one.
+There is no `checks` field: every read-back is on by default. The command keeps `live-build`'s checks that need no Live: an 808 one-shot whose content is not the one the plan named, and a pad whose file cannot be read, stop it. It also refuses what the format cannot hold: a choke group past 16 and a voices count outside 1–32. A locator at or past the plan's end, which `--direct` sent and the blueprint's validator refuses, is left out and logged. No plan of the suite or PIRAMIT's has one.
 
 Checked on PIRAMIT's plan and on three m5 plans of the suite (v1orig-3, producer-1, glides-1), plus v1orig-3's fs-3 plan, whose kick and snare files peak over full scale (2026-11-14):
 - ableton-live-mcp's validator (`python -m MCP_Server.blueprint`, at 0dcca86 of `feat/reference-jobs`) found no problem in any of the five, files on disk included.
 - Turned back into a `build_tracks` spec by ableton-live-mcp's own `blueprint.build_spec`, every track equals `live.build_spec(plan)`: the same notes (1,881 on PIRAMIT's, 328 to 459 on the others), devices, settings, pad Volumes and faders, with the 808's `voices` the plan's. The only difference is that `build_from_blueprint` adds each copy's `sample_path`, so Live 12.4 and later load the files by path, not through the browser.
-- The copies `build_from_blueprint` writes into the User Library have the names and SHA-1s of the ones `live-build` writes, the two scaled ones (−5.1 and −1.6 dB) included.
+- The copies `build_from_blueprint` writes into the User Library have the names and SHA-1s of the ones `live-build --direct` wrote, the two scaled ones (−5.1 and −1.6 dB) included.
 - The m5 plans were made before `file_db` (2026-10-29), so no pad of v1orig-3's m5 plan is scaled; its fs-3 plan carries the scaling.
-- These checks came before the blueprint said each Simpler's `playback_mode` and turned the pads' filter off (later on 2026-11-14); the tests turn a blueprint back into `--direct`'s spec without those two.
+- These checks came before the blueprint said each Simpler's `playback_mode` and turned the pads' filter off (later on 2026-11-14); the tests turn a blueprint back into `live.build_spec`'s spec without those two.
 
-Not verified in Live: `build_from_blueprint` has not built a blueprint of `refdissect`'s.
+`build_from_blueprint` built blueprints of `refdissect`'s in Live 12.4.16 on 2026-11-14 ([above](#verified-in-live)).
 
 ## A short live check
 
 Live has no export API and the Trial cannot export, so a live check records in real time: the two checks so far took about 1 to 1.5 h each. `refdissect live-build work --bars A-B` builds bars A to B of the plan only, counted from 1 on Live's ruler in the plan's meter.
 - The excerpt starts at 0. Its drum, 808 and melodic notes that start in those bars move back by bar A's start and end by bar B's end. Its locators move alike, and its clips last the excerpt.
-- The stems are cut, sample for sample in their own format, at the same instants (bar A's start and bar B's end at the plan's tempo). They go into `excerpt-A-B/` beside the plan, or `--stems-out`. `live-build` has `build_from_blueprint` cut them, each named by its content; `--direct` cuts them itself under their own names ([what differs](#what-differs-from---direct)).
+- The stems are cut, sample for sample in their own format, at the same instants (bar A's start and bar B's end at the plan's tempo). They go into `excerpt-A-B/` beside the plan, or `--stems-out`. `live-build` has `build_from_blueprint` cut them, each named by its content (`--direct` cut them under their own names, [what changed](#what-changed-from---direct)).
 - The 808's one-shot and settings, the pads and the levels are the plan's.
 - A note that starts before bar A is left out, also where it still sounds into the excerpt. An 808 note that slid from it starts on its own.
 - Bars count on Live's ruler from beat 0, not from the grid's bar lines. By default the plan stays at the song's seconds and its locators carry the first bar line (full-1's m5 plan has them at beats 0.92 and 64.92), so an excerpt can start mid-bar in the music.
-- A plan made with `plan --align-bar1` has the grid's bar lines on Live's ([01](01-pipeline.md#bar-1-on-request)), so the bars of `--bars` are the music's. Where the first bar line came after 0 s, bar 1 is the pickup and bar 2 starts on that line; where it came before, bar 1 does. Its stems' clips start at the move, and `build_from_blueprint` cuts them from where the excerpt starts in the song: at 120 BPM in 4/4, a first bar line 0.4 s in moves 3.2 beats, bars 2–3 take the stems from 0.4 s on and place them at 0, and bar 1 takes 0–0.4 s and places it at beat 3.2 (checked offline on ableton-live-mcp's `blueprint.excerpt` and its simulator). `--direct` cuts the stems as if they started at beat 0, so its `--bars` on such a plan misplaces them.
+- A plan made with `plan --align-bar1` has the grid's bar lines on Live's ([01](01-pipeline.md#bar-1-on-request)), so the bars of `--bars` are the music's. Where the first bar line came after 0 s, bar 1 is the pickup and bar 2 starts on that line; where it came before, bar 1 does. Its stems' clips start at the move, and `build_from_blueprint` cuts them from where the excerpt starts in the song: at 120 BPM in 4/4, a first bar line 0.4 s in moves 3.2 beats, bars 2–3 take the stems from 0.4 s on and place them at 0, and bar 1 takes 0–0.4 s and places it at beat 3.2 (checked offline on ableton-live-mcp's `blueprint.excerpt` and its simulator).
 
 8 bars at 140 BPM play in 14 s (computed). How many minutes a whole short check takes in Live, with the build, the recording and the scoring, is not measured: the Live stage of 2026-11-05 could not connect to ableton-live-mcp and made no call.
 
@@ -412,14 +410,13 @@ Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 bea
 
 ## Not verified in Live
 
-- **`live-build` on `build_from_blueprint`.** Not yet run in Live, whole or with `--bars`; `--direct` stays until it is. To check against a `--direct` build of the same plan: the files each Simpler holds, each Simpler's parameters (playback mode, `F On`, Snap, Volume, Transpose, Detune, "Vol < Vel", One-Shot's fades and Trigger or Gate) and voices, each pad chain's playing note (C3), the choke groups, the notes, the locators, and a recording against the plan's offline render.
 - **`live-build --bars`.** Not yet run in Live: whether an excerpt's recording scores as its offline render does, as the whole plans did, and how long a short check takes.
-- **`refdissect live-build` end to end.** Both checks found Live serving 8 clients and sent the build's calls through their own session. The package's read-back, locator deletion and failure messages ran as the same commands, not as its code. These are now `build_from_blueprint`'s, run in-process as `--direct`'s were.
+- **`refdissect live-build` end to end.** Both checks found Live serving 8 clients and sent the build's calls through their own session. The package's read-back, locator deletion and failure messages ran as the same commands, not as its code. These are now `build_from_blueprint`'s, run in-process.
 - **One `build_tracks` call of PIRAMIT's size**, which went as 5, and **a build that stops half way**: no build of the second check failed, so the failure message has not been seen.
 - **How long the browser takes** to find a pad's content name: not timed.
 - **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups** as the build sets them: the battery's 1 ms cut is in `render.py`, but no plan with a choke group has been built, and a hit after its pad's choked hit is planned on time (not measured in Live).
-- **A pad's Volume as a number** and its read-back (`live.held_volumes`).
-- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in far enough (`zoom_view(3, "Arranger", False)`, 25 steps or more), every whole beat lands, as the 2026-11-16 probes found ([above](#live-12416-simplers-resampler-and-the-locators-2026-11-16)); ableton-live-mcp v2.4.1 zooms in before placing them (`build_from_blueprint`, so `live-build`): a 3/4 blueprint's locators on beats 0, 9, 21, 33 and 45 all landed (Live 12.4.16, 2026-11-16); `live-build --direct` does not zoom. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built. With `plan --align-bar1` such a plan's locators lie on Live's bar lines.
+- **A pad's Volume sent again as text** where the number did not hold (`build_from_blueprint`'s read-back): every pad held the number in Live 12.4.16 (2026-11-14), so the fallback has not run in Live.
+- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in far enough (`zoom_view(3, "Arranger", False)`, 25 steps or more), every whole beat lands, as the 2026-11-16 probes found ([above](#live-12416-simplers-resampler-and-the-locators-2026-11-16)); ableton-live-mcp v2.4.1 zooms in before placing them (`build_from_blueprint`, so `live-build`): a 3/4 blueprint's locators on beats 0, 9, 21, 33 and 45 all landed (Live 12.4.16, 2026-11-16); `live-build --direct` (gone on 2026-11-16) did not zoom. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built. With `plan --align-bar1` such a plan's locators lie on Live's bar lines.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it. `plan --align-bar1` moves the plan onto Live's bars; no plan made with it has been built in Live, and audio clips at a fractional beat (`create_audio_clip` at the move, 3.2 beats in the example) have not been checked there.
 - **A plan made with `--live-sr`, built and recorded.** The kernel was measured on probes, and it matches the second check's per-pad recordings within 0.045 dB. No plan made with it has been built, and no device rate other than 48 kHz has been measured.
 - **PIRAMIT against the song.** It has no truth: Live was measured against `render.py`, and nothing was checked by ear.
