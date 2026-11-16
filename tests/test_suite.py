@@ -271,6 +271,34 @@ def test_a_reused_step_that_reads_a_rerun_one_is_stale():
     assert suite._reused(agg) == "; melodic, match reused from m1 (stale: melodic, match read outputs this run rewrote)"
 
 
+def test_the_level_headlines_score_the_balance_within_each_stem_group():
+    """levels.balance_abs_db is the median |balance_db| over every measured
+    sound, levels.balance_in_group_abs_db the median |balance_in_group_db|
+    over the sounds that have one: an 808 alone in its group has none and
+    adds nothing, two 808s each count. A beat whose groups hold one sound
+    each has no in-group headline; one without a render has no levels."""
+    def sound(role, level, balance, in_group=None):
+        return {"role": role, "n": 4, "level_db": level, "spread_p90_db": 0.1, "vs_kit_db": level + 5.0,
+                "balance_db": balance, **({"balance_in_group_db": in_group} if in_group is not None else {})}
+
+    def levels(sounds):
+        return suite.headline({"summary": {"strict_f1_20": 1.0, "v1_f1": 1.0},
+                               "levels": {"kit": {}, "sounds": sounds}})
+
+    h = levels({"kick": sound("kick", -1.0, -0.5, -1.0), "snare": sound("snare", 0.0, 0.5, 0.0),
+                "hat": sound("hat", 2.0, 2.5, 2.0), "sub": sound("808", -6.0, -5.5), "tom": None})
+    assert h["levels.balance_abs_db"] == 1.5 and h["levels.balance_in_group_abs_db"] == 1.0
+    assert h["levels.hat.balance_in_group_db"] == 2.0 and "levels.808.balance_in_group_db" not in h
+    assert h["levels.808.balance_db"] == -5.5 and h["levels.vs_kit_abs_db"] == 4.5
+    two = levels({"kick": sound("kick", -1.0, -0.25, -0.5), "snare": sound("snare", 0.0, 0.75, 0.5),
+                  "sub": sound("808", -6.0, -5.25, -1.0), "sub2": sound("808", -4.0, -3.25, 1.0)})
+    assert two["levels.balance_in_group_abs_db"] == 0.75 and two["levels.808.balance_in_group_db"] == 0.0
+    one_each = levels({"kick": sound("kick", -1.0, 2.5), "sub": sound("808", -6.0, -2.5)})
+    assert one_each["levels.balance_abs_db"] == 2.5 and "levels.balance_in_group_abs_db" not in one_each
+    assert not any(k.startswith("levels.") for k in suite.headline({"summary": {"strict_f1_20": 1.0, "v1_f1": 1.0}}))
+    assert ("plan", "levels.balance_in_group_abs_db") in {t[:2] for t in suite.TABLES}
+
+
 def test_copied_outputs_point_into_their_new_folder(tmp_path):
     """The one-shot fit-808 writes is named by path in synth808.json and
     plan.json: copied, both name the copy; a folder whose name starts like

@@ -325,14 +325,25 @@ Transposed down, Simpler adds images above the source's top that an ideal resamp
 
 **In the plan** (`plan --live-sr 48000`, `suite run --live-sr 48000`; off by default). The plan carries `live_sr`, and `estimate_levels` and `render_plan` play each pad through Simpler's resampler at it (`render.pad_shot`): a pad's Volume rises by what Simpler takes off its sound. Kicks and the 808 are left as they were (the 808 stays on the ideal resampler). Timing and lengths stay as before: the kernel is symmetric, and a pad's voice keeps its length. Tags hf-1 and hf-1-ft are m5's and m5-ft's outputs planned and scored so. Tags hf-0 and hf-0-ft are m5's own plans rendered and scored with `live_sr`, as Live plays them.
 
-| plan level (48 beats) | m5 as `render.py` played it | m5 as Live plays it (hf-0) | with `--live-sr` (hf-1) |
+| plan level (48 beats, mean over the 22 scenarios) | m5 as `render.py` played it | m5 as Live plays it (hf-0) | with `--live-sr` (hf-1) |
 |---|---|---|---|
 | distance from a perfect kit | 1.198 dB [1.152] | 1.267 dB [1.311] | 1.213 dB [1.172] |
 | balance | 0.512 dB [0.476] | 0.472 dB [0.500] | 0.506 dB [0.487] |
+| balance within its stem group | not scored | 0.566 dB [0.378] | 0.597 dB [0.381] |
 | hats against the kit | −0.90 dB [−0.57] | −1.26 dB [−0.93] | −0.94 dB [−0.57] |
 | open hats | +0.15 dB [−0.72] | −0.28 dB [−1.13] | +0.14 dB [−0.71] |
 
-htdemucs_ft in brackets. Every other score of all 48 beats equals m5's (m5-ft's): drum, 808 and timing scores, analysis and plan. Against hf-0, `--live-sr` brings 13 scenarios closer to a perfect kit and 9 further off [16 and 6]. On htdemucs the balance is worse on 13 scenarios and better on 9 [10 and 12], since the hats, raised back to the plan's levels, now sit further from the median sound. That is why it is an option.
+htdemucs_ft in brackets. Every other score of all 48 beats equals m5's (m5-ft's): drum, 808 and timing scores, analysis and plan. Against hf-0, `--live-sr` brings 13 scenarios closer to a perfect kit and 9 further off [16 and 6]. On htdemucs the balance is worse on 13 scenarios and better on 9 [10 and 12], since the hats, raised back to the plan's levels, now sit further from the median sound.
+
+**Scored within each stem group, it stays off** (2026-11-16). The balance above is each sound against the median sound with the 808 among the drums, though the two groups' faders are matched to two stems. `levels.balance_in_group_abs_db` takes each sound against the median sound of its own group (`evaluate.level_scores`' `balance_in_group_db`); the 808, alone in its group on every beat, adds nothing. Tags hf-0g, hf-1g, hf-0g-ft and hf-1g-ft are hf-0's, hf-1's and their -ft's stored plans scored again (`suite run --steps score --reuse hf-0`, and so on): every score the records held before came out the same on all 48 beats. The rule set beforehand: `--live-sr 48000` becomes the default if, with it, the median over the 48 beats of this balance is no worse on both models. It is worse on both:
+
+| plan level, median over the 48 beats | m5 as Live plays it (hf-0g) | with `--live-sr` (hf-1g) | beats better / worse / equal |
+|---|---|---|---|
+| balance within its stem group | 0.190 dB [0.195] | 0.240 dB [0.245] | 18 / 27 / 3 [24 / 22 / 2] |
+| balance | 0.305 dB [0.365] | 0.340 dB [0.405] | 20 / 25 / 3 [27 / 19 / 2] |
+| distance from a perfect kit | 0.990 dB [0.720] | 0.905 dB [0.755] | 23 / 21 / 4 [33 / 10 / 5] |
+
+Over scenarios the balance within the group is better on 9, worse on 12 and equal on 1 [10, 12 and 0]. Per sound (medians over every sound of a role on the 48 beats), `--live-sr` brings the hats and open hats closer to a perfect kit and leaves the kicks and snares about where they were: hats −0.88 → −0.43 dB [−0.65 → −0.40], open hats −0.34 → +0.16 dB [−0.65 → −0.28], snares −0.34 → −0.24 dB [−0.57 → −0.57], kicks −0.05 → −0.05 dB [+0.10 → +0.13], while within the drums the snares' |balance| goes 0.17 → 0.28 dB [0.17 → 0.35] and the kicks' 0.66 → 0.81 dB [0.64 → 0.54]. Why the pads' readings come out so is not investigated. `--live-sr 48000` stays an option, off by default.
 
 **The locators.** In 3/4 (meter34-1's meter) a cue asked at beat 9 went to 12, as on 2026-10-29: `set_or_delete_cue` puts a cue on the nearest line of the Arrangement's grid, which follows the horizontal zoom. `zoom_view(3, "Arranger", False)` zooms in. Four steps put beat 9 and 10.5 on the grid. 25 more put 90.125 (an eighth of a beat, off screen) there exactly. After 20 steps out, 10.5 went to 12 again. Up and down (0 and 1) zoom the tracks' height: 13 steps left beat 9 at 12. `current_song_time` takes effect only after the call that sets it, and refuses a time past the song's length ("Cannot set the Songtime behind the Songlength"). Nothing in the LOM sets the grid, Snap to Grid or a cue's time. The song's first bar line cannot be moved off 0 s either: `Song.start_time` is the playback start marker, and there is no song offset or time signature marker to set. So bar 1 can only land on the music's first bar line by shifting the plan: every note, clip and locator starts (bar − phase) beats later.
 

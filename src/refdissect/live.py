@@ -530,8 +530,10 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     suite (tags hf-1, hf-1-ft against m5's plans rendered the same way,
     hf-0, hf-0-ft) the distance from a perfect kit went 1.267 -> 1.213 dB
     [1.311 -> 1.172] and hats -1.26 -> -0.94 dB [-0.93 -> -0.57], the
-    balance 0.472 -> 0.506 dB [0.500 -> 0.487]: off until that balance is
-    no worse."""
+    balance 0.472 -> 0.506 dB [0.500 -> 0.487]. Within each stem group
+    (evaluate.level_scores' balance_in_group_db; the same plans scored
+    again, hf-0g -> hf-1g) it is worse on both models, a median over the
+    48 beats of 0.190 -> 0.240 dB [0.195 -> 0.245]: off."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]

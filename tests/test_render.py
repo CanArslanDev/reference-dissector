@@ -326,6 +326,53 @@ def test_a_kit_at_the_truths_levels_reads_where_the_faders_put_it(kit, tmp_path)
     assert snare["vs_kit_db"] == pytest.approx(0.08, abs=0.01)
 
 
+def test_balance_within_each_stem_group_is_left_where_the_other_group_moves(kit, tmp_path):
+    """Each truth stem is the plan's own render of its sound scaled, so the
+    rebuild plays the kick at -1, the snare at 0, the hat at +2 and the 808
+    at -6 dB. balance_db is taken against the median of all four (-0.5 dB),
+    balance_in_group_db against the median of the sound's own group: the
+    drums' (0 dB), and none for the 808, alone in its group. The 808 9 dB
+    louder against its stem, as its fader up 9 dB would play it, moves every
+    balance_db (the median to +1 dB) but no balance_in_group_db."""
+    from refdissect.evaluate import level_scores
+    t = np.arange(SR) / SR
+    sub = (0.8 * np.sin(2 * np.pi * 32.703 * t) * np.exp(-t / 0.4)).astype(np.float32)
+    beats = {"36": [0, 2, 4, 6], "38": [1, 3, 5, 7], "42": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]}
+    pads = {n: {"path": wav(tmp_path, f"{n}.wav", kit[r]), "transpose": 0, "role": r}
+            for n, r in (("36", "kick"), ("38", "snare"), ("42", "hat"))}
+    t808 = {"sample_path": wav(tmp_path, "808.wav", sub), "root_midi": 24, "transpose": 36,
+            "notes": [note(24, b + 0.25, duration=0.5) for b in (0, 2, 4, 6)]}
+    p = plan(pads, [note(n, b) for n, bs in beats.items() for b in bs], t808)
+    m = render_plan(p, tmp_path / "r", n_samples=4 * SR)
+    est = estimate_from_plan(p)
+    names = {"36": "kick", "38": "snare", "42": "hat", "808": "sub"}
+    want = {"kick": -1.0, "snare": 0.0, "hat": 2.0, "sub": -6.0}
+    truth = {"schema": SCHEMA, "kind": "truth", "scenario": "t", "seed": 0,
+             "sounds": {s: {"role": pads[n]["role"] if n in pads else "808"} for n, s in names.items()},
+             "audio": {"sr": SR, "n_samples": 4 * SR, "stems": {s: f"{s}.wav" for s in names.values()}},
+             "drums": [{**e, "sound": names[e["sound"]]} for e in est["drums"]],
+             "bass808": [{**e, "sound": "sub"} for e in est["bass808"]]}
+    (tmp_path / "truth").mkdir()
+
+    def levels(sub_up_db=0.0):
+        for n, s in names.items():
+            level_db = want[s] + (sub_up_db if s == "sub" else 0.0)
+            wav(tmp_path / "truth", f"{s}.wav", rendered(tmp_path / "r", m, n) * 10 ** (-level_db / 20))
+        return level_scores(truth, est, tmp_path / "r", tmp_path / "truth")["sounds"]
+
+    lv = levels()
+    assert {s: v["level_db"] for s, v in lv.items()} == pytest.approx(want, abs=0.01)
+    assert {s: v["balance_db"] for s, v in lv.items()} == pytest.approx(
+        {"kick": -0.5, "snare": 0.5, "hat": 2.5, "sub": -5.5}, abs=0.01)
+    in_group = {s: v["balance_in_group_db"] for s, v in lv.items() if "balance_in_group_db" in v}
+    assert in_group == pytest.approx({"kick": -1.0, "snare": 0.0, "hat": 2.0}, abs=0.01)
+    louder = levels(sub_up_db=9.0)
+    assert louder["sub"]["level_db"] == pytest.approx(3.0, abs=0.01)
+    assert {s: v["balance_db"] for s, v in louder.items()} == pytest.approx(
+        {"kick": -2.0, "snare": -1.0, "hat": 1.0, "sub": 2.0}, abs=0.01)
+    assert {s: v["balance_in_group_db"] for s, v in louder.items() if "balance_in_group_db" in v} == in_group
+
+
 def test_a_planned_808_sounds_where_its_one_shot_is_tuned(tmp_path):
     """fit_808 writes its one-shot at the 808's own tuning (synth808.json
     pitch_hz), here 33.58 Hz, 45.8 cents over root_midi 24; this one starts
