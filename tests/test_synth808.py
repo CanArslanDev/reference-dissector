@@ -236,7 +236,7 @@ def test_the_one_shot_only_falls_where_its_template_rises():
     """A kick in the template: its curve reads 228 cents under the drop at
     60-80 ms and 228 over it at 90-110 ms. Followed, every note of the
     one-shot swooped 456 cents up; with the fitted drop played up to the
-    rise instead (bff9234), it left the template's periods before it and
+    rise instead (c58eb8f), it left the template's periods before it and
     read up to 577 cents apart. Pooled, the periods never shorten across
     the rise, so the one-shot's pitch never rises there, and the crossings
     before and after it stay the template's."""
