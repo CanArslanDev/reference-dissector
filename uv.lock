@@ -9,8 +9,8 @@ resolution-markers = [
 
 [[package]]
 name = "ableton-live-mcp"
-version = "2.4.1"
-source = { git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=v2.4.1#d9cffb2fbe481df4ffef7c1003b52f7f72a2b587" }
+version = "2.4.2"
+source = { git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=v2.4.2#96a416198b41b3754a9e4b9364f70fac186f1a09" }
 dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
@@ -1878,7 +1878,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ableton-live-mcp", marker = "extra == 'live'", git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=v2.4.1" },
+    { name = "ableton-live-mcp", marker = "extra == 'live'", git = "https://github.com/CanArslanDev/ableton-live-mcp?rev=v2.4.2" },
     { name = "librosa", specifier = ">=0.10" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mido", specifier = ">=1.3" },
