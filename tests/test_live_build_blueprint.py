@@ -2,18 +2,23 @@
 simulator (the real Remote Script over fake Live, MCP_Server/simulator.py and
 fake_live.py): a synthetic plan built by the new path and by live-build
 --direct, each into an empty set of its own, and the two sets compared. Needs
-the [live] extra (ableton-live-mcp with blueprints); skipped without it. No
+the [live] extra (ableton-live-mcp with blueprints); skipped without it, and
+failed instead where REFDISSECT_REQUIRE_LIVE is set (CI). No
 Live, no Demucs, no sample library: the plan of test_blueprint.plan_for."""
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-pytest.importorskip("MCP_Server.blueprint", reason="the [live] extra (ableton-live-mcp with blueprints) not installed")
+if os.environ.get("REFDISSECT_REQUIRE_LIVE"):  # CI installs the [live] extra: a missing one fails, not skips
+    import MCP_Server.blueprint  # noqa: F401
+    import MCP_Server.simulator  # noqa: F401
+pytest.importorskip("MCP_Server.blueprint", reason="ableton-live-mcp 2.4.0 or later (the [live] extra) not installed")
 simulator_module = pytest.importorskip("MCP_Server.simulator")
 
 from test_blueprint import SR, _wav, plan_for  # noqa: E402
@@ -206,14 +211,15 @@ def test_the_new_path_builds_the_same_set_as_direct(both):
     (s_direct, x_direct, r_direct, _), (s_new, x_new, r_new, logged) = out["direct"], out["blueprint"]
     assert comparable(s_new) == comparable(s_direct)
     assert x_new == x_direct
-    assert x_new["808 (synth)"] == {"mode": 0, "file": x_new["808 (synth)"]["file"], "voices": 1}
+    assert x_new["808 (synth)"] == {"mode": 0, "file": str(live_generated(work) / plan["tracks"]["808"]["sample"]),
+                                    "voices": 1}
     assert all(x_new[n]["mode"] == 1 for n in plan["tracks"]["drums"]["pads"])
     assert x_new["42"]["choke_group"] == 1 and x_new["38"]["file"].endswith(" -4.30dB.wav")
     assert all(Path(s["file"]).parent == live_generated(work) for s in x_new.values())
     # the pads' filter: off by the blueprint (PAD_OFF)
     rack = next(t for t in s_new["tracks"] if t["name"] == "Drums (library)")["devices"][0]
     assert {c[0]["devices"][0]["parameters"]["F On"] for c in rack["chains"].values()} == {"Off"}
-    # and their Fade In at 0, where a Simpler made by path starts at 0.1 ms in Live 12.4.6
+    # and their Fade In at 0, where a Simpler made by path starts at 0.1 ms in Live 12.4.16
     assert {c[0]["devices"][0]["parameters"]["Fade In"] for c in rack["chains"].values()} == {"0.0 ms"}
     # the report, in --direct's keys
     for key in ("samples_checked", "volumes_held", "choke_groups"):
@@ -294,3 +300,21 @@ def test_the_command_and_a_set_that_is_not_empty(live, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["ok"] is True
     with pytest.raises(RuntimeError, match="The set is not empty"):
         main(["live-build", str(work)])
+
+
+def test_the_server_is_imported_with_the_full_profile():
+    """live-build sets ABLETON_MCP_PROFILE=full before it imports
+    MCP_Server.server, which registers its tools once, on import: in a fresh
+    process with no profile set, build_from_blueprint is there."""
+    import subprocess
+    import sys
+
+    code = ("import asyncio, os\n"
+            "os.environ.pop('ABLETON_MCP_PROFILE', None)\n"
+            "from refdissect.blueprint import _server\n"
+            "tools = asyncio.run(_server().list_tools())\n"
+            "print([t.name for t in getattr(tools, 'tools', tools) if t.name == 'build_from_blueprint'])\n")
+    env = {k: v for k, v in os.environ.items() if k != "ABLETON_MCP_PROFILE"}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().splitlines()[-1] == "['build_from_blueprint']"
