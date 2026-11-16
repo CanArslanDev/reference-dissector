@@ -21,3 +21,5 @@ jobs:
       - run: uv sync --locked --extra live
       - run: uv run ruff check .
       - run: uv run pytest -q -n auto
+        env:
+          REFDISSECT_REQUIRE_LIVE: "1"  # the [live] tests fail instead of skipping

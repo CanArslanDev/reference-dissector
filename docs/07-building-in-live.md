@@ -1,6 +1,6 @@
 # 07 – Building in Ableton Live
 
-`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.6 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
+`refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.16 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
 uv sync --extra live          # pulls ableton-live-mcp v2.4.1 (build_from_blueprint since v2.4.0)
@@ -25,7 +25,7 @@ Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode), and the time signature, to the plan's meter (3/4 for meter34), before any locator;
 - locators at section starts, rounded to whole beats; one that Live puts elsewhere is deleted and reported;
 - the view, to the Arrangement with the playhead at 0;
-- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back: in Live 12.4.6 every pad's held (2026-11-14, [below](#verified-in-live)).
+- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back: in Live 12.4.16 every pad's held (2026-11-14, [below](#verified-in-live)).
 
 After `build_tracks` the build reads back the file each Simpler holds and compares it with the plan's.
 
@@ -71,11 +71,12 @@ The exit codes are `--direct`'s: 0 once the set is built, also where a read-back
 | loading a file | through Live's browser, by the copy's name | by its path (Live 12.4+); by name on older Live | accepted |
 | what loading leaves to Live | the browser loads a pad One-Shot with its filter off (the battery, 2026-10-19, below) | a Simpler made with `insert_device` starts Classic with its filter on, so the blueprint says `playback_mode` (pads `one_shot`, the 808 `classic`, as `render.py` plays them) turns each pad's `F On` off and its `Fade In` to 0 (a Simpler made by path starts at 0.1 ms, the browser's at 0) | filled; in Live the rest (Fade Out 0.1 ms, Trigger) came out the same, and so did the audio |
 | names | the Simpler, the pad and its chain named after the file | the Simpler "Simpler"; the pad's and chain's names Live's | not filled: names only |
-| a pad's chain | made by the browser's drop | made with `insert_chain`, its receiving note set; its playing note Live's default | checked in Live 12.4.6: every pad's playing note C3 (60), as the browser's |
+| a pad's chain | made by the browser's drop | made with `insert_chain`, its receiving note set; its playing note Live's default | checked in Live 12.4.16 (2026-11-14): every pad's playing note C3 (60), as the browser's |
 | the Arrangement's loop | off, before the build | `build_from_blueprint` leaves it | filled: off after the build |
 | the selected track | the 808's | none | filled |
 | `--user-library` | where the copies go | not used: the User Library ableton-live-mcp finds | not filled; a copy loads by its path wherever it is |
-| plans the blueprint cannot hold (a choke group past 16, voices outside 1–32, a locator at or past the end) | built | refused, with a pointer to `--direct` | none in the suite's or PIRAMIT's plans |
+| plans the blueprint cannot hold (a choke group past 16, voices outside 1–32) | built | refused, with a pointer to `--direct` | none in the suite's or PIRAMIT's plans |
+| a locator that rounds to the plan's end or past it | sent; Live refuses a playhead past the song's end | left out and logged, so a job's `blueprint` step does not fail | none in the suite's or PIRAMIT's plans |
 | two locators that round to one beat | both sent; Live keeps one | the first kept, the other logged (Live keeps one cue per beat, and 2.4.0's validator refuses two) | the same locators in Live |
 | a plan without pads | an empty Drums track | no Drums track (an empty `drum_rack` is not a rack to `build_tracks`, and the schema refuses one) | – |
 | a Volume that holds only as text | not held | held within 0.06 dB, listed as `held_by_text` | reported, as before |
@@ -96,7 +97,7 @@ With `--bars`:
 
 ### Verified in Live
 
-Live 12.4.6 Trial, 2026-11-14, an empty set, the plan built by `live-build` and by `live-build --direct` in turn, each recorded with `capture_stems` (the 808 track, the drum track and REF other as the clock), 48 kHz:
+Live 12.4.16 Trial, 2026-11-14 (Live's own log: 12.4.16 ran from 16:02 that day, 12.4.6 last on 2026-11-08), an empty set, the plan built by `live-build` and by `live-build --direct` in turn, each recorded with `capture_stems` (the 808 track, the drum track and REF other as the clock), 48 kHz:
 
 | plan | build | read-back | the two recordings |
 |---|---|---|---|
@@ -318,7 +319,7 @@ Simpler's loss against an ideal resampler, white noise (dB per band; the 0–2 k
 | 44.1 kHz, +2 | −0.09 | −0.21 | −0.41 | −0.74 | −1.23 | −1.87 | −2.68 | −3.69 |
 | 44.1 kHz, −2 | −0.12 | −0.31 | −0.69 | −1.28 | −2.18 | −3.52 | −5.27 | images |
 
-Transposed down, Simpler adds images above the source's top that an ideal resampler leaves out (a 44.1 kHz file 7 semitones down: 11 dB under the passband at 16 kHz, 32 dB at 22 kHz). The kernel reproduces all of it: against Live, 20 noise pads (44.1 and 48 kHz, −7 to +5 semitones and +25 cents) lie within 0.03 dB in every 2 kHz band to 22 kHz, and 44 click-train pads within 0.05 dB, all with a constant +0.008 dB of Live's over the velocity law's level.
+Transposed down, Simpler adds images above the source's top that an ideal resampler leaves out (a 44.1 kHz file 7 semitones down: 11 dB under the passband at 16 kHz, 32 dB at 22 kHz). The kernel reproduces all of it: against Live, 20 noise pads (44.1 and 48 kHz, −7 to +5 semitones and +25 cents) lie within 0.02 dB in every 2 kHz band to 22 kHz, and 44 click-train pads within 0.05 dB, all with a constant +0.008 dB of Live's over the velocity law's level.
 
 **Against the second check's recordings** (Live 12.4.6, 2026-10-29, the per-pad captures of four m5 plans and PIRAMIT's), `render.py`'s render of the same plans with `live_sr` 48000 plays all 25 pads within 0.045 dB of Live, full band and hat band (3.5 kHz up): 19 within 0.003 dB, and the 6 whose Volume Live held a display step under (−0.045 dB, sent as text then) at −0.042 dB. Without it the same pads lay 0.002–0.95 dB under Live's level as `render.py` gave it (v1orig-3's 48 kHz hat 0.95 dB, PIRAMIT's hats 0.33–0.38 dB, its two 192 kHz snares 0.17–0.18 dB). The kernel measured on 12.4.16 holds on 12.4.6.
 

@@ -5,6 +5,7 @@ sample library: synthetic plans over files written here."""
 
 import json
 import math
+import os
 import re
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from refdissect.blueprint import make_blueprint, song_name, write
+from refdissect.blueprint import as_live_build, make_blueprint, song_name, write
 from refdissect.cli import main
 from refdissect.live import build_spec, one_shot_digest, pad_sample, pad_volume, scale_files_to_full
 
@@ -278,9 +279,23 @@ def test_a_plan_without_an_808_one_shot(tmp_path):
 def test_what_a_blueprint_cannot_hold(tmp_path):
     plan = plan_for(tmp_path)
     plan["tracks"]["drums"]["pads"]["42"]["choke_group"] = 17
-    plan["locators"].append(["C (5)", 15.7])  # rounds to 16.0, the end
-    with pytest.raises(ValueError, match=r"choke group 17.*locator 'C \(5\)'"):
+    plan["tracks"]["808"]["voices"] = 33
+    with pytest.raises(ValueError, match=r"33 voices.*choke group 17"):
         make_blueprint(plan, "Song")
+
+
+def test_a_locator_at_the_end_is_left_out(tmp_path):
+    """A section that starts in the plan's last half beat rounds to the end
+    (16.0 here), where a blueprint holds no locator: it is left out and
+    logged, and the blueprint is made (a job's last step does not fail)."""
+    plan = plan_for(tmp_path)
+    plan["locators"] += [["C (5)", 15.7], ["D (6)", 19.0]]
+    logged = []
+    bp = make_blueprint(plan, "Song", made="refdissect test", log=logged.append)
+    assert_valid(bp)
+    assert [loc["name"] for loc in bp["locators"]] == ["A (1)", "B (3)"]
+    assert len(logged) == 2 and all("at or past the plan's end (16)" in line for line in logged)
+    assert "'C (5)' (beat 15.7)" in logged[0] and "'D (6)' (beat 19)" in logged[1]
 
 
 def test_a_plan_without_pads_has_no_drums_track(tmp_path):
@@ -377,6 +392,78 @@ def test_the_command_refuses_what_live_build_refuses(tmp_path, capsys):
     assert not (work / "blueprint.json").exists()
 
 
+
+def test_a_report_with_everything_wrong_in_direct_s_keys(tmp_path):
+    """build_from_blueprint's report where Live took nothing as asked (its
+    keys as ableton-live-mcp 2.4 writes them, CLAUDE.md's interface), mapped
+    onto live-build --direct's keys, each difference logged."""
+    plan = plan_for(tmp_path)
+    plan["tracks"]["drums"]["pads"]["42"]["choke_group"] = 1
+    bp = make_blueprint(plan, "Song", made="refdissect test")
+    pad = bp["tracks"][1]["instrument"]["drum_rack"]
+    then = {"value": -7.0, "display": "-7.0 dB"}
+    found = {
+        "tracks": [{"track": "808 (synth)", "devices": ["Simpler"], "notes": 2,
+                    "problems": ["audio clip x.wav: Live left it warped"]},
+                   {"track": "Drums (library)", "devices": ["Drum Rack"], "notes": 5}],
+        "locators": 1,
+        "locators_moved": [{"name": "B (3)", "asked": 8.0, "live": 12.0, "deleted": True},
+                           {"name": "C (4)", "asked": 12.0, "live": None, "deleted": False}],
+        "checks": {
+            "time_signature": {"want": "4/4", "live": "3/4", "same": False},
+            "tempo": {"want": 140.0, "live": 139.5, "same": False},
+            "samples": {"checked": 4, "wrong": {
+                "Drums (library) pad 38": {"want": "/lib/a.wav", "live": "/lib/b.wav", "same": False},
+                "808 (synth)": {"want": "/lib/808.wav", "live": None, "same": False, "error": "no sample"}}},
+            "volumes": {"checked": 3, "held": 1, "held_by_text": ["Drums (library) pad 36"], "not_held": {
+                "Drums (library) pad 42": {"want": -7.2, "value": -7.0, "display": "-7.0 dB", "held": False,
+                                           "then": then, "by_text": False}}},
+            "choke_groups": {"checked": 1, "wrong": {
+                "Drums (library) pad 42": {"want": 1, "live": 0, "same": False, "error": "refused"}}},
+            "voices": {"808 (synth)": {"want": 1, "live": 6, "same": False}}},
+        "files": {"folder": "/lib", "copied": 4}, "ok": False}
+    logged = []
+    report = as_live_build(found, bp, logged.append)
+    assert report["problems"] == {"808 (synth)": ["audio clip x.wav: Live left it warped"]}
+    assert report["locators"] == 1 and report["locators_moved"] == found["locators_moved"]
+    assert report["choke_groups"] == {"42": {"plan": 1, "live": 0, "same": False, "error": "refused"}}
+    assert report["volumes_held"] == 1
+    assert report["volumes_not_held"] == {
+        "36": {"plan": pad["36"]["settings"]["Volume"], "text": True, "held_by_text": True},
+        "42": {"plan": -7.2, "value": -7.0, "display": "-7.0 dB", "then": then, "text": True}}
+    assert report["samples_checked"] == 4
+    assert report["wrong_samples"] == {
+        "38": {"plan": "/lib/a.wav", "live": "/lib/b.wav", "same": False},
+        "808": {"plan": "/lib/808.wav", "live": None, "same": False, "error": "no sample"}}
+    assert report["808_voices"] == {"want": 1, "live": 6, "same": False}
+    assert not report["tempo"]["same"] and not report["time_signature"]["same"]
+    assert report["ok"] is False and report["files"] == found["files"] and report["build_from_blueprint"] is found
+    text = "\n".join(logged)
+    for line in ("Live put it at beat 12 for locator 'B (3)' at beat 8.0: deleted",
+                 "Live made none for locator 'C (4)'",
+                 "pad 42 is in choke group 0, not the plan's 1 (refused)",
+                 "pad 36 did not hold Volume",
+                 "pad 42 holds Volume -7.0 (-7.0 dB), not the plan's -7.2 dB: sent as text",
+                 "pad 38 holds /lib/b.wav, not the plan's /lib/a.wav",
+                 "the 808 holds None, not the plan's /lib/808.wav",
+                 "the 808 has 6 voices, not the plan's 1",
+                 "Live's tempo is 139.5 BPM, not the plan's 140.0",
+                 "Live's time signature is 3/4, not the plan's 4/4"):
+        assert line in text, line
+
+
+def test_a_clean_report_logs_nothing(tmp_path):
+    bp = make_blueprint(plan_for(tmp_path), "Song", made="refdissect test")
+    found = {"tracks": [{"track": "808 (synth)", "notes": 2}], "locators": 2, "ok": True,
+             "checks": {"samples": {"checked": 4, "wrong": {}}, "volumes": {"checked": 3, "held": 3},
+                        "tempo": {"want": 140.0, "live": 140.0, "same": True},
+                        "time_signature": {"want": "4/4", "live": "4/4", "same": True}}}
+    logged = []
+    report = as_live_build(found, bp, logged.append)
+    assert logged == [] and report["ok"] is True
+    for key in ("problems", "locators_moved", "volumes_not_held", "wrong_samples", "choke_groups", "808_voices"):
+        assert key not in report, key
+
 # ── The same blueprints through the real validators, where they are installed ──
 
 def _cases(tmp_path):
@@ -390,6 +477,8 @@ def _cases(tmp_path):
 
 
 def test_the_schema_with_jsonschema(tmp_path):
+    if os.environ.get("REFDISSECT_REQUIRE_LIVE"):  # CI: fail, not skip (the [live] extra brings jsonschema)
+        import jsonschema  # noqa: F401
     jsonschema = pytest.importorskip("jsonschema")
     validator = jsonschema.Draft202012Validator(SCHEMA)
     for bp in _cases(tmp_path):
@@ -398,10 +487,15 @@ def test_the_schema_with_jsonschema(tmp_path):
 
 
 def test_ableton_live_mcps_validator(tmp_path):
-    blueprint = pytest.importorskip("MCP_Server.blueprint", reason="ableton-live-mcp with blueprints not installed")
+    if os.environ.get("REFDISSECT_REQUIRE_LIVE"):  # CI: fail, not skip
+        import MCP_Server.blueprint  # noqa: F401
+    blueprint = pytest.importorskip("MCP_Server.blueprint",
+                                    reason="ableton-live-mcp 2.4.0 or later (the [live] extra) not installed")
     for bp in _cases(tmp_path):
         assert blueprint.validate(bp) == []
         assert blueprint.check_sources(bp, None) == []
+    # the schema copy here is the installed one's, but for its $comment
+    assert {k: v for k, v in SCHEMA.items() if k != "$comment"} == blueprint.schema()
 
 
 def test_the_minimal_check_catches_what_the_schema_refuses(tmp_path):

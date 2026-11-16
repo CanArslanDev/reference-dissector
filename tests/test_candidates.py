@@ -276,3 +276,14 @@ def test_the_command_without_stems_or_comparison(work, tmp_path):
     assert m["ducking"]["808"]["source"] == "default" and "round" not in m
     assert m["stats"]["chords"] is None and m["candidates"][0]["notes"]["chords"] == []
     assert (tmp_path / "o" / "01" / "candidate-01.wav").is_file()
+
+
+def test_the_command_passes_the_copy_rule_on(tmp_path, monkeypatch):
+    """--copy-mean-only reaches run() as per_bar=False; without it, per_bar."""
+    from refdissect.cli import main
+
+    seen = []
+    monkeypatch.setattr(cd, "run", lambda *a, **k: seen.append(k["per_bar"]))
+    main(["candidates", str(tmp_path), "--out", str(tmp_path / "out")])
+    main(["candidates", str(tmp_path), "--out", str(tmp_path / "out"), "--copy-mean-only"])
+    assert seen == [True, False]
