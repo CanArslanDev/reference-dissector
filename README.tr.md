@@ -15,7 +15,7 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
 
 ## Öne çıkan sonuçlar
 
-**PIRAMIT** (replika moduyla, 29.10.2026 çalıştırması; `fit-808` 74931ce'nin koduyla, `plan` ise ilk Live kontrolünün düzeltmelerini birleştiren a4f2358'in koduyla yeniden çalıştırıldı; replika modunun ilk çalıştırması 22.10.2026'daydı):
+**PIRAMIT** (replika moduyla, 29.10.2026 çalıştırması; `fit-808` 1f5506d'nin koduyla, `plan` ise ilk Live kontrolünün düzeltmelerini birleştiren e08d786'in koduyla yeniden çalıştırıldı; replika modunun ilk çalıştırması 22.10.2026'daydı):
 - **Tempo:** 137,00 BPM (136,999), ilk ölçü çizgisi 23,4 ms'de. Beat tracker'ın verdiği 136,36 BPM'de vuruşlar ölçü başına 8 ms kayıyor: 7. ölçüde 50 ms, şarkı sonunda 0,59 s (hesaplandı, ölçülmedi).
 - **Akort:** melodik kanallar A440'ta (other −2, piano +1,5 cent). Sadece **808 +11,8 cent**: akortsuz olan şarkı değil, 808 sample'ı. Bu, 808 şablonunun oturduğu perde (32,93 Hz). Replika modundan önce okunan +33 cent, 808'in başındaki perde düşüşünü de duyuyordu. Prototipteki "C mi C# mı" karışıklığı da notaların bu düşüşle, C'nin 30 cent kadar üstünde okunmasından geliyor. (Önceki sürüm her şeyi +0,28 yarım ton okuyordu; bu `librosa.estimate_tuning`'in hatasıydı.)
 - **Hi-hat:** Kütüphanedeki bir hat, kendi perdesinde.
@@ -40,7 +40,7 @@ Bir referans şarkıyı parçalarına ayırıp Ableton Live'da yeniden kurar. Ad
   - 10 Drum Rack pad'inde 630 davul notası (22.10.2026'da 7 pad'de 607), Transpose +36 ve Detune +1 ile 101 808 notası, susturulmuş üç melodik kanal, 4/4 ölçü, 8 lokator.
   - Live, bir pad'in hâlâ çalan vuruşunu kesen yeni vuruşu 1 ms geç başlatıyor; plan bu notaları 1 ms erken yazıyor: 630 davul notasının 98'i, 101 808 notasının 62'si (808'de aynı perdedeki notayı yeniden başlatanlar).
   - Her pad, stem'lerin o sesi tuttuğu yere göre kendi Volume'unda çalıyor: −12,6 dB'lik davul fader'ının altında −12,1 ile 0 dB arası (kulakla kontrol edilmedi). En yüksek pad bir perc; çoğunlukla hat ile paylaştığı vuruşlarda okunuyor.
-  - İlk Live kontrolünde 74931ce'nin planı bir pad'de durdu: Live'ın tarayıcı (browser) araması tek karakterlik bir dosya adını bulamadı. Başka bir pad de aynı adı taşıyan bir FX sesini çaldı. Artık her pad'in dosyası, içeriğinden türetilen bir adla yükleniyor ve kurulumdan sonra geri okunuyor.
+  - İlk Live kontrolünde 1f5506d'nin planı bir pad'de durdu: Live'ın tarayıcı (browser) araması tek karakterlik bir dosya adını bulamadı. Başka bir pad de aynı adı taşıyan bir FX sesini çaldı. Artık her pad'in dosyası, içeriğinden türetilen bir adla yükleniyor ve kurulumdan sonra geri okunuyor.
   - Bir ses artık burada 12 değil 5 vuruşla pad alıyor, kalıntı geçişinden (residual pass) gelen bir sesin ise ölçüden ölçüye tekrar etmesi gerekiyor. Böylece üç pad eklendi: bir perc, snare bandında bulunan hat dosyası ve snare'e benzer bir ses (her biri 7–8 nota, kulakla kontrol edilmedi).
 
 **Replika modu, kalibrasyon v2 (48 sentetik beat, 22 senaryo):**
