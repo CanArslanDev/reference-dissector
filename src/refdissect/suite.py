@@ -696,11 +696,13 @@ def _levels(lv: dict) -> dict:
     out = {f"levels.kit.{group}_db": g["kit_db"] for group, g in (lv.get("kit") or {}).items()}
     measured = [s for s in lv["sounds"].values() if s and "level_db" in s]
     for role, sounds in _by_role(measured).items():
-        for key in ("level_db", "vs_kit_db", "balance_db", "spread_p90_db"):
+        for key in ("level_db", "vs_kit_db", "balance_db", "balance_in_group_db", "spread_p90_db"):
             if all(key in s for s in sounds):
                 out[f"levels.{role}.{key}"] = round(float(np.median([s[key] for s in sounds])), 2)
     if measured:
         out["levels.balance_abs_db"] = round(float(np.median([abs(s["balance_db"]) for s in measured])), 2)
+    if grouped := [s["balance_in_group_db"] for s in measured if "balance_in_group_db" in s]:
+        out["levels.balance_in_group_abs_db"] = round(float(np.median(np.abs(grouped))), 2)
     if measured and all("vs_kit_db" in s for s in measured):
         out["levels.vs_kit_abs_db"] = round(float(np.median([abs(s["vs_kit_db"]) for s in measured])), 2)
     return out
@@ -714,7 +716,10 @@ def headline(score: dict) -> dict[str, float]:
     their p90 |error|. Levels per role are medians over its sounds:
     vs_kit_db against a perfect kit under the same faders (level_scores),
     level_db against the truth stem, and levels.kit.<group>_db is where the
-    faders put a perfect kit."""
+    faders put a perfect kit. levels.balance_abs_db is the median |balance|
+    over every measured sound, levels.balance_in_group_abs_db the median
+    |balance within its stem group| over the sounds of groups with two or
+    more (an 808 alone in its group is left out)."""
     s = score["summary"]
     out = {"strict_f1_20": s["strict_f1_20"], "v1_f1": s["v1_f1"]}
     if score.get("drums"):
@@ -832,6 +837,8 @@ TABLES = (  # (part, key, title, digits)
     ("plan", "levels.kit.drums_db", "Levels: a perfect kit's drums under the plan's faders, re the truth (dB)", 2),
     ("plan", "levels.vs_kit_abs_db", "Levels: median |level against a perfect kit| over sounds, plan render (dB)", 2),
     ("plan", "levels.balance_abs_db", "Levels: median |balance| over sounds, plan render (dB)", 2),
+    ("plan", "levels.balance_in_group_abs_db", "Levels: median |balance within its stem group| over sounds, plan "
+                                               "render (dB)", 2),
     ("seconds", "total", "Seconds per beat after separation (beats that read nothing back from cache/)", 0),
 )
 ROLE_TABLES = (("analysis", "f1_20", "Strict F1@20 per drum role, analysis", 3),

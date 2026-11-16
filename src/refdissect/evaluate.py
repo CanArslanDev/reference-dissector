@@ -951,10 +951,17 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     that truth sound (the 808 track for an 808), times render_gain (e.g. a
     master's small-signal gain, to compare in the truth stems' domain).
     balance_db is each level minus their median over sounds, which no
-    overall gain changes. A truth sound without a stem or a rendered track is
-    None. A stem written below unity is read back at its level, divided by
-    audio.master.stems_gain (a scenario halves a stem that would clip in
-    FLAC: three group stems of the 27 real beats, none of a sound).
+    overall gain changes. balance_in_group_db is each level minus the median
+    over the sounds of its stem group (level_group: the drums, or the 808s),
+    which no group's fader changes either: each group's fader is matched to
+    a stem of its own, so balance_db also carries the groups' kit_db apart
+    (the drums' -5.6 against the bass's -1.0 dB on the htdemucs baseline).
+    A group with one measured sound (the 808 of every suite beat) has none:
+    it would be 0 dB by definition. A truth sound without a stem or a
+    rendered track is None. A stem written below unity is read back at its
+    level, divided by audio.master.stems_gain (a scenario halves a stem that
+    would clip in FLAC: three group stems of the 27 real beats, none of a
+    sound).
 
     reference names the stems the plan's track faders were matched to, per
     group ({"drums": path, "bass": path}: the separated stems): a fader puts
@@ -988,14 +995,27 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
         x_rebuild = band(sum(read(render_dir / tracks[e]) for e in ids) * render_gain, b)
         est_t = np.sort(np.concatenate([e_times[e] for e in ids]))
         out[s] = {"role": role, **_level(x_truth, x_rebuild, ref, est_t, samples(ms))}
-        group = kit.get("bass" if role == "808" else "drums")
+        group = kit.get(level_group(role))
         if group and "level_db" in out[s]:
             out[s]["vs_kit_db"] = round(out[s]["level_db"] - group["kit_db"], 2)
-    measured = [v["level_db"] for v in out.values() if v and "level_db" in v]
-    for v in out.values():
-        if v and "level_db" in v:
-            v["balance_db"] = round(v["level_db"] - float(np.median(measured)), 2)
+    measured = [v for v in out.values() if v and "level_db" in v]
+    groups: dict[str, list[float]] = {}
+    for v in measured:
+        groups.setdefault(level_group(v["role"]), []).append(v["level_db"])
+    middle = float(np.median([v["level_db"] for v in measured])) if measured else 0.0
+    for v in measured:
+        v["balance_db"] = round(v["level_db"] - middle, 2)
+        own = groups[level_group(v["role"])]
+        if len(own) > 1:  # a group of one would be 0 dB by definition
+            v["balance_in_group_db"] = round(v["level_db"] - float(np.median(own)), 2)
     return {"render_gain": render_gain, "window_ms": ms, "kit": kit, "sounds": out}
+
+
+def level_group(role: str) -> str:
+    """The stem group a truth sound of this role is levelled in: the plan's
+    track fader of that group was matched to its stem (bass for the 808,
+    drums for every drum role)."""
+    return "bass" if role == "808" else "drums"
 
 
 # ── Everything ──
