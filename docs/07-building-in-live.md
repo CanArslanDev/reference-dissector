@@ -244,7 +244,7 @@ The code of 74931ce. Eight plans of the suite's m4 (bass_low-1, glides-1, dynami
 
 **Glide** (probe A). Glide Mode "Glide", Glide Time "120 ms" and Detune −23 read back as sent, and voices went from 6 to 1 with `lom_set_property`. Over a legato chain Live's pitch stayed within 1.04 cents (p90) of `render.py`'s. Notes 25 ms apart started the sample again.
 
-**Simpler loses some highs.** Against its own file at the held Volume, a 48 kHz hat lost 0.14 dB at 4–8 kHz, 0.32 dB at 8–12 kHz and 0.9–2.5 dB above 12 kHz. 44.1 kHz files lost more: about 0.5 dB at 8–12 kHz, 1.6–1.8 dB at 12–16 kHz and 3.1–3.7 dB at 16–18 kHz. A stem clip recorded the same way is flat within 0.02 dB to 12 kHz. `render.py` does not model this.
+**Simpler loses some highs.** Against its own file at the held Volume, a 48 kHz hat lost 0.14 dB at 4–8 kHz, 0.32 dB at 8–12 kHz and 0.9–2.5 dB above 12 kHz. 44.1 kHz files lost more: about 0.5 dB at 8–12 kHz, 1.6–1.8 dB at 12–16 kHz and 3.1–3.7 dB at 16–18 kHz. A stem clip recorded the same way is flat within 0.02 dB to 12 kHz. Measured as Simpler's resampler and modelled since 2026-11-16, behind `plan --live-sr` ([below](#live-12416-simplers-resampler-and-the-locators-2026-11-16)).
 
 **The one-shot's digest name works.** A one-shot under a new digest name played the new file; loaded again by its old name after that file was overwritten, Live still played the old content.
 
@@ -300,6 +300,40 @@ Bars 3–10 of glides-1's g1 plan (htdemucs, `--slides`; 32 beats, 3.53–17.65 
 - **The slides.** The excerpt holds 5 legato notes: 4 slide inside it, and the fifth is cut by the excerpt's end and slides in neither. Over the 4 slides' 102 periods Live's pitch lies within 1.21 cents of `render.py`'s (p90; median 0.0), 1.18–3.5 cents per slide (p90 over the ramp; 3.5 on the 9-semitone one), and each slide starts and ends within 0.3 ms of `render.py`'s.
 - **The pipeline's 808 reader on both**, with slides on: 30 notes on Live's audio and 28 on `render.py`'s, 28 of them within 20 ms of each other at the same pitch; Live's other 2 are read an octave low. It reads 3 legato notes on Live's recording, each within 2 ms of a planned slide, and 1 on `render.py`'s (the same at the reader of def2f33). The check first reported none on either: its script looked for a `legato` key, where a note carries `"legato"` in its flags (found in the fix stage). Why it reads fewer slides on `render.py`'s audio than on Live's is not investigated.
 - **Not measured:** the one-voice takeover on its own (a note 1, 10 or 25 ms after a held chain at Release 35.7 ms), per-note Glide Time, and a whole plan with Glide. Nothing was judged by ear.
+
+### Live 12.4.16, Simpler's resampler and the locators (2026-11-16)
+
+Live 12.4.16 Trial (build 2026-10-30), the user's empty scratch set, the audio device at 48 kHz. Probe plans of click trains and white noise were built by `live-build` (ableton-live-mcp 2.4.0's `build_from_blueprint`: each file loaded by path, `F On` off and `Fade In` 0 on every pad) and recorded with `capture_stems`. The probes and recordings stay outside the repo. The first probe was recorded in the same Live session, which was found at 12.4.16 right after it.
+
+**Simpler resamples every pad, also at the device's own rate.** A click in a 48 kHz file, untransposed, plays five taps: −0.0122, 0.0620, 0.9009, 0.0620, −0.0122. Played at another rate, Simpler reads its source at ρ = file rate ÷ 48,000 × 2^(semitones/12) samples per output sample through one kernel: a Blackman-windowed sinc with its cutoff at 0.45 of the source rate ÷ max(1, ρ), half-width 3n/7 source samples, n = 2·max(3, ⌈3.5ρ − 1.5⌉) + 1 (`render.simpler_play`, `simpler_taps`). Read off click trains of 22.05, 44.1, 48, 88.2, 96 and 192 kHz files, 40 pads in all, ρ 0.46 to 4.24, it fits every phase within 3·10⁻³ of the peak (residual −42 to −60 dB). It is the same at every sub-sample start of a note (16 starts a sixteenth of a sample apart): a note starts on a whole output sample. It adds no delay. Simpler's interpolation cannot be read or set through the LOM: neither `SimplerDevice` nor its `Sample` has such a property. Live's default Simpler preset stores it as `InterpolationMode` 3 (Core Library, `Defaults/Instruments/Simpler.adv`), which only a preset could change.
+
+Simpler's loss against an ideal resampler, white noise (dB per band; the 0–2 kHz band within 0.01 dB):
+
+| file, transposition | 4–6 kHz | 6–8 | 8–10 | 10–12 | 12–14 | 14–16 | 16–18 | 18–20 |
+|---|---|---|---|---|---|---|---|---|
+| 48 kHz, 0 | −0.07 | −0.16 | −0.31 | −0.55 | −0.85 | −1.21 | −1.60 | −1.98 |
+| 48 kHz, +2 | −0.16 | −0.32 | −0.56 | −0.93 | −1.43 | −2.04 | −2.86 | −3.78 |
+| 48 kHz, −2 | −0.10 | −0.24 | −0.52 | −0.97 | −1.67 | −2.67 | −4.02 | −5.70 |
+| 44.1 kHz, 0 | −0.09 | −0.22 | −0.47 | −0.88 | −1.51 | −2.39 | −3.62 | −5.09 |
+| 44.1 kHz, +2 | −0.09 | −0.21 | −0.41 | −0.74 | −1.23 | −1.87 | −2.68 | −3.69 |
+| 44.1 kHz, −2 | −0.12 | −0.31 | −0.69 | −1.28 | −2.18 | −3.52 | −5.27 | images |
+
+Transposed down, Simpler adds images above the source's top that an ideal resampler leaves out (a 44.1 kHz file 7 semitones down: 11 dB under the passband at 16 kHz, 32 dB at 22 kHz). The kernel reproduces all of it: against Live, 20 noise pads (44.1 and 48 kHz, −7 to +5 semitones and +25 cents) lie within 0.03 dB in every 2 kHz band to 22 kHz, and 44 click-train pads within 0.05 dB, all with a constant +0.008 dB of Live's over the velocity law's level.
+
+**Against the second check's recordings** (Live 12.4.6, 2026-10-29, the per-pad captures of four m5 plans and PIRAMIT's), `render.py`'s render of the same plans with `live_sr` 48000 plays all 25 pads within 0.045 dB of Live, full band and hat band (3.5 kHz up): 19 within 0.003 dB, and the 6 whose Volume Live held a display step under (−0.045 dB, sent as text then) at −0.042 dB. Without it the same pads lay 0.002–0.95 dB under Live's level as `render.py` gave it (v1orig-3's 48 kHz hat 0.95 dB, PIRAMIT's hats 0.33–0.38 dB, its two 192 kHz snares 0.17–0.18 dB). The kernel measured on 12.4.16 holds on 12.4.6.
+
+**In the plan** (`plan --live-sr 48000`, `suite run --live-sr 48000`; off by default). The plan carries `live_sr`, and `estimate_levels` and `render_plan` play each pad through Simpler's resampler at it (`render.pad_shot`): a pad's Volume rises by what Simpler takes off its sound. Kicks and the 808 are left as they were (the 808 stays on the ideal resampler). Timing and lengths stay as before: the kernel is symmetric, and a pad's voice keeps its length. Tags hf-1 and hf-1-ft are m5's and m5-ft's outputs planned and scored so. Tags hf-0 and hf-0-ft are m5's own plans rendered and scored with `live_sr`, as Live plays them.
+
+| plan level (48 beats) | m5 as `render.py` played it | m5 as Live plays it (hf-0) | with `--live-sr` (hf-1) |
+|---|---|---|---|
+| distance from a perfect kit | 1.198 dB [1.152] | 1.267 dB [1.311] | 1.213 dB [1.172] |
+| balance | 0.512 dB [0.476] | 0.472 dB [0.500] | 0.506 dB [0.487] |
+| hats against the kit | −0.90 dB [−0.57] | −1.26 dB [−0.93] | −0.94 dB [−0.57] |
+| open hats | +0.15 dB [−0.72] | −0.28 dB [−1.13] | +0.14 dB [−0.71] |
+
+htdemucs_ft in brackets. Every other score of all 48 beats equals m5's (m5-ft's): drum, 808 and timing scores, analysis and plan. Against hf-0, `--live-sr` brings 13 scenarios closer to a perfect kit and 9 further off [16 and 6]. On htdemucs the balance is worse on 13 scenarios and better on 9 [10 and 12], since the hats, raised back to the plan's levels, now sit further from the median sound. That is why it is an option.
+
+**The locators.** In 3/4 (meter34-1's meter) a cue asked at beat 9 went to 12, as on 2026-10-29: `set_or_delete_cue` puts a cue on the nearest line of the Arrangement's grid, which follows the horizontal zoom. `zoom_view(3, "Arranger", False)` zooms in. Four steps put beat 9 and 10.5 on the grid. 25 more put 90.125 (an eighth of a beat, off screen) there exactly. After 20 steps out, 10.5 went to 12 again. Up and down (0 and 1) zoom the tracks' height: 13 steps left beat 9 at 12. `current_song_time` takes effect only after the call that sets it, and refuses a time past the song's length ("Cannot set the Songtime behind the Songlength"). Nothing in the LOM sets the grid, Snap to Grid or a cue's time. The song's first bar line cannot be moved off 0 s either: `Song.start_time` is the playback start marker, and there is no song offset or time signature marker to set. So bar 1 can only land on the music's first bar line by shifting the plan: every note, clip and locator starts (bar − phase) beats later.
 
 ### What the build does with it
 
@@ -372,9 +406,9 @@ Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 bea
 - **How long the browser takes** to find a pad's content name: not timed.
 - **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups** as the build sets them: the battery's 1 ms cut is in `render.py`, but no plan with a choke group has been built, and a hit after its pad's choked hit is planned on time (not measured in Live).
 - **A pad's Volume as a number** and its read-back (`live.held_volumes`).
-- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in, one probe placed such a locator; that is not in the build. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
+- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in far enough (`zoom_view(3, "Arranger", False)`, 25 steps or more), every whole beat lands, as the 2026-11-16 probes found ([above](#live-12416-simplers-resampler-and-the-locators-2026-11-16)); ableton-live-mcp's build does not zoom yet. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it.
-- **Simpler's top-end loss** per sample rate and transposition, as a curve. `render.py` does not model it: hats played up to 0.97 dB and snares up to 0.16 dB under `render.py`.
+- **A plan made with `--live-sr`, built and recorded.** The kernel was measured on probes, and it matches the second check's per-pad recordings within 0.045 dB. No plan made with it has been built, and no device rate other than 48 kHz has been measured.
 - **PIRAMIT against the song.** It has no truth: Live was measured against `render.py`, and nothing was checked by ear.
 
 ## Runs
