@@ -385,3 +385,50 @@ def test_missing_files_play_nothing(tmp_path):
     assert m["tracks"] == {} and len(m["missing"]) == 2
     est = estimate_from_plan(p, root=tmp_path)
     assert est["drums"] == [] and est["bass808"] == [] and len(est["generator"]["switches"]["missing"]) == 2
+
+
+def test_simplers_kernel_at_48_khz_untransposed_is_the_one_live_played():
+    # Live 12.4.16, 2026-11-16: a click in a 48 kHz file, untransposed, played these five taps (live_sr 48 kHz)
+    from refdissect.render import simpler_play
+    click = np.zeros(64)
+    click[20] = 1.0
+    y = simpler_play(click, 48000, 0.0, 48000)
+    assert y[18:23] == pytest.approx([-0.01217, 0.06203, 0.90085, 0.06203, -0.01217], abs=1e-3)
+    assert np.all(y[:16] == 0) and np.all(y[25:64] == 0)
+
+
+def test_simplers_kernel_spans_more_source_samples_as_it_reads_faster():
+    from refdissect.render import simpler_taps
+    # the spans Live 12.4.16 played (2026-11-16), at read rates on both sides of each step measured
+    for rho, n in ((0.46, 7), (1.0, 7), (1.2623, 7), (1.2968, 9), (1.5451, 9), (1.6370, 11), (1.8375, 11),
+                   (1.8877, 13), (2.1189, 13), (3.3636, 23), (3.7755, 25), (4.0, 27), (4.2379, 29)):
+        assert simpler_taps(rho) == n
+
+
+def test_simpler_takes_highs_off_and_keeps_lows(tmp_path):
+    from refdissect.render import pad_shot
+    rng = np.random.default_rng(3)
+    for sr, top_db in ((48000, -0.55), (44100, -0.88)):  # 10-12 kHz, as white noise played in Live 12.4.16
+        path = tmp_path / f"n{sr}.wav"
+        sf.write(path, (rng.standard_normal(sr) * 0.1).astype(np.float32), sr, subtype="FLOAT")
+        ideal, live = pad_shot(path, 0.0, 0.0), pad_shot(path, 0.0, 0.0, 48000)
+        assert len(live) == len(ideal)
+        f = np.fft.rfftfreq(len(ideal), 1 / SR)
+        a, b = np.abs(np.fft.rfft(live)) ** 2, np.abs(np.fft.rfft(ideal)) ** 2
+
+        def band_db(lo, hi, f=f, a=a, b=b):
+            m = (f >= lo) & (f < hi)
+            return 10 * np.log10(np.sum(a[m]) / np.sum(b[m]))
+        assert band_db(20, 2000) == pytest.approx(0.0, abs=0.02)
+        assert band_db(10000, 12000) == pytest.approx(top_db, abs=0.05)
+
+
+def test_a_plan_without_live_sr_renders_as_before_and_with_it_plays_hats_quieter(tmp_path):
+    path = wav(tmp_path, "hat.wav", noise(0.1))
+    p = plan({"42": {"path": path, "transpose": 0, "role": "hat"}}, [note(42, 0.0)])
+    before = rendered(tmp_path / "a", render_plan(p, tmp_path / "a"), "42")
+    p["live_sr"] = 48000
+    m = render_plan(p, tmp_path / "b")
+    after = rendered(tmp_path / "b", m, "42")
+    assert m["live_sr"] == 48000 and len(after) == len(before)
+    assert 10 * np.log10(np.sum(after.astype(float) ** 2) / np.sum(before.astype(float) ** 2)) < -0.2

@@ -11,7 +11,10 @@ check:
 - a pad plays its file from frame 0 [start_s 0.0 moves the start], mono
   (channels averaged), transposed by transpose + detune_cents / 100
   [detune_cents 0] semitones the way Simpler does with warping off
-  (audio.transpose: pitch and length change together);
+  (audio.transpose: pitch and length change together), through an ideal
+  resampler [the plan's live_sr None]; with live_sr (plan --live-sr) through
+  Simpler's own on a device at that rate, which takes highs off as Live
+  12.4.16 played them (pad_shot, simpler_play; the 808 stays ideal);
 - gain = track fader (build_spec's min(6, levels[...]) dB) x 10^(volume_db/20)
   [volume_db 0, a pad's at most 0 (pad_settings); build_spec sets a
   Simpler's Volume to it] x 10^(file_db/20) [a pad's file_db 0; under 0
@@ -64,6 +67,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import soxr
 
 from .audio import SR, read, samples, transpose
 
@@ -97,6 +101,10 @@ GLIDE_TAKEOVER = False
 # stopped where it reached -60 dB, RELEASE_S on (35.7 ms)
 RELEASE_808_MS, RELEASE_DB_MS = 50.0, 1.683
 RELEASE_S = 60.0 / RELEASE_DB_MS / 1000
+# Simpler's resampler (simpler_play): the audio device's rate plan --live-sr names (48 kHz, the rate measured), and
+# its kernel's cutoff as a share of the source rate
+LIVE_SR = 48000
+SIMPLER_FC = 0.45
 
 
 def resolve(path: str | Path, root: str | Path | None = None) -> Path:
@@ -189,6 +197,70 @@ def varispeed(x: np.ndarray, semis: np.ndarray) -> np.ndarray:
 def as_played(x: np.ndarray, start_s: float, semitones: float) -> np.ndarray:
     """A sample as Simpler plays it: from start_s, transposed with its length."""
     return transpose(x[int(round(start_s * SR)):], semitones)
+
+
+def simpler_taps(rho: float) -> int:
+    """How many source samples Simpler's kernel spans (n; its half-width
+    3n/7) when it reads rho source samples per output sample: 2h + 1 with h
+    = max(3, ceil(3.5 rho - 1.5)). In Live 12.4.16 (2026-11-16) h was 3 at
+    every rho to 1.2623, 4 from 1.2968 to 1.5451, 5 from 1.6370 to 1.8375,
+    6 from 1.8877 to 2.1189, then 11, 12, 13 and 14 at 3.36, 3.78, 4.0 and
+    4.24 (20 rates from 0.46 to 4.24): every ceil(a rho + b) with a 3.36 to
+    3.63 and b -1.71 to -1.24 gives them, and this one is a round pair among
+    them. Between the steps measured the step's place is not known to
+    better than that."""
+    return 2 * max(3, int(np.ceil(3.5 * rho - 1.5))) + 1
+
+
+def simpler_play(x: np.ndarray, sr: float, semitones: float, live_sr: float = LIVE_SR) -> np.ndarray:
+    """x (at sr) as Simpler plays it at semitones (Transpose + Detune / 100)
+    on a Live whose audio device runs at live_sr, at live_sr: output sample
+    m reads the source at m x rho (rho = sr / live_sr x 2^(semitones / 12))
+    through a Blackman-windowed sinc of cutoff SIMPLER_FC / max(1, rho) of
+    the source rate, half-width 3 x simpler_taps(rho) / 7 source samples.
+    Measured in Live 12.4.16 at 48 kHz (2026-11-16, ableton-live-mcp 2.4.0's
+    build_from_blueprint loading each file by path with PAD_OFF): click
+    trains of 22.05 to 192 kHz files on 40 pads, rho 0.46 to
+    4.24, fit within 3e-3 of the peak at every phase (residual -42 to -60
+    dB); white noise of 44.1 and 48 kHz files at 20 transpositions within
+    0.02 dB in every 2 kHz band to 22 kHz. It is the same at every note's sub-sample start (a note starts
+    on a whole output sample) and leaves no delay. At rho 1 (a 48 kHz file
+    untransposed) it still filters: 0.31 dB down at 8-10 kHz, 0.55 at
+    10-12, 1.2 at 14-16; a 44.1 kHz file 0.47, 0.88 and 2.4 dB; reading
+    slower than the source (transposed down) it adds images above the
+    source's top, reading faster it lowers its cutoff."""
+    rho = sr / live_sr * 2 ** (semitones / 12)
+    fc, half = SIMPLER_FC / max(1.0, rho), 3 * simpler_taps(rho) / 7
+    x = np.asarray(x, np.float64)
+    n_out = int(np.ceil((len(x) + half) / rho))
+    p = np.arange(n_out) * rho
+    n0 = np.floor(p).astype(np.int64)
+    y = np.zeros(n_out)
+    reach = int(np.ceil(half))
+    for j in range(-reach, reach + 1):
+        n = n0 + j
+        ok = (n >= 0) & (n < len(x))
+        t = p[ok] - n[ok]
+        w = np.where(np.abs(t) < half, 0.42 + 0.5 * np.cos(np.pi * t / half) + 0.08 * np.cos(2 * np.pi * t / half),
+                     0.0)
+        y[ok] += x[n[ok]] * 2 * fc * np.sinc(2 * fc * t) * w
+    return y
+
+
+def pad_shot(path: str | Path, start_s: float, semitones: float, live_sr: float | None = None) -> np.ndarray:
+    """A pad's file (mono) as Live plays it, at SR: from start_s, at
+    semitones. live_sr None plays it through an ideal resampler (as_played,
+    as every plan without live_sr is rendered and estimated); a rate plays
+    it through Simpler's (simpler_play) on a device at that rate, then
+    resampled to SR as a capture is, cut or padded to as_played's length so
+    that the pad's voice ends where pad_voice_s says."""
+    ideal = as_played(read(path), start_s, semitones)
+    if not live_sr:
+        return ideal
+    x, sr = sf.read(str(path), dtype="float32", always_2d=True)
+    x = x.mean(axis=1)[int(round(start_s * sr)):]
+    y = soxr.resample(simpler_play(x, sr, semitones, live_sr), live_sr, SR).astype(np.float32)
+    return y[:len(ideal)] if len(y) >= len(ideal) else np.pad(y, (0, len(ideal) - len(y)))
 
 
 def late_starts(times, ends, shift: bool = True) -> np.ndarray:
@@ -432,8 +504,8 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
     for note, pad in plan["tracks"]["drums"]["pads"].items():
         s = settings[str(note)] = pad_settings(pad)
         try:
-            shots[str(note)] = as_played(read(resolve(pad["path"], root)), s["start_s"],
-                                         s["transpose"] + s["detune_cents"] / 100)
+            shots[str(note)] = pad_shot(resolve(pad["path"], root), s["start_s"],
+                                        s["transpose"] + s["detune_cents"] / 100, plan.get("live_sr"))
         except (OSError, RuntimeError):
             missing.append(str(pad["path"]))
     hits = pad_hits(plan, shots, settings, velocity_curve, faders, mono)
@@ -444,6 +516,7 @@ def render_plan(plan: dict, out_dir: str | Path, velocity_curve: str | Callable 
                                               for n in notes808]
     n = n_samples or max([int(round(plan.get("length_beats", 0) / bps * SR)), *ends, 1])
     manifest = {"sr": SR, "n_samples": n, "tempo": plan["tempo"], "velocity_curve": str(velocity_curve),
+                "live_sr": plan.get("live_sr"),
                 "fade_ms": fade_ms, "mono": mono, "cut_808": cut_808, "release_808_ms": RELEASE_808_MS,
                 "faders_db": {"drums": fader_db(plan, "drums") if faders else 0.0}, "tracks": {},
                 "drums": "drums.wav", "missing": missing}

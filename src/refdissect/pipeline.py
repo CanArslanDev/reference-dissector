@@ -755,7 +755,8 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     return out
 
 
-def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = False) -> dict:
+def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = False,
+         live_sr: int | None = None) -> dict:
     from .live import make_plan, write_midi
     work = Path(work)
     analysis = _load(work / "analysis.json")
@@ -763,7 +764,7 @@ def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, choke
     synth = _load(work / "synth808.json") if (work / "synth808.json").is_file() else None
     melodic_notes = _load(work / "melodic.json") if (work / "melodic.json").is_file() else None
     p = make_plan(analysis, matches, synth, stems_dir or analysis["source"]["stems"], melodic=melodic_notes,
-                  chokes=chokes)
+                  chokes=chokes, live_sr=live_sr)
     _save(work / "plan.json", p)
     written = write_midi(p, work / "midi")
     tonal = ", ".join(f"{len(t['notes'])} {s}" for s, t in p["tracks"].get("melodic", {}).items())

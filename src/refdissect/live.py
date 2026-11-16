@@ -87,6 +87,7 @@ from .render import (
     late_808,
     pad_hits,
     pad_settings,
+    pad_shot,
     pad_track,
     render_808,
     takes_over,
@@ -439,7 +440,7 @@ def _one_voice(out: list[dict], order: list[int], slid: list[bool], bps: float) 
 def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str | Path,
               headroom_db: float = 4.0, min_hits: int | None = None, min_clean: float = 0.5,
               min_ncc: float = 0.75, melodic: dict | None = None, min_recur: float = 0.5,
-              chokes: bool = False, scale_files: bool = True) -> dict:
+              chokes: bool = False, scale_files: bool = True, live_sr: int | None = None) -> dict:
     """Everything the build needs, decided here so it can be checked first.
 
     A detected sound gets a Drum Rack pad on evidence that it is one:
@@ -520,7 +521,17 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
     copy's pad stays out: in one group the pads of a roll's pitched copies
     cut each other, which the songs' rolls do not (on the suite, with them
     in: full's hats 0.11 dB further under a perfect kit, its balance 1.165
-    -> 1.12 dB but htdemucs_ft's 1.41 -> 1.50)."""
+    -> 1.12 dB but htdemucs_ft's 1.41 -> 1.50).
+
+    With live_sr (the audio device's rate, render.LIVE_SR measured; off by
+    default) the plan carries it, and its levels (estimate_levels) and every
+    render of it play each pad through Simpler's resampler at that rate
+    (render.pad_shot), which takes highs off as Live 12.4.16 does. On the
+    suite (tags hf-1, hf-1-ft against m5's plans rendered the same way,
+    hf-0, hf-0-ft) the distance from a perfect kit went 1.267 -> 1.213 dB
+    [1.311 -> 1.172] and hats -1.26 -> -0.94 dB [-0.93 -> -0.57], the
+    balance 0.472 -> 0.506 dB [0.500 -> 0.487]: off until that balance is
+    no worse."""
     bpm = analysis["grid"]["bpm"]
     beats_per_second = bpm / 60
     duration = analysis["source"]["duration_s"]
@@ -605,7 +616,7 @@ def make_plan(analysis: dict, matches: dict, synth: dict | None, stems_dir: str 
             "tracks": {"drums": {"pads": pads, "notes": no_overlaps(drum_notes, 1.0),
                                  **({"chokes": choke} if choke else {})},
                        "808": plan_808(analysis, synth, stems_dir, beats_per_second)},
-            "stems": {}, "locators": [], "levels": {}}
+            "stems": {}, "locators": [], "levels": {}, **({"live_sr": int(live_sr)} if live_sr else {})}
     stems_dir = Path(stems_dir)
     for stem in ("drums", "bass", "other", "piano", "guitar", "vocals"):
         path = stems_dir / f"{stem}.wav"
@@ -1010,8 +1021,9 @@ def _unity_drums(plan: dict, n: int) -> np.ndarray:
     shots, settings = {}, {}
     for note, pad in plan["tracks"]["drums"]["pads"].items():
         try:
-            shots[str(note)] = transpose(trim_onset(read(pad["path"])),
-                                         pad["transpose"] + pad.get("detune_cents", 0) / 100)
+            semis = pad["transpose"] + pad.get("detune_cents", 0) / 100
+            shots[str(note)] = (trim_onset(pad_shot(pad["path"], 0.0, semis, plan["live_sr"])) if plan.get("live_sr")
+                                else transpose(trim_onset(read(pad["path"])), semis))
         except Exception:
             continue
         settings[str(note)] = pad_settings(pad)
@@ -1102,7 +1114,7 @@ def pad_levels(plan: dict, drums: np.ndarray, low: np.ndarray | None = None, und
     for key, pad in pads.items():
         s = pad_settings(pad)
         try:
-            x = as_played(read(pad["path"]), s["start_s"], s["transpose"] + s["detune_cents"] / 100)
+            x = pad_shot(pad["path"], s["start_s"], s["transpose"] + s["detune_cents"] / 100, plan.get("live_sr"))
         except (OSError, RuntimeError):
             continue
         if len(x) and float(np.max(np.abs(x))) >= 10 ** (SILENT_DB / 20):
