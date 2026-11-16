@@ -3,7 +3,7 @@
 `refdissect live-build` turns `plan.json` into an Arrangement in the open Live set. It works through [ableton-live-mcp](https://github.com/CanArslanDev/ableton-live-mcp): the MCP server and its Remote Script. It writes the plan as a blueprint (`blueprint.json` beside the plan, [below](#a-blueprint-for-build_from_blueprint)) and has ableton-live-mcp's `build_from_blueprint` tool build it. The build imports the server, with its full profile (`ABLETON_MCP_PROFILE=full`, where that tool is), and calls the tool in-process (`mcp.call_tool`) over the server's own connection to Live: the same tool an AI client uses. `live-build --direct` is the build from before `build_from_blueprint` ([below](#what-live-build---direct-sends)), unchanged. In Live 12.4.6 (2026-11-14, [below](#verified-in-live)) the two builds played the same audio sample for sample; `--direct` stays as a fallback.
 
 ```bash
-uv sync --extra live          # pulls ableton-live-mcp v2.4.0, the first release with build_from_blueprint
+uv sync --extra live          # pulls ableton-live-mcp v2.4.1 (build_from_blueprint since v2.4.0)
 uv run refdissect live-build "$W/song/refdissect"
 uv run refdissect live-build "$W/song/refdissect" --direct     # the build from before build_from_blueprint
 ```
@@ -348,7 +348,7 @@ htdemucs_ft in brackets. Every other score of all 48 beats equals m5's (m5-ft's)
 
 ## A blueprint for `build_from_blueprint`
 
-`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, released in v2.4.0, which the [live] extra pins). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
+`refdissect blueprint WORK [--out FILE]` writes the plan as a blueprint, version 1: one JSON document that ableton-live-mcp's `build_from_blueprint` tool builds in an empty set. The format is ableton-live-mcp's (`docs/blueprint-v1.md` and the JSON Schema `MCP_Server/schemas/blueprint-v1.schema.json`, released in v2.4.0, unchanged in v2.4.1, which the [live] extra pins). It goes to `WORK/blueprint.json` by default, and the command exits 1 on a plan it cannot write.
 
 ```bash
 uv run refdissect blueprint "$W/song/refdissect"     # no Live, no [live] extra
@@ -406,7 +406,7 @@ Checked offline on full-1's m5 plan, `render.py`'s render of bars 5–12 (32 bea
 - **How long the browser takes** to find a pad's content name: not timed.
 - **htdemucs_ft plans**, **a whole plan with Glide** (an 8-bar excerpt of one played its slides as `render.py` does, above), **the one-voice takeover under Glide** on its own, and **choke groups** as the build sets them: the battery's 1 ms cut is in `render.py`, but no plan with a choke group has been built, and a hit after its pad's choked hit is planned on time (not measured in Live).
 - **A pad's Volume as a number** and its read-back (`live.held_volumes`).
-- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in far enough (`zoom_view(3, "Arranger", False)`, 25 steps or more), every whole beat lands, as the 2026-11-16 probes found ([above](#live-12416-simplers-resampler-and-the-locators-2026-11-16)); ableton-live-mcp's build does not zoom yet. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
+- **Locators off the Arrangement's grid.** Live moves them, and the build deletes them. Zoomed in far enough (`zoom_view(3, "Arranger", False)`, 25 steps or more), every whole beat lands, as the 2026-11-16 probes found ([above](#live-12416-simplers-resampler-and-the-locators-2026-11-16)); ableton-live-mcp v2.4.1 zooms in before placing them (`build_from_blueprint`, so `live-build`): a 3/4 blueprint's locators on beats 0, 9, 21, 33 and 45 all landed (Live 12.4.16, 2026-11-16); `live-build --direct` does not zoom. 11 of the 169 locators of the suite's m5 plans (11 of 170 on m5-ft) lie off Live's bar lines (full and tempo72, whose first bar line is not at 0 s) and are likely to be deleted the same way; they were not built.
 - **Bar 1.** Live's bar 1 sits at 0 s: full's first bar line, 0.4 s in, lands 400 ms off it.
 - **A plan made with `--live-sr`, built and recorded.** The kernel was measured on probes, and it matches the second check's per-pad recordings within 0.045 dB. No plan made with it has been built, and no device rate other than 48 kHz has been measured.
 - **PIRAMIT against the song.** It has no truth: Live was measured against `render.py`, and nothing was checked by ear.
