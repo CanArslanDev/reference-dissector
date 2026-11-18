@@ -61,7 +61,7 @@ The report is one JSON line in the keys the build before `build_from_blueprint` 
 | `time_signature`, `tempo`, `files`, `excerpt`, `ok` | Live's signature and tempo against the plan's, the copies, the excerpt's bars, beats and seconds, and `ok`, false where anything differs |
 | `build_from_blueprint` | its whole report |
 
-The exit code is 0 once the set is built, also where a read-back differs (it is logged and in the report); a build that cannot start or stops ends in an error.
+The exit code is 0 once the set is built, also where a read-back differs (it is logged and in the report); a build that cannot start or stops ends in its message on stderr, exit 1 (`live-build: …`; a stopped build's names the tracks it left in the set).
 
 ### What changed from `--direct`
 

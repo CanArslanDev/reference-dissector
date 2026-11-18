@@ -562,3 +562,26 @@ def test_the_minimal_check_catches_what_the_schema_refuses(tmp_path):
     bad["files"]["pad-36"]["name"] = "kick"
     bad["time_signature"] = "4/3"
     assert len(schema_errors(bad)) == 3
+
+
+def test_live_build_without_the_live_extra_says_so(tmp_path, monkeypatch, capsys):
+    """Without ableton-live-mcp (the [live] extra) live-build stops before
+    Live with the install hint on stderr, exit 1, no traceback."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_server(name, *args, **kwargs):
+        if name == "MCP_Server.server" or name.startswith("MCP_Server.server"):
+            raise ImportError("No module named 'MCP_Server'")
+        return real_import(name, *args, **kwargs)
+
+    plan = plan_for(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    monkeypatch.setattr(builtins, "__import__", no_server)
+    with pytest.raises(SystemExit) as stop:
+        main(["live-build", str(work)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and err.startswith("live-build: Building in Live needs ableton-live-mcp")
