@@ -335,7 +335,10 @@ async def build(work: str | Path, bars: tuple[int, int] | None = None, stems_out
     mcp = _server()
 
     async def call(tool_name, **args):
-        r = await mcp.call_tool(tool_name, args)
+        try:  # a tool's error can come back as an exception (the SDK's ToolError) or as is_error
+            r = await mcp.call_tool(tool_name, args)
+        except Exception as e:
+            raise RuntimeError(f"{tool_name}: {e}") from e
         text = "".join(getattr(c, "text", "") for c in r.content)
         if getattr(r, "is_error", False):
             raise RuntimeError(f"{tool_name}: {text}")

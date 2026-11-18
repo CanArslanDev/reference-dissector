@@ -585,3 +585,33 @@ def test_live_build_without_the_live_extra_says_so(tmp_path, monkeypatch, capsys
         main(["live-build", str(work)])
     err = capsys.readouterr().err
     assert stop.value.code == 1 and err.startswith("live-build: Building in Live needs ableton-live-mcp")
+
+
+def test_live_build_turns_a_tool_exception_after_the_build_into_its_message(tmp_path, monkeypatch, capsys):
+    """A tool that fails by raising (the SDK's ToolError) after the build,
+    as get_session_overview could, ends live-build in its message too
+    (stderr, exit 1), as an is_error result does. No Live: the server
+    faked."""
+    import types
+
+    from refdissect import blueprint
+
+    plan = plan_for(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    class ToolError(Exception):
+        pass
+
+    async def call_tool(name, args):
+        if name == "get_session_overview":  # after the build: not under build_from_blueprint's own handling
+            raise ToolError("Error executing tool get_session_overview: Live went away")
+        return types.SimpleNamespace(content=[types.SimpleNamespace(text="{}")], is_error=False)
+
+    monkeypatch.setattr(blueprint, "_server", lambda: types.SimpleNamespace(call_tool=call_tool))
+    with pytest.raises(SystemExit) as stop:
+        main(["live-build", str(work)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 1
+    assert "get_session_overview: Error executing tool get_session_overview: Live went away" in err
