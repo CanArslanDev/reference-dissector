@@ -972,11 +972,18 @@ def level_scores(truth: dict, est: dict, render_dir: str | Path, truth_dir: str 
     sound).
 
     reference names the stems the plan's track faders were matched to, per
-    group ({"drums": path, "bass": path}: the separated stems): a fader puts
-    its track's RMS (at render_gain) on the reference's, so a perfect kit
-    (the truth's sounds at the truth's relative gains) plays every sound of
-    a group at its kit_db, RMS(reference) - RMS(truth group stem), and a
-    sound's vs_kit_db (level_db - kit_db) is what is wrong within the kit.
+    group ({"drums": path, "bass": path}: the separated stems), and kit_db
+    is RMS(reference) - RMS(truth group stem). The drum fader puts its
+    track's RMS (at render_gain) on the reference's, so a perfect kit (the
+    truth's sounds at the truth's relative gains) plays every drum sound at
+    the drums' kit_db, and a sound's vs_kit_db (level_db - kit_db) is what
+    is wrong within the kit. The 808's fader puts the 808 where the
+    reference holds it at each note's attack, read as this reads it
+    (live.level_808), so a perfect 808 plays at the reference's per-note
+    ratio to the truth's 808, not at the bass group's kit_db: its vs_kit_db
+    also carries how much less of the 808's attacks the separated stem
+    holds than of its whole track (0.29 dB under on htdemucs, 1.53 on
+    htdemucs_ft, mean over scenarios, read at the plan's note attacks).
     On the htdemucs baseline the drums' kit_db is -5.6 dB (median over 48
     beats; Demucs separates the clipped mix, the truth is before the
     clipper) and the bass's -1.0 dB: per-role level_db mostly showed that."""
