@@ -189,19 +189,29 @@ def correlate(q: np.ndarray, bank: np.ndarray, wide: int = SPECKLE_WIDE,
 def correlate_many(qs: list[np.ndarray], bank: np.ndarray, wide: int = SPECKLE_WIDE,
                    chunk: int = 512) -> list[tuple[np.ndarray, np.ndarray]]:
     """correlate() of each speckle in qs, each block of the bank transformed
-    once for all of them (the same numbers as one at a time)."""
+    once for all of them (the same numbers as one at a time). On THREADS
+    threads: each speckle's inverse transform of a block, and meanwhile the
+    next block's transform, each computed as one thread computes it."""
     n_bins = bank.shape[1]
     nfft = next_fast_len(n_bins + wide, real=True)
     Qs = [np.fft.rfft(q.astype(np.float32), nfft) for q in qs]
     lags = np.r_[np.arange(0, wide + 1), np.arange(nfft - wide, nfft)]
     out = [(np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)) for _ in qs]
-    for a in range(0, len(bank), chunk):
-        S = np.conj(np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1))
-        for Q, (peak, shift_cents) in zip(Qs, out):
-            c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
-            k = np.argmax(c, axis=1)
-            peak[a:a + chunk] = c[np.arange(len(c)), k] / n_bins
-            shift_cents[a:a + chunk] = np.where(k <= wide, k, k - len(lags))
+
+    def transformed(a):
+        return np.conj(np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1))
+
+    def scored(Q, S):
+        c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
+        k = np.argmax(c, axis=1)
+        return c[np.arange(len(c)), k] / n_bins, np.where(k <= wide, k, k - len(lags))
+    starts = list(range(0, len(bank), chunk))
+    ahead = _threads().submit(transformed, starts[0]) if starts else None
+    for j, a in enumerate(starts):
+        S = ahead.result()
+        ahead = _threads().submit(transformed, starts[j + 1]) if j + 1 < len(starts) else None
+        for (peak, shift_cents), (p, k) in zip(out, _threads().map(functools.partial(scored, S=S), Qs)):
+            peak[a:a + chunk], shift_cents[a:a + chunk] = p, k
     return out
 
 
@@ -360,8 +370,10 @@ def copies(a: np.ndarray, b: np.ndarray, pitched: bool, threshold: float = 0.95)
 
 # match()'s work on THREADS threads (REFDISSECT_THREADS; 1: one at a time): _sweep's inverse
 # transforms, ROWS rows of a block at a time, and the transposed candidates of _match and
-# match_fine, an entry at a time. numpy's FFT and soxr let other threads run while they work, and
-# each row, entry and transposition is computed as one at a time computes it: the same numbers.
+# match_fine, an entry at a time; in _sweep and correlate_many the next block's transform while a
+# block is scored, and correlate_many's inverse transforms a speckle at a time. numpy's FFT and soxr
+# let other threads run while they work, and each row, entry and transposition is computed as one
+# at a time computes it: the same numbers. synth808's fit takes a second thread where it is over 1.
 THREADS = max(1, int(os.environ.get("REFDISSECT_THREADS", "4")))
 ROWS = 64
 
@@ -567,12 +579,20 @@ class Library:
         chosen = [i for i, r in enumerate(self.roles) if not roles or r in roles]
         scorers = [_Ncc(t, role, max_lag_ms) for t in ts]
         out = [(np.zeros(len(chosen), np.float32), np.zeros(len(chosen), np.int64)) for _ in ts]
-        for a in range(0, len(chosen), chunk):
+
+        def transformed(a):  # a block laid out, its spectra in the band, their energy and conjugate
             C = scorers[0].spectra(self.block(chosen[a:a + chunk], len(ts[0]), base))
-            e, conj = energy(C, scorers[0].n), np.conj(C)
+            return energy(C, scorers[0].n), np.conj(C)
+        starts = list(range(0, len(chosen), chunk))
+        ahead = _threads().submit(transformed, starts[0]) if starts else None
+        for j, a in enumerate(starts):
+            e, conj = ahead.result()
+            # the next block laid out and transformed on a thread while this one is scored: v1-1's match had
+            # waited 2.7 s on it in this thread
+            ahead = _threads().submit(transformed, starts[j + 1]) if j + 1 < len(starts) else None
             # each template's inverse transform of the block, in ROWS-row parts on THREADS threads: a
             # row's numbers do not depend on the rows transformed with it, so they are the same
-            parts = [(k, slice(r, r + ROWS)) for k in range(len(scorers)) for r in range(0, len(C), ROWS)]
+            parts = [(k, slice(r, r + ROWS)) for k in range(len(scorers)) for r in range(0, len(conj), ROWS)]
 
             def part(job, conj=conj, e=e):
                 k, rows = job

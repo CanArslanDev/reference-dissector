@@ -24,7 +24,9 @@ onset, so the periods play where the template's do).
 from __future__ import annotations
 
 import functools
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -77,6 +79,18 @@ RISE_CENTS = 100.0
 # attacks 5.7 or 4.5 ms early, of drive 4.0 0.3 ms; the suite's fitted voices (drive 1.50 or more, decay_s
 # 0.16 or more) put its latest attack, 46.7 ms in, 0.5 ms early
 FADE_IN_S, EARLIEST_S, QUIET, RISE_S, ATTACK_TOL = 5e-4, 0.05, 0.2, 0.002, 2.5e-4
+# the fit's loss on two threads where REFDISSECT_THREADS (match's, library.THREADS) is over 1: a second one
+# makes the voice's attack and decay while this one makes its phase, then its harmonics and loudness envelope
+# while this one filters it and correlates it with the reference. numpy's and scipy's transforms, filters and
+# array functions let the other thread run, and each number is computed as on one thread: the same losses, so
+# the same fit. On v1-1, one process: a candidate 1.80 -> 1.08 ms (1.77 on one thread, made in place: _sound),
+# the fit 44.1 -> 26.7 s
+SECOND = max(1, int(os.environ.get("REFDISSECT_THREADS", "4"))) > 1
+
+
+@functools.cache
+def _second() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(1, thread_name_prefix="refdissect-fit")
 
 
 @dataclass
@@ -119,16 +133,48 @@ def _times(n: int) -> np.ndarray:
     return t
 
 
-def _drop_hz(p: Params, t: np.ndarray, ratio: float = 1.0) -> np.ndarray:
-    """The fitted pitch (Hz) at times t, moved by ratio."""
-    return (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * ratio
+@functools.lru_cache(maxsize=8)
+def _before(n: int) -> np.ndarray:
+    """-_times(n), negated once (read-only): the exponents' numerators."""
+    t = -_times(n)
+    t.setflags(write=False)
+    return t
 
 
-def _sound(p: Params, t: np.ndarray, phi: np.ndarray) -> np.ndarray:
-    """The voice at phase phi (radians) at times t: its envelope and drive, peak-normalized."""
-    amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)
+def _drop_hz(p: Params, t: np.ndarray, ratio: float = 1.0, neg: np.ndarray | None = None) -> np.ndarray:
+    """The fitted pitch (Hz) at times t, moved by ratio (neg: -t, if at hand)."""
+    # in place, and no product by a ratio of 1: the same numbers, fewer passes (the fit's every candidate)
+    f = np.exp((-t if neg is None else neg) / (p.glide_ms / 1000))
+    f *= p.f_start_hz - p.f_end_hz
+    f += p.f_end_hz
+    if ratio != 1.0:
+        f *= ratio
+    return f
+
+
+def _envelope(p: Params, neg: np.ndarray) -> np.ndarray:
+    """The voice's envelope at times -neg: its attack, then its decay."""
+    amp = np.exp(neg / (p.attack_ms / 1000))
+    np.subtract(1, amp, out=amp)
+    amp *= np.exp(neg / p.decay_s)
+    return amp
+
+
+def _sound(p: Params, t: np.ndarray, phi: np.ndarray, neg: np.ndarray | None = None, amp=None) -> np.ndarray:
+    """The voice at phase phi (radians) at times t: its envelope and drive,
+    peak-normalized (neg: -t; amp: its envelope made already, or a Future
+    of it)."""
+    if amp is None:
+        amp = _envelope(p, -t if neg is None else neg)
+    elif not isinstance(amp, np.ndarray):
+        amp = amp.result()
     if not p.gritty:
-        y = np.tanh(p.drive * (amp * np.sin(phi) + p.asym)) - np.tanh(p.drive * p.asym)
+        y = np.sin(phi)
+        y *= amp
+        y += p.asym
+        y *= p.drive
+        np.tanh(y, out=y)
+        y -= np.tanh(p.drive * p.asym)
     else:  # the upper harmonics added to the oscillator, then the drive, asymmetric
         osc = np.sin(phi)
         if p.grit:
@@ -137,15 +183,22 @@ def _sound(p: Params, t: np.ndarray, phi: np.ndarray) -> np.ndarray:
         def shape(u):
             return np.tanh(p.drive * u * (1 + p.skew * np.sign(u)))
         y = shape(amp * osc + p.asym) - shape(p.asym)
-    return (y / (np.max(np.abs(y)) or 1.0)).astype(np.float32)
+    y /= np.max(np.abs(y)) or 1.0
+    return y.astype(np.float32)
 
 
 def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarray:
     """The voice, peak-normalized; pitch_hz moves the whole pitch curve (the
     drop keeps its size in semitones)."""
-    t = _times(int(seconds * SR))
-    f = _drop_hz(p, t, (pitch_hz / p.f_end_hz) if pitch_hz else 1.0)
-    return _sound(p, t, p.phase + 2 * np.pi * np.cumsum(f) / SR)
+    n = int(seconds * SR)
+    t, neg = _times(n), _before(n)
+    # the envelope on the second thread while this one makes the phase (SECOND; never called from that thread)
+    amp = _second().submit(_envelope, p, neg) if SECOND else None
+    phi = np.cumsum(_drop_hz(p, t, (pitch_hz / p.f_end_hz) if pitch_hz else 1.0, neg))
+    phi *= 2 * np.pi
+    phi /= SR
+    phi += p.phase
+    return _sound(p, t, phi, neg, amp)
 
 
 def laid_out(p: Params, length: int) -> np.ndarray:
@@ -195,16 +248,22 @@ def _scorer(reference: np.ndarray, f1: float):
         v = np.r_[corr[: lag + 1], corr[-lag:]] / (t_norm * (float(np.linalg.norm(c)) or 1.0))
         return float(np.max(np.abs(v)))
 
+    def rest(y: np.ndarray, f1: float) -> tuple[np.ndarray, float]:
+        """The harmonics' distances from the reference's, and the envelope's term."""
+        off = np.abs(harmonics(y, f1) - h_ref)
+        return off, np.mean(np.abs(np.maximum(envelope_db(y, 25), -40) - e_ref)) / 20
+
     def loss(p: Params, upper: float | None = 0.0) -> float:
         if p.f_start_hz < p.f_end_hz:
             return 2.0
         y = laid_out(p, n)
-        wave = 1 - wave_match(band(y, "808"))
         if upper is None:
-            return wave
-        off = np.abs(harmonics(y, p.f_end_hz) - h_ref)
+            return 1 - wave_match(band(y, "808"))
+        # the harmonics and the envelope on the second thread while this one filters and correlates (SECOND)
+        other = _second().submit(rest, y, p.f_end_hz) if SECOND else None
+        wave = 1 - wave_match(band(y, "808"))
+        off, env = other.result() if other else rest(y, p.f_end_hz)
         harm = np.mean(off) / 20
-        env = np.mean(np.abs(np.maximum(envelope_db(y, 25), -40) - e_ref)) / 20
         if upper:
             return wave + 0.1 * harm + upper * np.mean(off[4:]) / 20 + 0.1 * env
         return wave + 0.1 * harm + 0.1 * env

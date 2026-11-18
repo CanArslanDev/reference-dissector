@@ -103,6 +103,25 @@ def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
                           .astype(np.float32))
 
 
+def test_the_loss_on_two_threads_is_the_loss_on_one(monkeypatch):
+    """SECOND: the harmonics and the envelope computed on a second thread
+    give every candidate, plain or grittier, the loss one thread gives it,
+    to the bit, so the search finds the same fit."""
+    from refdissect import synth808
+
+    reference = laid_out(TRUE, int(0.6 * SR))
+    rng = np.random.default_rng(0)
+    candidates = [Params.of([rng.uniform(lo, hi) for lo, hi in synth808.BOUNDS + synth808.GRIT_BOUNDS])
+                  for _ in range(12)]
+    got = {}
+    for second in (False, True):
+        monkeypatch.setattr(synth808, "SECOND", second)
+        score = synth808._scorer(reference, 41.2)
+        got[second] = ([(score(c), score(c, None), score(c, 0.1)) for c in candidates],
+                       fit(reference, 41.2, maxiter=3, popsize=4)[0])
+    assert got[True] == got[False]
+
+
 HELD = Params(f_end_hz=32.70, f_start_hz=32.70 * 2 ** (5 / 12), glide_ms=25, decay_s=1.5, attack_ms=3, drive=2.0,
               asym=0.05, phase=0.3)
 

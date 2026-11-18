@@ -234,6 +234,41 @@ def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
     assert len(blocks) == 3  # forgotten: searched again
 
 
+def test_a_sweep_and_a_speckle_search_on_threads_are_the_ones_on_one(noisy, monkeypatch):
+    """_sweep and correlate_many on 4 threads, each block's transform made
+    ahead while the block before is scored, give the numbers one thread
+    gives, and correlate_many those of a loop over its blocks and speckles
+    (the search as it was), to the bit."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from refdissect import library
+    from refdissect.library import SPECKLE_WIDE, correlate_many, speckle
+
+    lib, sounds = noisy
+    kicks = [placed(sounds[k], d, 200) for k, d in ((120, 0.0), (121, -2.0), (30, 0.4))]
+    bank = lib.speckles["snare"][1]
+    qs = [speckle(placed(sounds[k], d, 150), "snare")[0] for k, d in ((30, 0.0), (33, -1.0))]
+    n_bins, wide = bank.shape[1], SPECKLE_WIDE
+    nfft = library.next_fast_len(n_bins + wide, real=True)
+    lags = np.r_[np.arange(0, wide + 1), np.arange(nfft - wide, nfft)]
+    Qs = [np.fft.rfft(q.astype(np.float32), nfft) for q in qs]
+    loop = [(np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)) for _ in qs]
+    for a in range(0, len(bank), 32):
+        S = np.conj(np.fft.rfft(bank[a:a + 32].astype(np.float32), nfft, axis=1))
+        for Q, (peak, cents) in zip(Qs, loop):
+            c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
+            k = np.argmax(c, axis=1)
+            peak[a:a + 32], cents[a:a + 32] = c[np.arange(len(c)), k] / n_bins, np.where(k <= wide, k, k - len(lags))
+    out = {}
+    for n in (1, 4):
+        with ThreadPoolExecutor(n) as pool:
+            monkeypatch.setattr(library, "_threads", lambda pool=pool: pool)
+            out[n] = lib._sweep(kicks, "kick", 0.0, None, 30, 32) + correlate_many(qs, bank, chunk=32)
+    assert len(out[1]) == len(out[4]) == 5
+    assert all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(out[1], out[4]))
+    assert all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(out[4][3:], loop))
+
+
 def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monkeypatch):
     """Library.candidate resamples only the start of an entry a transposed
     window holds (and TRANSPOSE_MARGIN more): the samples are the same as
