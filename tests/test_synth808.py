@@ -178,6 +178,10 @@ def test_the_loss_on_two_threads_is_the_loss_as_it_was(monkeypatch):
         score = synth808._scorer(reference, 41.2)
         assert [(score(c), score(c, None), score(c, 0.1)) for c in candidates] == want
         assert fit(reference, 41.2, maxiter=3, popsize=4)[0] == Params.of(found.x)
+    # the loss called from the second thread itself computes there (handed to it, it would wait on itself)
+    score = synth808._scorer(reference, 41.2)
+    there = synth808._second().submit(lambda: [(score(c), score(c, None), score(c, 0.1)) for c in candidates])
+    assert there.result(timeout=120) == want
 
 
 def test_the_voice_made_from_the_second_thread_is_made_there(monkeypatch):

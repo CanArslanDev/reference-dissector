@@ -266,17 +266,25 @@ def test_a_sweep_and_a_speckle_search_on_threads_are_the_ones_on_one(noisy, monk
         return (lib._sweep(kicks, "kick", 0.0, None, 30, 32) + lib._sweep(kicks, "kick", -1.5, None, 30, 32)
                 + correlate_many(qs, bank, chunk=32))
 
+    def ranked():  # match's transposed candidates (tried) and match_fine's near map, as the steps call them
+        return (lib.match(kicks[0], "kick", semitones=(-1, 0, 1), top=10, chunk=32)
+                + lib.match_fine(qs_audio[0], "snare", keep=8, top=8, semitones=(-1, 0, 1), union=4))
+
+    qs_audio = [placed(sounds[k], d, 150) for k, d in ((30, 0.0), (33, -1.0))]
+
     def same(x, y):
         return len(x) == len(y) and all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(x, y))
     monkeypatch.setattr(library, "THREADS", 1)
     monkeypatch.setattr(library, "_threads", lambda: pytest.fail("THREADS 1 handed work to the pool"))
-    one = search()
+    one, one_ranked = search(), ranked()
     monkeypatch.setattr(library, "THREADS", 4)
     with ThreadPoolExecutor(4, initializer=library._mark_worker) as pool:
         monkeypatch.setattr(library, "_threads", lambda: pool)
-        four = search()
+        four, four_ranked = search(), ranked()
         inside = pool.submit(search).result(timeout=120)
+        inside_ranked = pool.submit(ranked).result(timeout=120)
     assert len(one) == 8 and same(one, four) and same(one, inside) and same(four[6:], loop)
+    assert one_ranked and one_ranked == four_ranked == inside_ranked
     assert not np.array_equal(one[0][0], one[3][0])  # the transposed sweep is another one
 
 
