@@ -206,13 +206,15 @@ GLIDE_CHAIN = {"root_midi": 24, "transpose": 36, "voices": 1, "glide_mode": "Gli
                "notes": [note(24, 0.0, duration=0.52), note(29, 0.5, duration=0.48), note(31, 1.0, duration=0.5)]}
 
 
-def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_on_time_by_default(tmp_path):
-    """By default (render.GLIDE_TAKEOVER off: Live has not measured a note
-    in a held chain's release under Glide), a note of another pitch that
-    comes 10 ms after a chain of two ends starts on time, as it would
-    alone, in the render and in the estimate from the plan; the slid note
-    in the chain starts nothing. (A chain's render stops at its last
-    note's end: render.py does not model its release under Glide.)"""
+def test_with_glide_and_the_takeover_off_a_note_in_the_release_of_the_chain_before_starts_on_time(tmp_path,
+                                                                                                    monkeypatch):
+    """With render.GLIDE_TAKEOVER off, a note of another pitch that comes
+    10 ms after a chain of two ends starts on time, as it would alone, in
+    the render and in the estimate from the plan; the slid note in the
+    chain starts nothing. (A chain's render stops at its last note's end:
+    render.py does not model its release under Glide.)"""
+    from refdissect import render
+    monkeypatch.setattr(render, "GLIDE_TAKEOVER", False)
     t = np.arange(2 * SR) / SR
     sine = 0.8 * np.sin(2 * np.pi * 32.703 * t)
     t808 = dict(GLIDE_CHAIN, sample_path=wav(tmp_path, "808.wav", sine))
@@ -226,16 +228,17 @@ def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_on_time_by_
     assert [n["flags"] for n in est] == [[], ["legato"], []]
 
 
-def test_with_glide_one_voice_takes_over_the_release_of_any_pitch(tmp_path, monkeypatch):
-    """With render.GLIDE_TAKEOVER on, the 808 plays one voice under Glide:
-    a note of another pitch that comes while the chain before still sounds
-    in its release fades it out over 1 ms from its note and starts 1 ms
-    late, as a note of its pitch does without Glide, where two voices sum
-    through the release by default; the slid note in the chain starts
-    nothing (one sample read on). Not measured in Live."""
+def test_with_glide_one_voice_takes_over_the_release_of_any_pitch(tmp_path):
+    """By default (render.GLIDE_TAKEOVER on, as measured in Live 12.4.16)
+    the 808 plays one voice under Glide: a note of another pitch that comes
+    while the chain before still sounds in its release fades it out over
+    1 ms from its note and starts 1 ms late, as a note of its pitch does
+    without Glide, where two voices would sum through the release with the
+    takeover off; the slid note in the chain starts nothing (one sample
+    read on)."""
     from refdissect import render
     from refdissect.render import RETRIGGER_S
-    monkeypatch.setattr(render, "GLIDE_TAKEOVER", True)
+    assert render.GLIDE_TAKEOVER
     t = np.arange(2 * SR) / SR
     sine = 0.8 * np.sin(2 * np.pi * 32.703 * t)
     t808 = {"sample_path": wav(tmp_path, "808.wav", sine), "root_midi": 24, "transpose": 36, "voices": 1,

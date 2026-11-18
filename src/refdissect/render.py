@@ -94,13 +94,15 @@ RETRIGGER_S = 0.001
 # hit's onset (ableton-live-mcp's battery, Live 12.4.6, 2026-10-19). render.py had faded such a cut over 5 ms.
 # Groups 1 to 16 choke; 0 is none (Live refuses 17, 99 and -1)
 CHOKE_S = 0.001
-# With Glide on (one voice), whether a note that comes while the chain before still sounds in its release, at any
-# pitch, takes that voice over as a note of its pitch does without Glide (late_808 mono: the chain faded out over
-# RETRIGGER_S from the note, the note RETRIGGER_S late, planned that much earlier). Not measured in Live (a note 1,
-# 10 or 25 ms after a held chain under Glide), and on the suite with slides it moved glides-1's and glides-2's 808
-# notes 1 ms with no 808 note F1 gain while the glides scenario's median |balance| went 0.24 -> 0.29 dB: off until
-# Live measures it. Off, a note under Glide starts on time and the chain before rings out its release.
-GLIDE_TAKEOVER = False
+# With Glide on (one voice), a note that comes while the chain before still sounds in its release, at any pitch,
+# takes that voice over as a note of its pitch does without Glide (late_808 mono: the chain faded out over
+# RETRIGGER_S from the note, the note RETRIGGER_S late, planned that much earlier). Measured in Live 12.4.16
+# (2026-11-18, glides-1's whole plan with slides, built and recorded at 48 kHz; each note's lag behind render.py's
+# over 20-60 ms from 1 ms before it): its 43 notes that came 0.4-27.6 ms after the note before ended, at any pitch,
+# lagged 0.78-0.97 ms more than the 6 that came after a release with this off, and 0.04-0.22 ms less with it on;
+# the 808's residual under the render went -19.9 -> -32.4 dB. Off, such a note starts on time and the chain before
+# rings out.
+GLIDE_TAKEOVER = True
 # The 808 Simpler's release, Live's default Ve Release (live.simpler_808 sends it): in the live check (probe A,
 # four isolated notes) the voice fell 1.683 dB a ms from its note's end, a straight line in dB within 0.5 dB, and
 # stopped where it reached -60 dB, RELEASE_S on (35.7 ms)
@@ -371,8 +373,8 @@ def late_808(notes: list[dict], bps: float, played_s, mono: bool = False) -> np.
     808's notes after a note of their pitch started 0.94 to 1.05 ms after
     the other notes of their pitch, whose own delay was the filter's
     (simpler_808 now turns it off). mono (one voice: Glide on): the note
-    before at any pitch, as the one voice is the one it takes over; not
-    measured in Live, which started a note 25 ms after one ended again."""
+    before at any pitch, as the one voice is the one it takes over (what
+    Live 12.4.16 played on a whole plan with Glide: GLIDE_TAKEOVER)."""
     late = np.zeros(len(notes), bool)
     by_pitch: dict[int, list[int]] = {}
     for k, nt in enumerate(notes):
@@ -595,7 +597,7 @@ def render_808(track: dict, shot: np.ndarray, n: int, bps: float, fade: int | No
     while the voice of the note before at its pitch still sounds (late_808)
     fades that voice out over RETRIGGER_S from its note and starts
     RETRIGGER_S late, as a pad's hit does; with Glide on (one voice), only
-    where GLIDE_TAKEOVER (off: not measured in Live), and then the voice of
+    where GLIDE_TAKEOVER (on: measured in Live 12.4.16), and then the voice of
     the chain before at any pitch."""
     s = settings_808(track)
     out = np.zeros(n, np.float32)

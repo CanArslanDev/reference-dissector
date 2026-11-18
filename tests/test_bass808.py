@@ -732,27 +732,29 @@ def glide_plan_last(tmp_path, gap: float) -> tuple[float, float]:
     return n["start_time"] - 2.0 * gap, n["start_time"] + n["duration"]
 
 
-def test_with_glide_a_note_in_the_release_of_the_chain_before_is_planned_on_time_by_default(tmp_path, monkeypatch):
-    """By default (render.GLIDE_TAKEOVER off: not measured in Live), a note
-    that comes while the chain before still sounds in its release under
-    Glide is planned where it attacks, as one that comes after the
-    release: no RETRIGGER_S earlier."""
-    from refdissect import live
+def test_with_glide_and_the_takeover_off_a_note_in_the_release_of_the_chain_before_is_planned_on_time(tmp_path,
+                                                                                                         monkeypatch):
+    """With render.GLIDE_TAKEOVER off, a note that comes while the chain
+    before still sounds in its release under Glide is planned where it
+    attacks, as one that comes after the release: no RETRIGGER_S
+    earlier."""
+    from refdissect import live, render
     monkeypatch.setattr(live, "GLIDE_LEAST", 1)
+    monkeypatch.setattr(render, "GLIDE_TAKEOVER", False)
     (soon, soon_end), (later, later_end) = glide_plan_last(tmp_path, 0.01), glide_plan_last(tmp_path, 0.2)
     assert soon == pytest.approx(later, abs=1e-4) and soon_end == later_end
 
 
 def test_with_glide_a_note_in_the_release_of_the_chain_before_starts_1_ms_earlier(tmp_path, monkeypatch):
-    """With render.GLIDE_TAKEOVER on (one voice under Glide), a note that
-    comes while the chain before still sounds in its release, at any
-    pitch, is planned RETRIGGER_S earlier (Live would start it that much
-    late: render.late_808 mono), its end kept; one that comes after the
-    release, on time."""
+    """By default (render.GLIDE_TAKEOVER on: one voice under Glide, as
+    measured in Live 12.4.16), a note that comes while the chain before
+    still sounds in its release, at any pitch, is planned RETRIGGER_S
+    earlier (Live starts it that much late: render.late_808 mono), its end
+    kept; one that comes after the release, on time."""
     from refdissect import live, render
     from refdissect.render import RETRIGGER_S
     monkeypatch.setattr(live, "GLIDE_LEAST", 1)
-    monkeypatch.setattr(render, "GLIDE_TAKEOVER", True)
+    assert render.GLIDE_TAKEOVER
     (soon, soon_end), (later, later_end) = glide_plan_last(tmp_path, 0.01), glide_plan_last(tmp_path, 0.2)
     assert soon == pytest.approx(later - 2.0 * RETRIGGER_S, abs=1e-4) and soon_end == later_end
 
