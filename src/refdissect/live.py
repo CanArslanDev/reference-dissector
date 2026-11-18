@@ -81,6 +81,7 @@ from .render import (
     RETRIGGER_S,
     VOL_VEL,
     as_played,
+    chains_808,
     choke_voices,
     glide_s,
     grouped,
@@ -90,7 +91,9 @@ from .render import (
     pad_settings,
     pad_shot,
     pad_track,
+    pitch_808,
     render_808,
+    settings_808,
     shift_notes,
     takes_over,
     voices_808,
@@ -1004,10 +1007,25 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     its volume_db, each velocity at its level under Live's law at the pad's
     vol_vel, as render_plan plays it, each pad one voice; the 808 as
     render_plan plays it, Transpose, Detune and Glide included, released at
-    each note's end as Live releases it), with the
-    stems by RMS over the whole track: a perfect kit, the truth's sounds at
-    their own balance, then plays every sound at the kit level
-    evaluate.level_scores scores against. The drum fader stops where the
+    each note's end as Live releases it), with the stems: the drums by RMS
+    over the whole track, the 808 as evaluate.level_scores reads it, per
+    note in the 808 band over LEVEL_MS from its attack, the median
+    (level_808). A perfect kit, the truth's sounds at their own balance,
+    then plays every sound at the kit level evaluate.level_scores scores
+    against. Matched by RMS, the 808 sat 1.87 [2.01] dB under a perfect
+    kit (m5; mean over scenarios, htdemucs_ft in brackets): our 808 track
+    holds more of its energy away from the notes' attacks than the stem
+    does (the per-note fader sits 1.6 [0.5] dB over the RMS one). Per note
+    (f808-2),
+    0.29 [1.48] dB under it, closer on 19 [17] of 22 scenarios. What is
+    left is the stem's: read against the truth, the separated bass stem
+    holds the 808 at the plan's note attacks 0.29 [1.53] dB under its
+    whole-track ratio to the truth's bass stem (the kit level). A kick is
+    still read under the 808 at the RMS-matched level (held808): under the
+    per-note one (f808-1) the kicks read lower, the loudest pad with them,
+    and the other pads rose over the kit, hats +1.65 and snares +1.61 dB:
+    the distance from a perfect kit went 1.20 -> 1.94 [1.15 -> 1.30] dB.
+    The drum fader stops where the
     loudest pad plays as loud as the stem holds its sound. The RMS match
     goes over that on 4 [5] suite beats: where the stem holds a kick no pad
     plays (layers-1, tempo160-1, v1orig-2 [bass_low-2]; tempo160-1 sits
@@ -1049,9 +1067,12 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
     stems = plan["stems"]
     track808, held808, fader808 = plan["tracks"]["808"], None, None
     if "sample_path" in track808 and "bass" in stems:
-        ours = render_808(track808, read(track808["sample_path"]), n, bps, None, True, 1.0, "live")
-        fader808 = round(rms_db(read(stems["bass"]["path"])) - rms_db(ours) - headroom_db, 1)
-        held808 = ours * np.float32(10 ** ((fader808 + headroom_db) / 20))  # where the bass stem holds it
+        shot, bass = read(track808["sample_path"]), read(stems["bass"]["path"])
+        ours = render_808(track808, shot, n, bps, None, True, 1.0, "live")
+        by_rms = round(rms_db(bass) - rms_db(ours) - headroom_db, 1)
+        at = level_808(track808, shot, ours, bass, bps)
+        fader808 = by_rms if at is None else round(at - headroom_db, 1)
+        held808 = ours * np.float32(10 ** ((by_rms + headroom_db) / 20))  # where the bass stem holds it under a kick
     if "drums" in stems:
         stem = read(stems["drums"]["path"])
         low = None
@@ -1074,6 +1095,41 @@ def estimate_levels(plan: dict, analysis: dict, headroom_db: float) -> dict:
         out["808_track_db"] = fader808
     out["stems_track_db"] = -headroom_db
     return out
+
+
+def attacks_808(track: dict, shot: np.ndarray, bps: float) -> np.ndarray:
+    """Where each of the 808's notes attacks (s), as
+    evaluate.estimate_from_plan times it for the level scores: a chain's
+    first note at its start, RETRIGGER_S later where Live starts it late
+    (late_808), plus the attack of the one-shot as played at its pitch, in
+    the 808 band; a legato note (Glide) at its start."""
+    s = settings_808(track)
+    chains, gliding = chains_808(track), glide_s(track) > 0
+    leads: dict[float, tuple[float, float]] = {}  # per shift: the attack (s) and the length (s) as played
+
+    def played(pitch: int) -> tuple[float, float]:
+        shift = pitch_808(s, pitch)[0]
+        if shift not in leads:
+            x = as_played(shot, s["start_s"], shift)
+            leads[shift] = (attack_time(x, "808"), len(x) / SR)
+        return leads[shift]
+
+    late = (late_808(voices_808(chains), bps, lambda p: played(p)[1], gliding) if takes_over(gliding)
+            else np.zeros(len(chains), bool))
+    return np.array([n["start_time"] / bps + (RETRIGGER_S * late[c] + played(n["pitch"])[0] if not k else 0.0)
+                     for c, chain in enumerate(chains) for k, n in enumerate(chain)])
+
+
+def level_808(track: dict, shot: np.ndarray, ours: np.ndarray, bass: np.ndarray, bps: float,
+              ms: float = LEVEL_MS) -> float | None:
+    """How far over `ours` (the 808 track at unity) the bass stem holds the
+    808 (dB), read as evaluate.level_scores reads the 808: per note, the
+    energy in the 808 band over `ms` from where the note attacks
+    (attacks_808), the stem's over ours; the median over the notes. None
+    where no note holds energy on both."""
+    at, w = attacks_808(track, shot, bps), samples(ms)
+    d = _db(_energies(band(bass, "808"), at, w), _energies(band(ours, "808"), at, w))
+    return float(np.median(d)) if d else None
 
 
 def _unity_drums(plan: dict, n: int) -> np.ndarray:
