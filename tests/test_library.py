@@ -234,6 +234,60 @@ def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
     assert len(blocks) == 3  # forgotten: searched again
 
 
+def test_a_sweep_and_a_speckle_search_on_threads_are_the_ones_on_one(noisy, monkeypatch):
+    """_sweep (untransposed and transposed) and correlate_many on 4 threads,
+    each block's transform made ahead while the block before is scored, give
+    the numbers they give with THREADS 1, which never touches the pool, and
+    correlate_many those of a loop over its blocks and speckles (the search
+    as it was), to the bit. Called from one of the pool's own threads, they
+    run in it instead of waiting on the pool."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from refdissect import library
+    from refdissect.library import SPECKLE_WIDE, correlate_many, speckle
+
+    lib, sounds = noisy
+    kicks = [placed(sounds[k], d, 200) for k, d in ((120, 0.0), (121, -2.0), (30, 0.4))]
+    bank = lib.speckles["snare"][1]
+    qs = [speckle(placed(sounds[k], d, 150), "snare")[0] for k, d in ((30, 0.0), (33, -1.0))]
+    n_bins, wide = bank.shape[1], SPECKLE_WIDE
+    nfft = library.next_fast_len(n_bins + wide, real=True)
+    lags = np.r_[np.arange(0, wide + 1), np.arange(nfft - wide, nfft)]
+    Qs = [np.fft.rfft(q.astype(np.float32), nfft) for q in qs]
+    loop = [(np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)) for _ in qs]
+    for a in range(0, len(bank), 32):
+        S = np.conj(np.fft.rfft(bank[a:a + 32].astype(np.float32), nfft, axis=1))
+        for Q, (peak, cents) in zip(Qs, loop):
+            c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
+            k = np.argmax(c, axis=1)
+            peak[a:a + 32], cents[a:a + 32] = c[np.arange(len(c)), k] / n_bins, np.where(k <= wide, k, k - len(lags))
+
+    def search():
+        return (lib._sweep(kicks, "kick", 0.0, None, 30, 32) + lib._sweep(kicks, "kick", -1.5, None, 30, 32)
+                + correlate_many(qs, bank, chunk=32))
+
+    def ranked():  # match's transposed candidates (tried) and match_fine's near map, as the steps call them
+        return (lib.match(kicks[0], "kick", semitones=(-1, 0, 1), top=10, chunk=32)
+                + lib.match_fine(qs_audio[0], "snare", keep=8, top=8, semitones=(-1, 0, 1), union=4))
+
+    qs_audio = [placed(sounds[k], d, 150) for k, d in ((30, 0.0), (33, -1.0))]
+
+    def same(x, y):
+        return len(x) == len(y) and all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(x, y))
+    monkeypatch.setattr(library, "THREADS", 1)
+    monkeypatch.setattr(library, "_threads", lambda: pytest.fail("THREADS 1 handed work to the pool"))
+    one, one_ranked = search(), ranked()
+    monkeypatch.setattr(library, "THREADS", 4)
+    with ThreadPoolExecutor(4, initializer=library._mark_worker) as pool:
+        monkeypatch.setattr(library, "_threads", lambda: pool)
+        four, four_ranked = search(), ranked()
+        inside = pool.submit(search).result(timeout=120)
+        inside_ranked = pool.submit(ranked).result(timeout=120)
+    assert len(one) == 8 and same(one, four) and same(one, inside) and same(four[6:], loop)
+    assert one_ranked and one_ranked == four_ranked == inside_ranked
+    assert not np.array_equal(one[0][0], one[3][0])  # the transposed sweep is another one
+
+
 def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monkeypatch):
     """Library.candidate resamples only the start of an entry a transposed
     window holds (and TRANSPOSE_MARGIN more): the samples are the same as

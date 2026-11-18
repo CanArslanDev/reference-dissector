@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import warnings
 import zipfile
@@ -189,19 +190,26 @@ def correlate(q: np.ndarray, bank: np.ndarray, wide: int = SPECKLE_WIDE,
 def correlate_many(qs: list[np.ndarray], bank: np.ndarray, wide: int = SPECKLE_WIDE,
                    chunk: int = 512) -> list[tuple[np.ndarray, np.ndarray]]:
     """correlate() of each speckle in qs, each block of the bank transformed
-    once for all of them (the same numbers as one at a time)."""
+    once for all of them (the same numbers as one at a time). On THREADS
+    threads: each speckle's inverse transform of a block, and meanwhile the
+    next block's transform, each computed as one thread computes it."""
     n_bins = bank.shape[1]
     nfft = next_fast_len(n_bins + wide, real=True)
     Qs = [np.fft.rfft(q.astype(np.float32), nfft) for q in qs]
     lags = np.r_[np.arange(0, wide + 1), np.arange(nfft - wide, nfft)]
     out = [(np.zeros(len(bank), np.float32), np.zeros(len(bank), np.int64)) for _ in qs]
-    for a in range(0, len(bank), chunk):
-        S = np.conj(np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1))
-        for Q, (peak, shift_cents) in zip(Qs, out):
-            c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
-            k = np.argmax(c, axis=1)
-            peak[a:a + chunk] = c[np.arange(len(c)), k] / n_bins
-            shift_cents[a:a + chunk] = np.where(k <= wide, k, k - len(lags))
+
+    def transformed(a):
+        return np.conj(np.fft.rfft(bank[a:a + chunk].astype(np.float32), nfft, axis=1))
+
+    def scored(Q, S):
+        c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
+        k = np.argmax(c, axis=1)
+        return c[np.arange(len(c)), k] / n_bins, np.where(k <= wide, k, k - len(lags))
+    starts = list(range(0, len(bank), chunk))
+    for a, S in zip(starts, _ahead(transformed, starts)):
+        for (peak, shift_cents), (p, k) in zip(out, _map(functools.partial(scored, S=S), Qs)):
+            peak[a:a + chunk], shift_cents[a:a + chunk] = p, k
     return out
 
 
@@ -360,15 +368,50 @@ def copies(a: np.ndarray, b: np.ndarray, pitched: bool, threshold: float = 0.95)
 
 # match()'s work on THREADS threads (REFDISSECT_THREADS; 1: one at a time): _sweep's inverse
 # transforms, ROWS rows of a block at a time, and the transposed candidates of _match and
-# match_fine, an entry at a time. numpy's FFT and soxr let other threads run while they work, and
-# each row, entry and transposition is computed as one at a time computes it: the same numbers.
+# match_fine, an entry at a time; in _sweep and correlate_many the next block's transform while a
+# block is scored, and correlate_many's inverse transforms a speckle at a time. numpy's FFT and soxr
+# let other threads run while they work, and each row, entry and transposition is computed as one
+# at a time computes it: the same numbers. With 1, or called from one of the pool's own threads
+# (which would wait on itself), all of it runs in the calling thread, one block at a time, as before.
+# synth808's fit takes a second thread where it is over 1.
 THREADS = max(1, int(os.environ.get("REFDISSECT_THREADS", "4")))
 ROWS = 64
+_local = threading.local()  # .worker: set in the pool's own threads
+
+
+def _mark_worker() -> None:
+    _local.worker = True
 
 
 @functools.cache
 def _threads() -> ThreadPoolExecutor:
-    return ThreadPoolExecutor(THREADS, thread_name_prefix="refdissect-ncc")
+    return ThreadPoolExecutor(THREADS, thread_name_prefix="refdissect-ncc", initializer=_mark_worker)
+
+
+def _pooled() -> bool:
+    """Whether work goes to the pool: THREADS over 1, from a thread not its own."""
+    return THREADS > 1 and not getattr(_local, "worker", False)
+
+
+def _map(fn, items):
+    """fn over items, results in order: on the pool (_pooled), else in this thread."""
+    return _threads().map(fn, items) if _pooled() else map(fn, items)
+
+
+def _ahead(fn, items):
+    """fn(item) for each of items, in order. On the pool (_pooled) the next
+    one is made while the caller works on this one (one result more held);
+    else each is made in this thread when it is wanted."""
+    items = list(items)
+    if not _pooled() or not items:
+        for item in items:
+            yield fn(item)
+        return
+    pending = _threads().submit(fn, items[0])
+    for item in items[1:]:
+        done, pending = pending.result(), _threads().submit(fn, item)
+        yield done
+    yield pending.result()
 
 
 class _Ncc:
@@ -567,17 +610,22 @@ class Library:
         chosen = [i for i, r in enumerate(self.roles) if not roles or r in roles]
         scorers = [_Ncc(t, role, max_lag_ms) for t in ts]
         out = [(np.zeros(len(chosen), np.float32), np.zeros(len(chosen), np.int64)) for _ in ts]
-        for a in range(0, len(chosen), chunk):
+
+        def transformed(a):  # a block laid out, its spectra in the band, their energy and conjugate
             C = scorers[0].spectra(self.block(chosen[a:a + chunk], len(ts[0]), base))
-            e, conj = energy(C, scorers[0].n), np.conj(C)
+            return energy(C, scorers[0].n), np.conj(C)
+        starts = list(range(0, len(chosen), chunk))
+        # the next block laid out and transformed on the pool while this one is scored (_ahead): v1-1's match
+        # had waited 2.7 s on it in this thread
+        for a, (e, conj) in zip(starts, _ahead(transformed, starts)):
             # each template's inverse transform of the block, in ROWS-row parts on THREADS threads: a
             # row's numbers do not depend on the rows transformed with it, so they are the same
-            parts = [(k, slice(r, r + ROWS)) for k in range(len(scorers)) for r in range(0, len(C), ROWS)]
+            parts = [(k, slice(r, r + ROWS)) for k in range(len(scorers)) for r in range(0, len(conj), ROWS)]
 
             def part(job, conj=conj, e=e):
                 k, rows = job
                 return scorers[k].scores(conj[rows], e[rows])
-            for (k, rows), (s, lag) in zip(parts, _threads().map(part, parts)):
+            for (k, rows), (s, lag) in zip(parts, _map(part, parts)):
                 at = slice(a + rows.start, a + rows.start + len(s))
                 out[k][0][at], out[k][1][at] = s, lag
         return out
@@ -649,7 +697,7 @@ class Library:
                 out.append((s, float(abs(v[k])), k))
             return out
         # the entries on THREADS threads, their scores taken in the order a loop over them had
-        for (i, _), scored in zip(tries.items(), _threads().map(tried, tries.items())):
+        for (i, _), scored in zip(tries.items(), _map(tried, tries.items())):
             r = by_i[i]
             for s, v, k in scored:
                 if v > r["ncc"]:
@@ -725,7 +773,7 @@ class Library:
             semis = (cents_off[j] + offsets) / 100
             return semis, *score(np.stack([self.candidate(i, len(t), float(s)) for s in semis]))
         # the entries on THREADS threads, taken in the order a loop over them had
-        for (i, j), (semis, v, lag) in zip(tried.items(), _threads().map(near, tried.items())):
+        for (i, j), (semis, v, lag) in zip(tried.items(), _map(near, tried.items())):
             k = int(np.argmax(v))
             if i not in found or v[k] > found[i]["ncc"]:
                 found[i] = {"i": i, "ncc": float(v[k]), "lag": int(lag[k]), "semitones": round(float(semis[k]), 4)}

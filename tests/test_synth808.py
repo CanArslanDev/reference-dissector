@@ -103,6 +103,98 @@ def test_the_fit_designs_its_filter_window_and_times_once(monkeypatch):
                           .astype(np.float32))
 
 
+def _loss_as_it_was(reference, f1):
+    """synth808._scorer's loss as the code before the second thread had it,
+    the voice made by its expressions of then (not in place)."""
+    from refdissect.audio import PRE, band, samples
+    from refdissect.describe import envelope_db, harmonics
+    from refdissect.synth808 import UPPER
+
+    def voice_then(p, seconds):
+        t = np.arange(int(seconds * SR)) / SR
+        f = (p.f_end_hz + (p.f_start_hz - p.f_end_hz) * np.exp(-t / (p.glide_ms / 1000))) * 1.0
+        phi = p.phase + 2 * np.pi * np.cumsum(f) / SR
+        amp = (1 - np.exp(-t / (p.attack_ms / 1000))) * np.exp(-t / p.decay_s)
+        if not p.gritty:
+            y = np.tanh(p.drive * (amp * np.sin(phi) + p.asym)) - np.tanh(p.drive * p.asym)
+        else:
+            osc = np.sin(phi)
+            if p.grit:
+                osc = osc + p.grit * sum(6 / n * np.sin(n * phi) for n in UPPER)
+
+            def shape(u):
+                return np.tanh(p.drive * u * (1 + p.skew * np.sign(u)))
+            y = shape(amp * osc + p.asym) - shape(p.asym)
+        return (y / (np.max(np.abs(y)) or 1.0)).astype(np.float32)
+
+    def laid_out_then(p, length):
+        y = np.r_[np.zeros(PRE, np.float32), voice_then(p, (length - PRE + 1) / SR)][:length]
+        return np.pad(y, (0, length - len(y)))
+    target, h_ref = band(reference, "808"), harmonics(reference, f1)
+    e_ref, n = np.maximum(envelope_db(reference, 25), -40), len(reference)
+    size = 1 << int(np.ceil(np.log2(2 * len(target))))
+    spectrum, t_norm, lag = np.fft.rfft(target, size), float(np.linalg.norm(target)) or 1.0, samples(8)
+
+    def loss(p, upper=0.0):
+        if p.f_start_hz < p.f_end_hz:
+            return 2.0
+        y = laid_out_then(p, n)
+        c = band(y, "808")
+        corr = np.fft.irfft(spectrum * np.conj(np.fft.rfft(c, size)), size)
+        v = np.r_[corr[: lag + 1], corr[-lag:]] / (t_norm * (float(np.linalg.norm(c)) or 1.0))
+        wave = 1 - float(np.max(np.abs(v)))
+        if upper is None:
+            return wave
+        off = np.abs(harmonics(y, p.f_end_hz) - h_ref)
+        harm = np.mean(off) / 20
+        env = np.mean(np.abs(np.maximum(envelope_db(y, 25), -40) - e_ref)) / 20
+        if upper:
+            return wave + 0.1 * harm + upper * np.mean(off[4:]) / 20 + 0.1 * env
+        return wave + 0.1 * harm + 0.1 * env
+    return loss
+
+
+def test_the_loss_on_two_threads_is_the_loss_as_it_was(monkeypatch):
+    """SECOND: the voice made in place, its envelope, harmonics and loudness
+    envelope on a second thread, give every candidate, plain or grittier,
+    the loss the code before gave it, to the bit, on one thread or two; so
+    the search finds the fit it found."""
+    from scipy.optimize import differential_evolution
+
+    from refdissect import synth808
+
+    reference = laid_out(TRUE, int(0.6 * SR))
+    rng = np.random.default_rng(0)
+    candidates = [Params.of([rng.uniform(lo, hi) for lo, hi in synth808.BOUNDS + synth808.GRIT_BOUNDS])
+                  for _ in range(12)]
+    then = _loss_as_it_was(reference, 41.2)
+    want = [(then(c), then(c, None), then(c, 0.1)) for c in candidates]
+    bounds = list(synth808.BOUNDS)
+    bounds[0] = (41.2 * 0.9, 41.2 * 1.1)
+    found = differential_evolution(lambda v: then(Params.of(v)), bounds, popsize=4, maxiter=3, tol=1e-7, seed=1,
+                                   polish=True)
+    for second in (False, True):
+        monkeypatch.setattr(synth808, "SECOND", second)
+        score = synth808._scorer(reference, 41.2)
+        assert [(score(c), score(c, None), score(c, 0.1)) for c in candidates] == want
+        assert fit(reference, 41.2, maxiter=3, popsize=4)[0] == Params.of(found.x)
+    # the loss called from the second thread itself computes there (handed to it, it would wait on itself)
+    score = synth808._scorer(reference, 41.2)
+    there = synth808._second().submit(lambda: [(score(c), score(c, None), score(c, 0.1)) for c in candidates])
+    assert there.result(timeout=120) == want
+
+
+def test_the_voice_made_from_the_second_thread_is_made_there(monkeypatch):
+    """voice() called from the second thread itself makes everything there
+    (handed to it, it would wait on itself), the same samples."""
+    from refdissect import synth808
+
+    monkeypatch.setattr(synth808, "SECOND", True)
+    gritty = Params.of([41.2, 70.0, 40, 0.8, 2, 2.0, 0.05, 0.3, 0.2, 0.02])
+    for p in (TRUE, gritty):
+        assert np.array_equal(synth808._second().submit(voice, p, 0.5).result(timeout=60), voice(p, 0.5))
+
+
 HELD = Params(f_end_hz=32.70, f_start_hz=32.70 * 2 ** (5 / 12), glide_ms=25, decay_s=1.5, attack_ms=3, drive=2.0,
               asym=0.05, phase=0.3)
 
