@@ -181,9 +181,16 @@ def _plan(a):
 
 
 def _build(a):
-    """The plan as a blueprint, built by ableton-live-mcp's build_from_blueprint (blueprint.build)."""
+    """The plan as a blueprint, built by ableton-live-mcp's build_from_blueprint
+    (blueprint.build). A build Live refuses or that stops half way ends in its
+    message on stderr, exit 1, with no traceback: the message says why, and
+    which tracks a stopped build left in the set."""
     from .blueprint import build
-    asyncio.run(build(Path(a.plan), bars=_bars(a.bars) if a.bars else None, stems_out=a.stems_out))
+    try:
+        asyncio.run(build(Path(a.plan), bars=_bars(a.bars) if a.bars else None, stems_out=a.stems_out))
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"live-build: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
 
 
 def _blueprint(a):

@@ -376,7 +376,8 @@ def test_the_command_refuses_what_live_build_refuses(tmp_path, capsys):
     """live-build's checks that need no Live: an 808 one-shot fitted again
     after the plan, and a pad file that is gone. The command exits 1;
     live-build, which writes the blueprint first, stops with the same
-    RuntimeError before it calls Live (the [live] extra is not needed)."""
+    message (exit 1, "live-build: " on stderr) before it calls Live (the
+    [live] extra is not needed)."""
     plan = plan_for(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
@@ -385,27 +386,30 @@ def test_the_command_refuses_what_live_build_refuses(tmp_path, capsys):
     with pytest.raises(SystemExit) as stop:
         main(["blueprint", str(work)])
     assert stop.value.code == 1 and "changed after the plan named it" in capsys.readouterr().err
-    with pytest.raises(RuntimeError, match="run refdissect plan again"):
+    with pytest.raises(SystemExit) as stop:
         main(["live-build", str(work)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and err.startswith("live-build: ") and "run refdissect plan again" in err
     plan = plan_for(tmp_path / "again")
     Path(plan["tracks"]["drums"]["pads"]["36"]["path"]).unlink()
     (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(SystemExit):
         main(["blueprint", str(work)])
     assert "Cannot read the files of pad 36" in capsys.readouterr().err
-    with pytest.raises(RuntimeError, match="Cannot read the files of pad 36"):
+    with pytest.raises(SystemExit) as stop:
         main(["live-build", str(work)])
+    assert stop.value.code == 1 and "Cannot read the files of pad 36" in capsys.readouterr().err
     assert not (work / "blueprint.json").exists()
 
 
-def test_live_build_says_why_live_did_not_build(tmp_path, monkeypatch):
+def test_live_build_says_why_live_did_not_build(tmp_path, monkeypatch, capsys):
     """A connection Live refuses (its Remote Script serves at most 8
     clients: in the live check of 2026-10-29 other sessions held all 8), a
     Live that does not answer, a server without build_from_blueprint, and a
-    build that stops end live-build in a RuntimeError that says so;
-    build_from_blueprint's own message names where it stopped and the tracks
-    it left. A plan the blueprint cannot hold stops it before Live. No Live:
-    ableton-live-mcp's server faked."""
+    build that stops end live-build with a message that says so (stderr,
+    exit 1, no traceback); build_from_blueprint's own message names where it
+    stopped and the tracks it left. A plan the blueprint cannot hold stops it
+    before Live. No Live: ableton-live-mcp's server faked."""
     import types
 
     from refdissect import blueprint
@@ -431,15 +435,17 @@ def test_live_build_says_why_live_did_not_build(tmp_path, monkeypatch):
             ("Unknown tool: build_from_blueprint", "registers build_from_blueprint in its full profile"),
             (stopped, stopped)):
         said[:] = [error]
-        with pytest.raises(RuntimeError, match=re.escape(means)):
+        with pytest.raises(SystemExit) as stop:
             main(["live-build", str(work)])
+        err = capsys.readouterr().err
+        assert stop.value.code == 1 and err.startswith("live-build: ") and means in err
         assert said[1:] == ["build_from_blueprint"]  # nothing after the call that failed
     plan["tracks"]["808"]["voices"] = 33
     (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     said[:] = ["not called"]
-    with pytest.raises(ValueError, match="33 voices"):
+    with pytest.raises(SystemExit):
         main(["live-build", str(work)])
-    assert said == ["not called"]
+    assert "33 voices" in capsys.readouterr().err and said == ["not called"]
 
 
 
@@ -556,3 +562,56 @@ def test_the_minimal_check_catches_what_the_schema_refuses(tmp_path):
     bad["files"]["pad-36"]["name"] = "kick"
     bad["time_signature"] = "4/3"
     assert len(schema_errors(bad)) == 3
+
+
+def test_live_build_without_the_live_extra_says_so(tmp_path, monkeypatch, capsys):
+    """Without ableton-live-mcp (the [live] extra) live-build stops before
+    Live with the install hint on stderr, exit 1, no traceback."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_server(name, *args, **kwargs):
+        if name == "MCP_Server.server" or name.startswith("MCP_Server.server"):
+            raise ImportError("No module named 'MCP_Server'")
+        return real_import(name, *args, **kwargs)
+
+    plan = plan_for(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    monkeypatch.setattr(builtins, "__import__", no_server)
+    with pytest.raises(SystemExit) as stop:
+        main(["live-build", str(work)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and err.startswith("live-build: Building in Live needs ableton-live-mcp")
+
+
+def test_live_build_turns_a_tool_exception_after_the_build_into_its_message(tmp_path, monkeypatch, capsys):
+    """A tool that fails by raising (the SDK's ToolError) after the build,
+    as get_session_overview could, ends live-build in its message too
+    (stderr, exit 1), as an is_error result does. No Live: the server
+    faked."""
+    import types
+
+    from refdissect import blueprint
+
+    plan = plan_for(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    class ToolError(Exception):
+        pass
+
+    async def call_tool(name, args):
+        if name == "get_session_overview":  # after the build: not under build_from_blueprint's own handling
+            raise ToolError("Error executing tool get_session_overview: Live went away")
+        return types.SimpleNamespace(content=[types.SimpleNamespace(text="{}")], is_error=False)
+
+    monkeypatch.setattr(blueprint, "_server", lambda: types.SimpleNamespace(call_tool=call_tool))
+    with pytest.raises(SystemExit) as stop:
+        main(["live-build", str(work)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 1
+    assert "get_session_overview: Error executing tool get_session_overview: Live went away" in err
