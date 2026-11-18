@@ -342,14 +342,17 @@ def test_a_relative_stems_out(live, tmp_path, monkeypatch):
 
 def test_the_command_and_a_set_that_is_not_empty(live, tmp_path, capsys):
     """refdissect live-build WORK builds the plan (exit 0); built again into
-    the same set, build_from_blueprint refuses it, and live-build ends in
-    that RuntimeError."""
+    the same set, build_from_blueprint refuses it, and live-build prints its
+    message on stderr and exits 1 (no traceback)."""
     plan, work = a_plan(tmp_path)
     live()
     assert main(["live-build", str(work)]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["ok"] is True
-    with pytest.raises(RuntimeError, match="The set is not empty"):
+    with pytest.raises(SystemExit) as stopped:
         main(["live-build", str(work)])
+    assert stopped.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("live-build: ") and "The set is not empty" in err and "Traceback" not in err
 
 
 def test_a_plan_moved_onto_lives_bars(live, tmp_path):
