@@ -289,7 +289,9 @@ Measured on the way (Live 12.4):
   - The 630 drum hits played where `render.py` plays them, within 0.04 ms; the snare file's hits played to the end of the file, within a sample (0.023 ms) of `render.py`.
   - The 101 808 notes started within 0.11 ms of `render.py`'s, at a median −47.5 dB of residual (−48.8 on the 39 others, −46.8 on the 62 restarts). The 20 notes that end in a rest fell to −40 dB 25 ms after their end, in Live and in `render.py`.
   - The 8 locators sat where planned, in 4/4; the 3 muted Drift tracks and the 5 stems were built too.
-- Not checked by ear, and against `render.py`, not the song: PIRAMIT has no truth.
+- Checked against `render.py`, not the song: PIRAMIT has no truth.
+
+**Heard in Live 12.4.16** (2026-11-16): ableton-live-mcp's `dissect_reference` job (refdissect f907dd2) planned the song again (565 drum notes on 11 pads, 95 808 notes), `build_from_blueprint` built it in under 5 s with every read-back clean, and the listener liked what played. It is a later plan than the one measured above (630 drum notes on 10 pads, 101 808 notes; the job separated and analysed the song afresh), heard once as a whole; no pad, level or the one-shot was judged by ear on its own.
 
 See [07](07-building-in-live.md).
 
@@ -303,5 +305,5 @@ See [07](07-building-in-live.md).
 - **The perc's level** is read on hits it mostly shares with the main hat; on its 2 clear hits it reads 2.4 dB lower (see In Live).
 - **808 slides** are not read by default; PIRAMIT's reading has none.
 - **Melody, chords and vocal chops.** They are transcribed and planned as muted MIDI tracks. The original stems still play them; choosing instruments is the next stage.
-- **The ear test.** Every number here is a measurement; none of it has been confirmed by listening yet, the pad levels and the new one-shot included. The replica-mode plan was built and recorded in Live, and played as `render.py` plays it.
+- **The ear test.** Every number here is a measurement. A later plan than the one measured above (565 drum notes and 95 808 notes, against 630 and 101) was heard as a whole and liked (In Live); no pad, level or the one-shot was judged by ear on its own. The replica-mode plan was built and recorded in Live, and played as `render.py` plays it.
 - **The kick's level and one voice.** 81 of the kick's 93 hits cut the one before in Live, while its level is read against its hits summed, as the suite's truth sums them; if the song's own sampler cut them too, the reading runs low. Not measured here.
