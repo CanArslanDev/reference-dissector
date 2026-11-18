@@ -137,7 +137,7 @@ m3's regression, bass_low-1 played a median 41.7 cents off, is resolved (m4, abo
 Checked on 2026-10-29 by two live checks ([07](07-building-in-live.md#live-behaviour-measured-here); done, above). Still open:
 - Done (2026-11-14, [07](07-building-in-live.md#verified-in-live)): `refdissect live-build` end to end in Live 12.4.16, on ableton-live-mcp's `build_from_blueprint`, with its own connection (4 clients). a suite plan's bars 1–8 and PIRAMIT's whole plan (1,881 notes in one call, 7.1 s) built with nothing wrong in the read-back (files, 13 of 13 Volumes as numbers, locators, signature), and recorded equal to `--direct`'s builds sample for sample, once each pad's `Fade In` was set to 0 (a Simpler made by path starts at 0.1 ms).
 - A build that stops half way, and its message (not tried in Live).
-- htdemucs_ft plans, a whole plan with Glide (an 8-bar excerpt was built and recorded on 2026-11-05), and a plan with a choke group (`--chokes`).
+- htdemucs_ft plans and a plan with a choke group (`--chokes`). Done (2026-11-18): a whole plan with Glide, built by `live-build` and recorded ([07](07-building-in-live.md#live-12416-a-whole-plan-with-glide-2026-11-18)).
 - The locators off Live's grid (item 1): `live-build` places them since ableton-live-mcp v2.4.1, which zooms the Arrangement in first; `live-build --direct`, which did not, is gone (2026-11-16), and with it the browser's search for a content name (never timed).
 - PIRAMIT by ear: heard whole in Live 12.4.16 on 2026-11-16 (the plan of ableton-live-mcp's `dissect_reference` job on refdissect f907dd2, built by `build_from_blueprint`), and the listener liked it. Its new pads, the perc's level and the one-shot were not judged one by one (item 6).
 

@@ -97,10 +97,11 @@ CHOKE_S = 0.001
 # With Glide on (one voice), a note that comes while the chain before still sounds in its release, at any pitch,
 # takes that voice over as a note of its pitch does without Glide (late_808 mono: the chain faded out over
 # RETRIGGER_S from the note, the note RETRIGGER_S late, planned that much earlier). Measured in Live 12.4.16
-# (2026-11-18, glides-1's whole plan with slides, built and recorded at 48 kHz): its 43 notes that came 0.4-27.6 ms
-# after the note before ended, at any pitch, started a median 1.15 ms (0.75-1.44) after render.py's with this off,
-# and within -0.12..+0.42 ms of it with this on, as the notes after a release did (+0.37..+0.44 ms); the 808's
-# residual under the render went -19.9 -> -32.4 dB. Off, such a note starts on time and the chain before rings out.
+# (2026-11-18, glides-1's whole plan with slides, built and recorded at 48 kHz; each note's lag behind render.py's
+# over 20-60 ms from 1 ms before it): its 43 notes that came 0.4-27.6 ms after the note before ended, at any pitch,
+# lagged 0.78-0.97 ms more than the 6 that came after a release with this off, and 0.04-0.22 ms less with it on;
+# the 808's residual under the render went -19.9 -> -32.4 dB. Off, such a note starts on time and the chain before
+# rings out.
 GLIDE_TAKEOVER = True
 # The 808 Simpler's release, Live's default Ve Release (live.simpler_808 sends it): in the live check (probe A,
 # four isolated notes) the voice fell 1.683 dB a ms from its note's end, a straight line in dB within 0.5 dB, and
@@ -372,8 +373,8 @@ def late_808(notes: list[dict], bps: float, played_s, mono: bool = False) -> np.
     808's notes after a note of their pitch started 0.94 to 1.05 ms after
     the other notes of their pitch, whose own delay was the filter's
     (simpler_808 now turns it off). mono (one voice: Glide on): the note
-    before at any pitch, as the one voice is the one it takes over; not
-    measured in Live, which started a note 25 ms after one ended again."""
+    before at any pitch, as the one voice is the one it takes over (what
+    Live 12.4.16 played on a whole plan with Glide: GLIDE_TAKEOVER)."""
     late = np.zeros(len(notes), bool)
     by_pitch: dict[int, list[int]] = {}
     for k, nt in enumerate(notes):
