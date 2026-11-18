@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -86,11 +87,27 @@ FADE_IN_S, EARLIEST_S, QUIET, RISE_S, ATTACK_TOL = 5e-4, 0.05, 0.2, 0.002, 2.5e-
 # the same fit. On v1-1, one process: a candidate 1.80 -> 1.08 ms (1.77 on one thread, made in place: _sound),
 # the fit 44.1 -> 26.7 s
 SECOND = max(1, int(os.environ.get("REFDISSECT_THREADS", "4"))) > 1
+_local = threading.local()  # .second: set in the second thread itself
+
+
+def _mark_second() -> None:
+    _local.second = True
 
 
 @functools.cache
 def _second() -> ThreadPoolExecutor:
-    return ThreadPoolExecutor(1, thread_name_prefix="refdissect-fit")
+    return ThreadPoolExecutor(1, thread_name_prefix="refdissect-fit", initializer=_mark_second)
+
+
+def _two() -> bool:
+    """Whether to hand work to the second thread: SECOND, and not called
+    from that thread (it would wait on itself; then all of it runs here)."""
+    return SECOND and not getattr(_local, "second", False)
+
+
+def _made(x):
+    """An array, or what a Future of one gives once it is done."""
+    return x if isinstance(x, np.ndarray) else x.result()
 
 
 @dataclass
@@ -163,14 +180,12 @@ def _envelope(p: Params, neg: np.ndarray) -> np.ndarray:
 def _sound(p: Params, t: np.ndarray, phi: np.ndarray, neg: np.ndarray | None = None, amp=None) -> np.ndarray:
     """The voice at phase phi (radians) at times t: its envelope and drive,
     peak-normalized (neg: -t; amp: its envelope made already, or a Future
-    of it)."""
+    of it, waited for once the oscillator is made)."""
     if amp is None:
         amp = _envelope(p, -t if neg is None else neg)
-    elif not isinstance(amp, np.ndarray):
-        amp = amp.result()
     if not p.gritty:
         y = np.sin(phi)
-        y *= amp
+        y *= _made(amp)
         y += p.asym
         y *= p.drive
         np.tanh(y, out=y)
@@ -182,7 +197,7 @@ def _sound(p: Params, t: np.ndarray, phi: np.ndarray, neg: np.ndarray | None = N
 
         def shape(u):
             return np.tanh(p.drive * u * (1 + p.skew * np.sign(u)))
-        y = shape(amp * osc + p.asym) - shape(p.asym)
+        y = shape(_made(amp) * osc + p.asym) - shape(p.asym)
     y /= np.max(np.abs(y)) or 1.0
     return y.astype(np.float32)
 
@@ -192,8 +207,8 @@ def voice(p: Params, seconds: float, pitch_hz: float | None = None) -> np.ndarra
     drop keeps its size in semitones)."""
     n = int(seconds * SR)
     t, neg = _times(n), _before(n)
-    # the envelope on the second thread while this one makes the phase (SECOND; never called from that thread)
-    amp = _second().submit(_envelope, p, neg) if SECOND else None
+    # the envelope on the second thread while this one makes the phase (_two)
+    amp = _second().submit(_envelope, p, neg) if _two() else None
     phi = np.cumsum(_drop_hz(p, t, (pitch_hz / p.f_end_hz) if pitch_hz else 1.0, neg))
     phi *= 2 * np.pi
     phi /= SR
@@ -259,8 +274,8 @@ def _scorer(reference: np.ndarray, f1: float):
         y = laid_out(p, n)
         if upper is None:
             return 1 - wave_match(band(y, "808"))
-        # the harmonics and the envelope on the second thread while this one filters and correlates (SECOND)
-        other = _second().submit(rest, y, p.f_end_hz) if SECOND else None
+        # the harmonics and the envelope on the second thread while this one filters and correlates (_two)
+        other = _second().submit(rest, y, p.f_end_hz) if _two() else None
         wave = 1 - wave_match(band(y, "808"))
         off, env = other.result() if other else rest(y, p.f_end_hz)
         harm = np.mean(off) / 20

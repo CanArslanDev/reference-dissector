@@ -235,10 +235,12 @@ def test_windows_searched_together_rank_as_they_do_alone(noisy, monkeypatch):
 
 
 def test_a_sweep_and_a_speckle_search_on_threads_are_the_ones_on_one(noisy, monkeypatch):
-    """_sweep and correlate_many on 4 threads, each block's transform made
-    ahead while the block before is scored, give the numbers one thread
-    gives, and correlate_many those of a loop over its blocks and speckles
-    (the search as it was), to the bit."""
+    """_sweep (untransposed and transposed) and correlate_many on 4 threads,
+    each block's transform made ahead while the block before is scored, give
+    the numbers they give with THREADS 1, which never touches the pool, and
+    correlate_many those of a loop over its blocks and speckles (the search
+    as it was), to the bit. Called from one of the pool's own threads, they
+    run in it instead of waiting on the pool."""
     from concurrent.futures import ThreadPoolExecutor
 
     from refdissect import library
@@ -259,14 +261,23 @@ def test_a_sweep_and_a_speckle_search_on_threads_are_the_ones_on_one(noisy, monk
             c = np.fft.irfft(Q[None, :] * S, nfft, axis=1)[:, lags]
             k = np.argmax(c, axis=1)
             peak[a:a + 32], cents[a:a + 32] = c[np.arange(len(c)), k] / n_bins, np.where(k <= wide, k, k - len(lags))
-    out = {}
-    for n in (1, 4):
-        with ThreadPoolExecutor(n) as pool:
-            monkeypatch.setattr(library, "_threads", lambda pool=pool: pool)
-            out[n] = lib._sweep(kicks, "kick", 0.0, None, 30, 32) + correlate_many(qs, bank, chunk=32)
-    assert len(out[1]) == len(out[4]) == 5
-    assert all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(out[1], out[4]))
-    assert all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(out[4][3:], loop))
+
+    def search():
+        return (lib._sweep(kicks, "kick", 0.0, None, 30, 32) + lib._sweep(kicks, "kick", -1.5, None, 30, 32)
+                + correlate_many(qs, bank, chunk=32))
+
+    def same(x, y):
+        return len(x) == len(y) and all(np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) for a, b in zip(x, y))
+    monkeypatch.setattr(library, "THREADS", 1)
+    monkeypatch.setattr(library, "_threads", lambda: pytest.fail("THREADS 1 handed work to the pool"))
+    one = search()
+    monkeypatch.setattr(library, "THREADS", 4)
+    with ThreadPoolExecutor(4, initializer=library._mark_worker) as pool:
+        monkeypatch.setattr(library, "_threads", lambda: pool)
+        four = search()
+        inside = pool.submit(search).result(timeout=120)
+    assert len(one) == 8 and same(one, four) and same(one, inside) and same(four[6:], loop)
+    assert not np.array_equal(one[0][0], one[3][0])  # the transposed sweep is another one
 
 
 def test_a_transposed_candidate_is_resampled_from_the_start_it_needs(noisy, monkeypatch):
