@@ -1,3 +1,4 @@
+import inspect
 import json
 import re
 from pathlib import Path
@@ -1032,3 +1033,31 @@ def test_live_sr_reaches_the_plan_and_every_level_reading(tmp_path, monkeypatch)
     calls.clear()
     assert "live_sr" not in make_plan(analysis, matches, synth, tmp_path)
     assert {name for name, _ in calls} == {"pad_levels"} and {sr for _, sr in calls} == {None}
+
+
+def test_choke_groups_are_on_by_default_and_off_with_no_chokes(tmp_path, monkeypatch):
+    """plan and suite run plan choke groups by default (since Live 12.4.16
+    played a plan with one as render.py does, docs/07): pipeline.plan gets
+    chokes=True unless --no-chokes, and suite run hands each beat's plan step
+    {"chokes": False} only when it is turned off (cli._plan_kwargs: options
+    that differ from plan's defaults)."""
+    from refdissect import pipeline, suite
+    from refdissect.cli import main
+
+    assert inspect.signature(pipeline.plan).parameters["chokes"].default is True
+    passed = []
+    monkeypatch.setattr(pipeline, "plan", lambda work, **k: passed.append(k))
+    main(["plan", str(tmp_path)])
+    main(["plan", str(tmp_path), "--no-chokes"])
+    assert [k["chokes"] for k in passed] == [True, False]
+    options = []
+
+    def run(*args, **kwargs):
+        options.append(args[8])
+        return {"beats": 0, "failed": [], "overall": {"analysis": {}, "plan": {}}}
+
+    monkeypatch.setattr(suite, "run", run)
+    base = ["suite", "run", str(tmp_path), "--library", "lib.npz", "--tag", "t"]
+    main(base)
+    main(base + ["--no-chokes"])
+    assert "plan" not in options[0] and options[1]["plan"] == {"chokes": False}

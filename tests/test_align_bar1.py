@@ -101,15 +101,16 @@ BEFORE = {"plan.json": "ffddace6989002c1", "blueprint.json": "9bd46482751cec46",
 def test_with_the_option_off_plan_writes_what_it_wrote_before(tmp_path):
     """The option is off by default: plan.json, the MIDI files and the
     blueprint of a plan whose first bar line lies 0.4 s in are, byte for
-    byte, what the code before the option wrote (BEFORE), and `--align-bar1`
+    byte, what the code before the option wrote (BEFORE, made without choke
+    groups, which are on by default since: --no-chokes), and `--align-bar1`
     writes others."""
     work = _work(tmp_path, 0.4)
-    assert main(["plan", str(work)]) == 0
+    assert main(["plan", str(work), "--no-chokes"]) == 0
     assert main(["blueprint", str(work)]) == 0
     plan = json.loads((work / "plan.json").read_text(encoding="utf-8"))
     assert "align_bar1" not in plan
     assert _digests(tmp_path, work) == BEFORE
-    assert main(["plan", str(work), "--align-bar1"]) == 0
+    assert main(["plan", str(work), "--align-bar1", "--no-chokes"]) == 0
     assert main(["blueprint", str(work)]) == 0
     moved = _digests(tmp_path, work)
     assert all(moved[name] != BEFORE[name] for name in BEFORE)
@@ -327,8 +328,8 @@ def test_the_command_and_suite_run_pass_it_on(tmp_path, monkeypatch, capsys):
     main(base + ["--align-bar1"])
     main(base)
     assert options[0]["plan"] == {"align_bar1": True} and "plan" not in options[1]
-    assert _plan_kwargs(type("A", (), {"chokes": True, "live_sr": None, "align_bar1": True})()) == \
-        {"plan": {"chokes": True, "align_bar1": True}}
+    assert _plan_kwargs(type("A", (), {"chokes": False, "live_sr": None, "align_bar1": True})()) == \
+        {"plan": {"chokes": False, "align_bar1": True}}
     monkeypatch.undo()
     logged = []
     for phase in (0.4, 0.01):

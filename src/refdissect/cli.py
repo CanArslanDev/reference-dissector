@@ -152,9 +152,10 @@ def _fit(a):
 
 
 def _plan_options(s) -> None:
-    s.add_argument("--chokes", action="store_true",
+    s.add_argument("--chokes", action=argparse.BooleanOptionalAction, default=True,
                    help="put the hat pads in one choke group where the drum stem shows the closed hats cutting the "
-                        "open hats (live.choked_hats; off by default: see docs/12)")
+                        "open hats (live.choked_hats; on by default since Live played it as render.py does: "
+                        "docs/07; --no-chokes leaves every pad out of a group)")
     s.add_argument("--live-sr", type=int, default=None, metavar="HZ",
                    help="the rate of the audio device Live plays at (48000 measured): the plan's levels, and "
                         "its renders, play each pad through Simpler's resampler at it (render.simpler_play), "
@@ -167,8 +168,9 @@ def _plan_options(s) -> None:
 
 
 def _plan_kwargs(a) -> dict:
-    """plan's options as `suite run` passes them on: none unless given."""
-    out = {**({"chokes": True} if a.chokes else {}), **({"live_sr": a.live_sr} if a.live_sr else {})}
+    """plan's options as `suite run` passes them on: none unless they differ
+    from plan's defaults (chokes on)."""
+    out = {**({"chokes": False} if not a.chokes else {}), **({"live_sr": a.live_sr} if a.live_sr else {})}
     if a.align_bar1:
         out["align_bar1"] = True
     return {"plan": out} if out else {}
