@@ -471,10 +471,11 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
     Live 12.4.6's law there: hits at 1, 0.5 and 0.3 of the 90th
     percentile's gain play 0, -6.02 and -10.46 dB from it (within half a
     velocity step, 0.07 dB). The faders are worked out under the same law,
-    so the render puts each track on its stem's RMS less the headroom (a
-    drum stem of the pad's own hits at those gains)."""
+    so the render puts the drum track on its stem's RMS less the headroom
+    (a drum stem of the pad's own hits at those gains), and the 808 the
+    headroom under the bass stem at its note's attack (level_808)."""
     from refdissect.audio import rms_db, transpose
-    from refdissect.live import build_spec
+    from refdissect.live import build_spec, level_808
     from refdissect.render import render_plan
     analysis, matches, synth = _fixture(tmp_path)
     gains = [1.0, 0.5, 0.3, 1.0, 1.0, 0.5, 0.3, 1.0]
@@ -496,7 +497,45 @@ def test_the_plan_plays_its_hits_gains_under_lives_velocity_law(tmp_path):
     assert rms_db(drums) == pytest.approx(rms_db(stem) - plan["levels"]["headroom_db"], abs=0.06)
     bass = sf.read(tmp_path / "bass.wav", dtype="float32")[0]
     t808 = sf.read(tmp_path / "r" / m["tracks"]["808"], dtype="float32")[0]
-    assert rms_db(t808) == pytest.approx(rms_db(bass) - plan["levels"]["headroom_db"], abs=0.1)
+    track808 = plan["tracks"]["808"]
+    shot = sf.read(track808["sample_path"], dtype="float32")[0]
+    assert level_808(track808, shot, t808, bass, plan["tempo"] / 60) == pytest.approx(
+        plan["levels"]["headroom_db"], abs=0.06)
+
+
+def test_the_808_fader_matches_the_stem_where_the_score_reads_the_808(tmp_path, monkeypatch):
+    """The bass stem holds the 808's four notes 6.02 dB under the one-shot
+    at unity, each ending after 0.2 s where the plan holds it 0.45 s (the
+    song's notes shorter than the plan's). Matched by whole-track RMS, the
+    fader put the 808 3.5 dB under the stem at each note's attack, where
+    evaluate.level_scores reads it. The fader matches the 808 band over
+    LEVEL_MS from each note's attack, as estimate_from_plan times it
+    (attacks_808): -6.02 dB less the headroom. A kick is still read under
+    the 808 at the RMS-matched level (pad_levels' `under`)."""
+    from refdissect import live
+    from refdissect.audio import rms_db
+    from refdissect.evaluate import estimate_from_plan
+    from refdissect.render import render_808
+    plan = _kit(tmp_path, kick_in_bass=0.0, under=0.5)
+    t808, bps, head = plan["tracks"]["808"], plan["tempo"] / 60, plan["levels"]["headroom_db"]
+    shot = sf.read(t808["sample_path"], dtype="float32")[0]
+    short = {**t808, "notes": [{**n, "duration": 0.2 * bps} for n in t808["notes"]]}
+    bass = 0.5 * render_808(short, shot, 4 * SR, bps, None, True, 1.0, "live")
+    sf.write(tmp_path / "bass.wav", bass, SR, subtype="FLOAT")
+    heard = {}
+
+    def pad_levels(plan, drums, low=None, under=None, **kw):
+        heard["under"] = under
+        return {}
+
+    monkeypatch.setattr(live, "pad_levels", pad_levels)
+    levels = live.estimate_levels(plan, {"source": {"duration_s": 4.0}}, head)
+    ours = render_808(t808, shot, 4 * SR, bps, None, True, 1.0, "live")
+    assert levels["808_track_db"] == round(20 * np.log10(0.5) - head, 1) == -10.0
+    assert rms_db(bass) - rms_db(ours) - head == pytest.approx(-13.53, abs=0.01)  # the RMS match
+    assert rms_db(heard["under"]) == pytest.approx(rms_db(bass), abs=0.05)
+    est = sorted(e["t_attack"] for e in estimate_from_plan(plan)["bass808"])
+    assert live.attacks_808(t808, shot, bps) == pytest.approx(est, abs=1e-5)
 
 
 def _kit(tmp_path, kick_in_bass: float = 0.6, under: float = 0.0, copy_gain: float | None = None,

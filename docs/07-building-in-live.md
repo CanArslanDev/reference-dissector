@@ -24,7 +24,7 @@ Also set:
 - the song tempo, to the fitted grid (136.999 for PIRAMIT; 137.002 before replica mode), and the time signature, to the plan's meter (3/4 for meter34), before any locator;
 - locators at section starts, rounded to whole beats; one that Live puts elsewhere is deleted and reported;
 - the view, to the Arrangement with the playhead at 0;
-- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum and 808 tracks at the RMS of the stems they replace, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back: in Live 12.4.16 every pad's held (2026-11-14, [below](#verified-in-live)).
+- levels: each pad at a Volume of its own, read where the stems hold its sound (a kick on drums + bass less the plan's 808), the loudest pad at 0 dB; the drum track at the drum stem's RMS, the 808 where the bass stem holds each note's attack, the drum fader stopping where the loudest pad plays as loud as the stem holds its sound; everything 4 dB down for headroom ([01](01-pipeline.md#plan)). Live held a pad's Volume sent as text a display step under it and played what it held within 0.003 dB (below); the build now sends a number and reads it back: in Live 12.4.16 every pad's held (2026-11-14, [below](#verified-in-live)).
 
 After `build_tracks` the build reads back the file each Simpler holds and compares it with the plan's.
 

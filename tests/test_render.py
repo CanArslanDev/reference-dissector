@@ -255,6 +255,27 @@ def test_with_glide_one_voice_takes_over_the_release_of_any_pitch(tmp_path):
     assert [n["flags"] for n in est] == [[], ["legato"], ["retrigger"]]
 
 
+def test_the_808_fader_reads_the_notes_where_the_estimate_times_them_under_glide(tmp_path):
+    """live.attacks_808 times the 808's notes as estimate_from_plan does,
+    with Glide on, a start_s of 50 ms and a one-shot of 0.95 s from there: a
+    chain's first note at its start plus the one-shot's attack, a legato
+    note at its start, the note that comes in the release of the chain
+    before 1 ms late; the third legato note, which starts after the voice
+    has read past the one-shot's end (0.85 s, sliding up 5 semitones from
+    0.5 s), plays nothing and is left out of both."""
+    from refdissect.live import attacks_808
+    t = np.arange(SR) / SR
+    sine = 0.8 * np.sin(2 * np.pi * 32.703 * t) * np.exp(-t / 0.5)
+    t808 = {"sample_path": wav(tmp_path, "808.wav", sine), "root_midi": 24, "transpose": 36, "start_s": 0.05,
+            "voices": 1, "glide_mode": "Glide", "glide_time_ms": 60.0,
+            "notes": [note(24, 0.0, duration=1.02), note(29, 1.0, duration=1.52), note(31, 2.5, duration=0.5),
+                      note(24, 4.0, duration=0.5), note(29, 4.52, duration=0.5)]}
+    est = estimate_from_plan(plan({}, [], t808))["bass808"]
+    assert [n["flags"] for n in est] == [[], ["legato"], [], ["retrigger"]]
+    got = attacks_808(t808, sf.read(t808["sample_path"], dtype="float32")[0], 2.0)
+    assert sorted(got) == pytest.approx([n["t_attack"] for n in est], abs=1e-5)
+
+
 def test_a_retrigger_inside_a_retrigger_still_renders(tmp_path):
     """Plans make_plan never writes, but an edited plan can: a hit 0.5 ms
     after a late hit of its pad, two hits of a pad at one time after a late
