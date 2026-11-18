@@ -755,11 +755,13 @@ def melodic(work: str | Path, stems_dir: str | Path | None = None, min_hz: float
     return out
 
 
-def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = False,
+def plan(work: str | Path, stems_dir: str | Path | None = None, log=print, chokes: bool = True,
          live_sr: int | None = None,
          align_bar1: bool = False) -> dict:
     """plan.json and midi/ from the work folder's analysis (live.make_plan,
-    live.write_midi). align_bar1: moved onto Live's bars where the grid's
+    live.write_midi). chokes (on by default): the hat pads in a choke group
+    where the drum stem shows closed hats cutting open hats
+    (live.choked_hats). align_bar1: moved onto Live's bars where the grid's
     first bar line lies more than live.ALIGN_MS from 0 s (off by default:
     live.onto_live_bars)."""
     from .live import ALIGN_MS, make_plan, write_midi
