@@ -367,7 +367,7 @@ Live 12.4.16 Trial, an empty, unsaved scratch set. Plans of the suite (calibrati
 - **An 808 note in the release of its own pitch.** One note, 36.3 ms after the note before it ended, started 1.085 ms late in Live. `render.py`, whose release reaches −60 dB 35.7 ms after a note's end, plays it on time. Live's voice may last to its 50 ms Release time. One note only; nothing was changed ([10](10-roadmap.md#6-the-open-issues)).
 - **A build that stops half way.** A test blueprint had, on its 4th track, an instrument Live does not have. `build_from_blueprint` stopped with "build_tracks stopped: Could not insert 'NoSuchSynth': Device NoSuchSynth not found.. It left '808 (synth)' (…), 'Drums (library)' (Drum Rack), 'other (notes)' (Drift), '8-MIDI' (no device) in the set: delete them, or open a new set, before building again". The set held exactly those 4 tracks, with the plan's tempo already set and no locator.
   - A set that still held a build's locators was refused before anything was built: "The set is not empty (locator 'A (1)' at beat 0, …): open a new Live set first".
-  - `refdissect live-build` printed both as a traceback. With #26 (pending) it prints the message alone and exits 1.
+  - `refdissect live-build` printed both as a traceback; since 2026-11-18 it prints the message alone on stderr and exits 1.
 - **The muted "vocals (notes)" track was armed.** After every build that track, the last MIDI track the build makes, was armed. The recordings were made after disarming it. Not investigated.
 
 ### What the build does with it
