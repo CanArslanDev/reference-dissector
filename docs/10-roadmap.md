@@ -272,6 +272,7 @@ These are from before replica mode, and still open.
      - It also adds 39 s of fit a beat.
    - Still to do: on by default, once the kick's level no longer depends on the one-shot (item 6, "A kick is read under the plan's own 808"); then judge it by ear.
 3. **Melodic instruments.** The plan's melodic tracks are muted and play a placeholder (Drift). Choose instruments by CLAP (`find_similar_sounds`), or synthesize them.
+   - Research note, 2026-11-21: [13](13-similar-song.md). CLAP alone against a stem misleads; a shortlist played on the layer's own notes through its fitted space, with a fitted voice and the stock sound as a control, goes to the ear.
    - **Measured by:** note F1 against hand-checked bars; chroma distance.
 4. **Style mode and profiles** (the original brief):
    - pattern statistics per artist or album (hat roll rate, kick placement, 808 glide rate, chord vocabulary, section lengths) from several songs;
@@ -286,7 +287,7 @@ These are from before replica mode, and still open.
 6. **Style beats** ([11](11-style-beat-lessons.md)).
    - Done: `listening-round` (numbered A/B files and a manifest), `compare`, `space` and `mix-gains` commands.
    - Done: `candidates` draws 8-bar candidates from a plan's statistics, seeded and reproducible. The statistics are tempo, meter, swing, each drum role's placement, hat rolls, the 808's placement, register, pitches and slides, and the chords. It renders each candidate with `render.py` (the chords on a plain pad), ducks the 808 and the chords along the reference's kick curve, measures each one with `compare` and puts them into one listening round ([11](11-style-beat-lessons.md#5-sketches-drawn-from-the-plan-candidates)).
-   - Still to do: a listener's picks on real candidates. Melodies and riffs: a candidate has drums, 808 and chords only. Statistics from several songs (item 4). Candidates separated by Demucs by default, so they compare symmetrically.
+   - Still to do: a listener's picks on real candidates. Melodies and riffs: a candidate has drums, 808 and chords only ([13](13-similar-song.md) proposes riff and pulse parts drawn from a layer's onset and pitch-class shares, after a layer split). Statistics from several songs (item 4). Candidates separated by Demucs by default, so they compare symmetrically.
    - **Measured by:** the listener's picks, and ducking and balance against the reference.
 
 **Not planned:** publishing transcriptions or audio of songs, for the reasons in [09](09-data-and-copyright.md).
