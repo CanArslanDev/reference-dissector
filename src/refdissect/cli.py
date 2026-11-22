@@ -592,8 +592,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--notes", default=None, help="a corrected file instead of melodic.json's notes: MIDI, or JSON "
                                                  "notes in beats; bar 1 of the file is the first bar asked for")
     s.add_argument("--audio", default=None, help="check against this file instead of the stem: one layer of it, on "
-                                                 "the song's clock (--stem then names the layer; needs --notes "
-                                                 "when melodic.json does not have it)")
+                                                 "the song's clock (--stem then names the layer; needs --notes: "
+                                                 "melodic.json's notes are the stem's)")
     s.add_argument("--out", default=None, help="folder (default: WORK/melody-check)")
     s.add_argument("--bars-per-file", type=int, default=None, help="one A/B file per this many bars")
     s.add_argument("--lufs", type=float, default=-14.0)

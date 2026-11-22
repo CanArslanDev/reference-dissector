@@ -87,6 +87,12 @@ def test_midi_cuts_a_note_where_its_pitch_starts_again(tmp_path):
     got = MC.read_notes(MC.write_midi(notes, 120.0, tmp_path / "m.mid", meter=(7, 8)))
     assert got == [{"pitch": 60, "start": 0.0, "length": 1.0}, {"pitch": 64, "start": 0.0, "length": 2.0},
                    {"pitch": 60, "start": 1.0, "length": 0.5}]
+    for notes, want in (([(0, 2), (0, 4), (1, 0.5)], [(0.0, 1.0), (1.0, 0.5)]),      # equal starts: the longest
+                        ([(0, 2), (0, 4), (1, 3)], [(0.0, 1.0), (1.0, 3.0)]),
+                        ([(0, 8), (1, 4), (2, 1)], [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0)])):
+        path = MC.write_midi([{"pitch": 60, "start": a, "length": b} for a, b in notes], 120.0, tmp_path / "e.mid")
+        assert [(n["start"], n["length"]) for n in MC.read_notes(path)] == want
+    assert not np.any(MC.render([{"pitch": 60, "start": -1.0, "length": 0.5}], 120.0, 1.0, SR))
     import mido
     sig = [m for m in mido.MidiFile(str(tmp_path / "m.mid")).tracks[0] if m.type == "time_signature"][0]
     assert (sig.numerator, sig.denominator) == (7, 8)
@@ -95,9 +101,12 @@ def test_midi_cuts_a_note_where_its_pitch_starts_again(tmp_path):
 def test_check_keeps_a_note_from_before_the_first_bar_and_refuses_a_bad_split(work, tmp_path):
     (tmp_path / "n.json").write_text(json.dumps([{"pitch": 60, "start": -0.5, "length": 1.0},
                                                  {"pitch": 62, "start": -2.0, "length": 1.0},
-                                                 {"pitch": 64, "start": 1.0, "length": 0.5}]))
+                                                 {"pitch": 64, "start": 1.0, "length": 0.5},
+                                                 {"pitch": 65, "start": 3.5, "length": 2.0},
+                                                 {"pitch": 67, "start": 0.0, "length": 0.0}]))
     m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o", notes_file=tmp_path / "n.json")
-    assert [(n["pitch"], n["start"], n["length"]) for n in m["notes"]] == [(60, 0.0, 0.5), (64, 1.0, 0.5)]
+    assert [(n["pitch"], n["start"], n["length"]) for n in m["notes"]] == [
+        (60, 0.0, 0.5), (67, 0.0, 0.0), (64, 1.0, 0.5), (65, 3.5, 0.5)]
     with pytest.raises(ValueError, match="bars_per_file"):
         MC.check(work, "other", (2, 3), bars_per_file=0)
 
@@ -180,14 +189,16 @@ def test_check_against_a_layer_file_melodic_json_does_not_know(work, tmp_path):
     assert m["notes_per_bar"] == [2] and (tmp_path / "o" / "melody_AB.wav").is_file()
     over, _ = sf.read(str(tmp_path / "o" / "melody_overlay.wav"))
     assert abs(freq_of(over[int(0.55 * SR):int(0.95 * SR), 1]) - 440.0 * 2 ** ((62 - 69) / 12)) < 3
-    with pytest.raises(ValueError, match="needs both audio and notes"):
+    with pytest.raises(ValueError, match="needs its own notes"):
         MC.check(work, "piano", (2, 2), audio=tmp_path / "piano.wav")
+    with pytest.raises(ValueError, match="needs both audio and notes"):
+        MC.check(work, "piano", (2, 2), notes_file=tmp_path / "piano.json")
     # a stem melodic.json knows, against another file: its reading is the stem's, so nothing is compared
     m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o2", notes_file=tmp_path / "piano.json",
                  audio=tmp_path / "piano.wav")
     assert m["against_reading"] is None
-    m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o4", audio=tmp_path / "piano.wav")
-    assert m["notes_from"] == "melodic.json" and len(m["notes"]) == 4  # its own notes, heard against the layer
+    with pytest.raises(ValueError, match="needs its own notes"):  # the stem's notes are not the layer's
+        MC.check(work, "other", (2, 2), out_dir=tmp_path / "o4", audio=tmp_path / "piano.wav")
     (work / "melodic.json").unlink()
     m = MC.check(work, "piano", (2, 2), out_dir=tmp_path / "o3", notes_file=tmp_path / "piano.json",
                  audio=tmp_path / "piano.wav")

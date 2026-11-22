@@ -12,9 +12,9 @@ one layer of it (`audio`), this writes:
 
 A corrected file (MIDI, or notes as JSON in beats) is read back the same way,
 so the correction is heard against the stem too, and it is compared with the
-reading: how many notes were kept, moved, repitched, added and removed.
-The check confirms pitches and starts. A plain tone says little about how
-long a note rings or how loud it is: those are taken from the layer.
+reading (not for a layer file, which has no reading of its own): how many
+notes were kept, moved, repitched, added and removed. The check confirms
+pitches and starts. A plain tone says little about how long a note rings or how loud it is: those are taken from the layer.
 
 Notes here are in beats (quarter notes) from the first bar asked for:
 {"pitch": MIDI number, "start": beats, "length": beats}.
@@ -83,7 +83,7 @@ def render(notes: list[dict], bpm: float, seconds: float, sr: int, cents: float 
     out = np.zeros(int(round(seconds * sr)))
     for n in notes:
         a = int(round(n["start"] * beat * sr))
-        if a >= len(out):
+        if a >= len(out) or a < 0:  # outside the span (check() moves a note from before it onto its start)
             continue
         y = tone(n["pitch"] + cents / 100, max(n["length"] * beat, 0.03), sr)
         m = min(len(y), len(out) - a)
@@ -99,21 +99,25 @@ def write_midi(notes: list[dict], bpm: float, path: str | Path, ppq: int = PPQ,
                meter: tuple[int, int] = (4, 4)) -> Path:
     """The notes as a one-track MIDI file at the grid's tempo and meter, bar 1
     of the file being the first bar asked for. A note still sounding when
-    its pitch starts again ends there: a MIDI file cannot tell two sounding
-    notes of one pitch apart (their note-offs would pair the wrong way)."""
+    its pitch starts again ends there, and of notes of one pitch that start
+    together the longest is kept: a MIDI file cannot tell two sounding notes
+    of one pitch apart (their note-offs would pair the wrong way)."""
     import mido
     mid = mido.MidiFile(ticks_per_beat=ppq)
     track = mido.MidiTrack()
     mid.tracks.append(track)
     track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0))
     track.append(mido.MetaMessage("time_signature", numerator=meter[0], denominator=meter[1], time=0))
-    spans = sorted((int(n["pitch"]), int(round(n["start"] * ppq)),
-                    int(round((n["start"] + n["length"]) * ppq))) for n in notes)
+    ends: dict[tuple[int, int], int] = {}  # (pitch, start tick) -> end tick: of equal starts, the longest
+    for n in notes:
+        on = int(round(n["start"] * ppq))
+        key = (int(n["pitch"]), on)
+        ends[key] = max(ends.get(key, on + 1), int(round((n["start"] + n["length"]) * ppq)))
+    spans = sorted(ends.items())
     events = []
-    for k, (pitch, on, off) in enumerate(spans):
-        off = max(on + 1, off)
-        if k + 1 < len(spans) and spans[k + 1][0] == pitch and on < spans[k + 1][1]:
-            off = min(off, spans[k + 1][1])
+    for k, ((pitch, on), off) in enumerate(spans):
+        if k + 1 < len(spans) and spans[k + 1][0][0] == pitch:
+            off = min(off, spans[k + 1][0][1])
         events += [(on, 1, pitch), (off, 0, pitch)]
     now = 0
     for tick, kind, pitch in sorted(events):  # at one tick, note-offs first
@@ -205,9 +209,9 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
     corrected file's (beats from the first bar), compared with the reading.
     `audio` is a file to check against instead of the stem, on the song's
     clock: one layer of the stem, cut by another separation of the same
-    file. With `audio` there is no reading to compare with (melodic.json's
-    notes are the stem's, not the layer's), and a layer melodic.json does
-    not know needs notes_file. Writes into out_dir (WORK/melody-check by default): melody_AB.wav (one per
+    file. `audio` needs notes_file, and nothing is compared with a reading:
+    melodic.json's notes are the stem's, not the layer's. Writes into out_dir
+    (WORK/melody-check by default): melody_AB.wav (one per
     `bars_per_file` bars when given), melody_overlay.wav, melody.mid and
     melody-check.json, which it returns."""
     work = Path(work)
@@ -215,7 +219,9 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
     known = json.loads((work / "melodic.json").read_text(encoding="utf-8"))["stems"] \
         if (work / "melodic.json").is_file() else {}
     entry = known.get(stem)
-    if entry is None and (audio is None or notes_file is None):
+    if audio is not None and notes_file is None:
+        raise ValueError("a layer file needs its own notes (notes_file): melodic.json's notes are the stem's")
+    if entry is None and audio is None:
         raise ValueError(f"melodic.json has no stem {stem!r} (it has {', '.join(sorted(known)) or 'none'}): "
                          "a layer it does not know needs both audio and notes")
     grid = _grid(analysis)
@@ -236,10 +242,13 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
         notes = notes_in_span(entry["notes"], grid, t0, t1)
         source, changed = "melodic.json", None
     else:
-        # a note that starts before the first bar is kept from the bar's start, if it still sounds there
-        notes = _sorted({**n, "start": max(0.0, n["start"]), "length": n["length"] + min(0.0, n["start"])}
+        # as for the reading: a note that starts before the first bar is kept from the bar's start if it
+        # still sounds there, and one that crosses the last bar's end is cut at it
+        span = (last - first + 1) * bar_beats
+        notes = _sorted({**n, "start": max(0.0, n["start"]),
+                         "length": min(n["start"] + n["length"], span) - max(0.0, n["start"])}
                         for n in read_notes(notes_file)
-                        if n["start"] + n["length"] > 0 and n["start"] < (last - first + 1) * bar_beats)
+                        if (n["start"] >= 0 or n["start"] + n["length"] > 0) and n["start"] < span)
         source, changed = str(notes_file), diff(reading, notes) if reading is not None else None
     out = Path(out_dir) if out_dir else work / "melody-check"
     out.mkdir(parents=True, exist_ok=True)
