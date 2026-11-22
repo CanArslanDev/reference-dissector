@@ -272,7 +272,7 @@ These are from before replica mode, and still open.
      - It also adds 39 s of fit a beat.
    - Still to do: on by default, once the kick's level no longer depends on the one-shot (item 6, "A kick is read under the plan's own 808"); then judge it by ear.
 3. **Melodic instruments.** The plan's melodic tracks are muted and play a placeholder (Drift). Choose instruments by CLAP (`find_similar_sounds`), or synthesize them.
-   - Research note, 2026-11-21: [13](13-similar-song.md). CLAP alone against a stem misleads; a shortlist played on the layer's own notes through its fitted space, with a fitted voice and the stock sound as a control, goes to the ear.
+   - Research note, 2026-11-21/22: [13](13-similar-song.md). CLAP alone against a stem misleads; a shortlist played on the layer's own notes through its fitted space, with a fitted voice and the stock sound as a control, goes to the ear. On PIRAMIT the ear rejected every sound tried, and heard the notes read from its stem as wrong: a layer's notes, confirmed by ear, come first.
    - **Measured by:** note F1 against hand-checked bars; chroma distance.
 4. **Style mode and profiles** (the original brief):
    - pattern statistics per artist or album (hat roll rate, kick placement, 808 glide rate, chord vocabulary, section lengths) from several songs;

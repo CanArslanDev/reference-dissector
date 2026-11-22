@@ -230,7 +230,7 @@ uv run --extra live refdissect live-build "$W/song/refdissect" --bars 9-16   # a
 | [10 – Roadmap](docs/10-roadmap.md) | What replica mode finished, the targets and their gaps, and what comes next |
 | [11 – A new beat in a song's style](docs/11-style-beat-lessons.md) | Two rejected beats: the groove, effect and same-pipeline checks they led to, what each step cost, and 8-bar sketches drawn from a plan (`candidates`) |
 | [12 – Replica mode](docs/12-replica-mode.md) | Rebuilding a reference 1:1: running it, the stages and their files, what each measured, and what is not verified in Live |
-| [13 – A song like this one](docs/13-similar-song.md) | Where the melodic layer's sound and notes come from on each path, sounds ranked against a layer (CLAP, descriptors, a fitted voice, the stock sounds), and the proposed order of work |
+| [13 – A song like this one](docs/13-similar-song.md) | Where the melodic layer's sound and notes come from on each path, sounds ranked against a layer (CLAP, descriptors, a fitted voice, the stock sounds), what the ear said (the notes come first), and the proposed order of work |
 
 Türkçe özet: [README.tr.md](README.tr.md)
 
