@@ -1,12 +1,14 @@
 # 13 – A song like this one: where the melodic layer comes from, and how to make it similar
 
-Asked for "a song like this one", the tools give drums and an 808 that come close and a melodic layer that sounds unrelated to the reference: notes on a stock piano, pad or synth (on the replica path the notes are the reference's own transcription on Drift, built muted; the reference's own stems play by default). This page traces where that layer's sound and notes come from on each of the three paths, measures what would choose a closer sound, and proposes the order of work. It is a research note: no code changes with it.
+Asked for "a song like this one", the tools give drums and an 808 that come close and a melodic layer that sounds unrelated to the reference: notes on a stock piano, pad or synth (on the replica path the notes are the reference's own transcription on Drift, built muted; the reference's own stems play by default). This page traces where that layer's sound and notes come from on each of the three paths, measures what would choose a closer sound, and proposes the order of work. It is a research note; the one command that came out of it is `refdissect melody-check`.
 
 **In short** (2026-11-21/22, PIRAMIT, bars 13–20):
 - The user heard none of six files as close: four candidates chosen against the layer and two stock controls. Three versions of a sound resynthesized from the stem's own hits were rejected: noise and wrong notes, then worse twice.
 - Every one of those tests played notes nobody had confirmed. Where the user judged the melody (the resynthesized versions, a melody check) they heard it as wrong. The stem the notes were read from holds more than one sound: the riff, a sustained layer at the same pitches, and bleed.
-- No reading tried here gets a layer's notes out of such a stem. On the suite's melodic beat, Basic Pitch's notes find 57 % of the truth's notes at a precision of 0.72, its posteriorgrams read on the 16th grid 44–46 % at 0.83–0.89; the pad's chords least. A split of the stem without a learned model works only when the notes are known: 5.5 dB on the suite's pluck with the truth's notes, 2.0–2.2 dB with read ones, against 1.5 dB with no split.
-- So the notes come first. A layer's notes have to be confirmed by ear before any sound is tested on them (section 6).
+- No reading tried here gets a layer's notes out of such a stem: on the suite the best is a precision of 0.80 at a recall of 0.72, with a second separator and a second transcription model. Alone, a layer is read at 0.99.
+- A split of the stem from known notes, without a learned model, did not give a clean layer on PIRAMIT, with the notes the user had confirmed: 3.6–3.9 dB against the layer, where the unsplit stem scores 4.2 dB.
+- What worked was the other order. A separator that puts each sound in its own stem gave three stems the user heard as cleanly separated. Basic Pitch on each of two of them gave notes the user confirmed by ear without changing one (88 and 17). One layer's own sound, played on its confirmed notes, then scored inside the layer's own spread (CLAP 0.947 against 0.942), and the user heard it as right; on the mixed stem the same test had scored 0.47–0.55.
+- So single layers come first, then each layer's notes, confirmed by ear, then the render path, then a sound (section 8). The separator that did this has no clear licence, and htdemucs_6s does not do it: that is the first open question.
 
 As in [09](09-data-and-copyright.md), no audio, stems, transcriptions, library file names or preset names are published. The numbers come from local runs. Code is cited at reference-dissector `8484988` (rd) and ableton-live-mcp `d6f28e5` (alm).
 
@@ -213,7 +215,7 @@ So the measures shortlist and the ear chooses. The cheapest protocol that also t
 2. **Record each pick** with the candidates' numbers (the proposed `sounds --pick N`, section 7).
 3. **After about 20 picks,** score every measure by how often it puts the pick first, against chance. A measure that does not beat chance is shown, not used. MERT, not tested here, goes into that comparison; so do the study's composite score and CLAP inside the layer's AST family.
 
-## 6. What the ear said: the notes come first
+## 6. What the ear said: one sound at a time, and its notes first
 
 After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each file was the reference stem, a beep, then the candidate. The files stay local. Rounds 2 and 5 got no verdict by ear. In order:
 
@@ -290,30 +292,85 @@ Measured on the suite's four beats with melodic truth, all 16 bars: `melodic-1` 
 - **refdissect's loop vote did not move it:** 0.64 and 0.53 on htdemucs' stem.
 - YourMT3+ runs in its own environment (weights Apache-2.0, code GPL-3.0); BS-Roformer-SW's licence is not clear. Both were used for a draft only. MuScriptor was not tried (non-commercial weights).
 
-On PIRAMIT, BS-Roformer-SW puts the melodic content of bars 13–20 into two stems: `piano` at −27.8 dBFS (correlation with htdemucs' `other` 0.75) and `other` at −34.1 dBFS (0.39), against −25.8 dBFS for htdemucs' `other`; the three tonal stems together correlate at 0.85. The draft for the user's correction is the best reader above on that sum. It is a draft: at the suite's figures, about one note in five of it is wrong and more than one in four is missing.
+On PIRAMIT, BS-Roformer-SW puts the melodic content of bars 13–20 into two stems: `piano` at −27.8 dBFS (correlation with htdemucs' `other` 0.75) and `other` at −34.1 dBFS (0.39), against −25.8 dBFS for htdemucs' `other` (levels of the mono sum); the three tonal stems together correlate at 0.85. A draft for the user's correction was read by the best reader above on that sum: 103 notes. At the suite's figures about one note in five of it is wrong and more than one in four is missing. The user did not correct it: in htdemucs' stem they heard at least three sounds, and asked what to do about that.
 
-`refdissect melody-check` writes the check of a reading or of a corrected file (the stem, a beep, the notes on a plain tone; the stem left and the tone right; a MIDI file), and counts what a correction changed.
+### One sound at a time (2026-11-22)
+
+**The stems.** The user listened to BS-Roformer-SW's `piano`, `other` and `guitar` stems of bars 13–20 one by one, and heard three cleanly separated sounds. The one named `guitar` may not be a guitar, they said. AST agrees: its top labels there are Sonar 0.25 and Synthesizer 0.04. That stem sits 20 dB to the left, the `piano` stem near the centre (0.8 dB to the right).
+
+**The notes, read per stem.** Basic Pitch with refdissect's preset, on each stem alone:
+
+| Stem | Notes read in bars 13–20 | The user's verdict, the stem against the notes on a plain tone |
+|---|---|---|
+| `piano` | 88 | "this is the melody", no note changed |
+| `guitar` (peak-normalised; 10 notes before that) | 17 | "this is the melody", no note changed |
+| `other` | 5 by Basic Pitch's notes, 58 by the grid reading | no draft sent: the two readings disagree |
+
+The riff the user means is the `piano` and `guitar` stems together.
+
+**The layer from the notes, without a learned model.** With the confirmed notes, the split of round 5 above was run on htdemucs' `other`, and measured against BS-Roformer-SW's stems (magnitude SDR, dB; the stems are a yardstick here, the user having heard them as the sounds alone):
+
+| | `piano` | `guitar` |
+|---|---|---|
+| no split (htdemucs' `other` as it is) | 4.2 | 0.4 |
+| the split above, a template per note, mono | 3.6 | – |
+| a template per layer and pitch, a level per channel for each layer, the bed penalised | 3.8 | 2.9 |
+| the same with no bed | 3.9 | 2.5 |
+| a mask from the level difference between the channels, no notes | – | 1.2 |
+
+- For the `piano` layer no version beats leaving the stem as it is.
+- On the suite's `melodic-1` (htdemucs' stem, the truth's notes) the second version moves the pluck from 5.5 to 5.6 dB and the lead from 3.4 to 4.3 dB; the pad stays near 1 dB, under the 2.1 dB of no split. On a sum of the truth's layers panned apart, the level per channel adds 0.5 dB on the pluck and 0.8 dB on the lead. The suite's layers are all in the centre, so its stems cannot show that gain.
+- The user chose BS-Roformer-SW's stems as the clean layers, for this study only.
+
+**htdemucs_6s does not give this separation.** On the same bars its `guitar` stem is silent (−77 dBFS) and the level is in `piano` (−29.8 dBFS) and `other` (−27.6 dBFS):
+
+| | htdemucs_6s `piano` | htdemucs `other` | BS-Roformer-SW `piano` |
+|---|---|---|---|
+| magnitude SDR against BS-Roformer-SW's `piano`, dB | 5.3 | 4.2 | – |
+| the 88 confirmed notes found by Basic Pitch (within 30 ms) | 27 %, precision 0.55 (44 notes read) | – | 100 % (they were read there) |
+| AST's top instrument label | Pizzicato 0.07 (Speech 0.31 above it) | 0.057 | Piano 0.46 (Keyboard 0.35, Electric piano 0.12) |
+
+The ear has not judged htdemucs_6s' stems.
+
+**The render path, with the layer's own sound** (personal study, [09](09-data-and-copyright.md)). One cut per pitch from the layer itself, at the confirmed note of that pitch that sounds longest before another starts; the other pitches repitched from the nearest cut; all confirmed notes played by the sampler of section 2; no reverb added, since the cuts carry the room.
+
+| Layer | Clean cuts | CLAP against the layer | The layer's first half against its second | The user |
+|---|---|---|---|---|
+| `piano` | 4 of 11 pitches | 0.947 | 0.942 | "right" |
+| `piano`, the fitted reverb on top (1.5 s, 75 % wet) | – | 0.64 | – | not sent |
+| `guitar` | 4 of 4 | 0.73 | 0.90 | "very big errors" |
+| `guitar`, each group of notes at the layer's level | – | 0.74 | – | not sent |
+| `guitar`, and each note as long as the layer sounds (median 0.37 → 0.58 s) | – | 0.78 | – | not sent |
+
+- On the mixed stem the same test had scored 0.47–0.55 (round 2 above). Against a single layer it scores as the layer scores against itself.
+- The `guitar` layer's notes were confirmed as a melody, but the plain tone says nothing about how long a note rings or how loud it is. Its events ring about two and a half beats, the notes read stop earlier, and all were played at one level. Lengths and levels from the layer close a third of the gap; the rest is open.
+- The fitted reverb of section 2 is not to be trusted where notes overlap: it reads the gaps after note-offs, and this layer has few.
+
+**The family, on a single layer.** AST's top instrument label is Piano at 0.46 on the `piano` layer, against 0.057 on the mixed stem. The user hears a piano there. Of the pool's 3,996 files, 57 score 0.2 or more on AST's piano, keyboard or electric-piano labels; by CLAP against the layer the best of them is 16th, and the twelve nearest files are long library recordings. No candidate was played: the study stopped here.
+
+`refdissect melody-check` writes the check of a reading or of a corrected file (the stem or a layer file, a beep, the notes on a plain tone; the audio left and the tone right; a MIDI file), and counts what a correction changed.
 
 **What follows.**
-- Every test above played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were Basic Pitch's, which version 3 replayed and the user heard as a worse melody, so that verdict may mix the two.
-- The notes cannot come from the stem as it is: no reader tried here gets a layer's notes out of a stem of several sounds, and the split that would clean the stem needs those notes first.
-- So the order is: first the notes, confirmed by ear on a plain tone (or given by the user); then the render path, proven with the layer's own sound; only then a choice of sound.
+- Every test of the first day played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were Basic Pitch's, which version 3 replayed and the user heard as a worse melody, so that verdict may mix the two.
+- The notes do not come out of a stem of several sounds, and a split from notes does not clean that stem. Both were the wrong question: once each sound is in its own stem, the reader refdissect already has gives notes the ear confirms.
+- So the order is: first the single layers; then each layer's notes, confirmed by ear on a plain tone against that layer; then the render path, proven with the layer's own sound, with the notes' lengths and levels taken from the layer; only then a choice of sound.
+- What separates the layers is open. The separator that did it here has no clear licence and cannot ship; htdemucs_6s does not do it on this song; the model-free splits did not either.
 
 ## 7. The flow in ableton-live-mcp
 
 Today a "song like this one" in alm has no prompt of its own. Proposed order, the producing side (rd) first, then alm's pin:
 
 **In reference-dissector** (commands that write files a model can read; none needs Live):
-1. `refdissect melody-check WORK --stem other --bars a-b`: the notes read for those bars on a plain tone, after the stem and against it in the other channel, and a file of the notes to correct. Nothing below starts on notes the user has not confirmed (section 6).
-2. `refdissect layers WORK`: per tonal stem, the layers inside it, split from the confirmed notes (section 6), each with:
+1. `refdissect layers WORK`: the sounds inside each tonal stem, each as its own audio file (section 6: what does this is the first open question), each with:
    - its kind (section 4);
-   - its instrument family (AST's instrument labels, with their probabilities);
-   - its space (`space`: reverb time and wet share fitted as in section 2, width per octave, any band-pass);
+   - its instrument family (AST's instrument labels, with their probabilities: on a single layer they can be read, section 6);
+   - its place in the stereo field and its space (`space`: width per octave, any band-pass; the reverb fit of section 2 only where the notes leave gaps);
    - its repeat (period and strength).
    It writes `layers.json`.
+2. `refdissect melodic` per layer, then `refdissect melody-check WORK --stem LAYER --audio layer.wav --notes … --bars a-b`: the layer's notes on a plain tone, after the layer and against it in the other channel, and a file of the notes to correct. Nothing below starts on notes the user has not confirmed (section 6). The check confirms pitches and starts; lengths and levels are taken from the layer.
 3. `refdissect index-presets`: CLAP vectors of Live's preset previews, beside the library index (section 2: about a minute, no Live).
 4. `refdissect sounds WORK --layer L`: the two stages of section 2 for one layer, against the layer alone, after its own sound has passed the render path (section 8).
-   - Stage 1 by CLAP, inside the layer's family. Untested: AST's family scores on separated stems are weak (PIRAMIT's top instrument label 0.057, the three-layer stem's 0.055), so the filter has to be measured before it is trusted.
+   - Stage 1 by CLAP, inside the layer's family. On a mixed stem AST's family scores are weak (PIRAMIT's top instrument label 0.057, the three-layer stem's 0.055); on PIRAMIT's single `piano` layer the top label is 0.46. One layer is not a test of the filter: it has to be measured on more before it is trusted.
    - Stage 2: the top 30 played on the layer's own notes through its fitted space, together with a voice fitted to the layer, rendered as a multisample, and the stock sound as a control.
    - Both measures and their ranks, the top 3 and the control into one `listening-round`, and the pick written back with `--pick N`.
 5. `refdissect candidates --parts riff,pulse`: new notes of the layer's kind (section 4), each candidate played on the picked sound.
@@ -325,21 +382,21 @@ Today a "song like this one" in alm has no prompt of its own. Proposed order, th
    alm's `build_tracks` already takes both. Then `check-rebuild` measures the result as before.
 
 **In ableton-live-mcp**, after rd releases these:
-- **A prompt, `song_like_reference`:** dissect → melody check, the user's confirmation → layers → per layer: sounds, listening round, the user's pick → candidates for the parts, listening round → build → `compare_to_reference`. It is a new prompt, not a change to `beat_like_reference`, which stays the 1:1 replica.
+- **A prompt, `song_like_reference`:** dissect → layers → per layer: notes, melody check, the user's confirmation; the layer's own sound through the render path; sounds, listening round, the user's pick → candidates for the parts, listening round → build → `compare_to_reference`. It is a new prompt, not a change to `beat_like_reference`, which stays the 1:1 replica.
 - **A rule in it and in the compose skill.** For a melodic layer of a reference, no instrument is loaded by name (`browser_search`, `add_device`) unless it is in that layer's stage-2 shortlist or the user asks for it. `generate_melody` is not used to imitate a reference that has no lead. The CLAP order is required, but it is not enough: the ear picks among the shortlist (section 5).
 - **The pin** to the rd release, as for 2.4.x.
 
 ## 8. Recommended path
 
-1. **The notes first, confirmed by ear.** Before any sound is tested on a layer, its notes are played on a plain tone after the stem and against it in the other channel. The user says "this is the melody", or gives the notes. No sound test, separation or candidate starts on notes that have not passed.
-2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives a cleaner layer (on the suite, an SDR of 5.5 dB against the truth's pluck): the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
-3. **Then the render path, proven with the layer's own sound.** The layer's own notes, played by its own sound through the same sampler and space, must be heard as the layer, and score near its own spread, before any candidate is played that way. On PIRAMIT's mixed stem even its own sound scored as low as Drift's default.
+1. **Single layers first.** A tonal stem is taken apart until each file holds one sound, and the user says so by ear. On PIRAMIT that took a second separator; the notes-informed split did not do it.
+2. **Then each layer's notes, confirmed by ear.** Read on the layer alone, played on a plain tone after the layer and against it in the other channel. The user says "this is the melody", or corrects the notes. No sound test or candidate starts on notes that have not passed. On PIRAMIT two layers passed without a change.
+3. **Then the render path, proven with the layer's own sound.** The layer's own notes, played by its own sound through the same sampler, must be heard as the layer and score near its own spread before any candidate is played that way. Lengths and levels come from the layer, not from the reading. On PIRAMIT one layer passed (0.947 against a spread of 0.942) and one did not (0.78 against 0.90).
 4. **Only then a sound, from a shortlist, not by name.** Ways A and B together:
-   - the library and Live's previews;
+   - the library and Live's previews, inside the layer's family;
    - a fitted voice;
    - the stock sound as a plainly labelled control.
 
-   Ranked on the confirmed notes, through the layer's space, against the layer alone. Ways B2 and C stay personal-study controls ([09](09-data-and-copyright.md)): both are built from the song's own hits. Way D is not proposed: MusicGen's and RAVE's weights are non-commercial, MusicGen's melody conditioning copies the notes, and DDSP needs a model trained per timbre.
+   Ranked on the confirmed notes, against the layer alone. For an instrument that is sampled across its range (a piano), a preset recorded at one note and repitched is not the instrument: the shortlist is recorded in Live on the layer's notes (section 9, preset parity). Ways B2 and C stay personal-study controls ([09](09-data-and-copyright.md)): both are built from the song's own hits. Way D is not proposed: MusicGen's and RAVE's weights are non-commercial, MusicGen's melody conditioning copies the notes, and DDSP needs a model trained per timbre.
 5. **Then new notes of the layer's kind,** with `candidates`' copy rule, each played on the picked sound, and the build with its space; `check-rebuild` measures it.
 
 In every listening round, one thing changes at a time, and it is measured before the files go out.
@@ -348,15 +405,18 @@ In every listening round, one thing changes at a time, and it is measured before
 
 | Job | What | Measured by |
 |---|---|---|
-| 1. A layer's notes, and a melody check | A reading of each layer's notes that recovers them from a stem of several sounds (Basic Pitch's posteriorgrams on the 16th grid, iterated with the score-informed split of section 6), and `refdissect melody-check`: the notes on a plain tone after the stem, and against it in the other channel | On the suite's melodic beats: note F1 per truth layer (today, on `melodic-1`'s htdemucs stem, all layers together: Basic Pitch's notes 57 % recall at 0.72 precision, F1 0.63; the grid reading 44 % at 0.89, F1 0.59). On PIRAMIT and HAYIR DEMELİYDİM: the user's verdict on the melody check, bar by bar |
-| 2. `layers`, and the render-path gate | The split of section 6 from the confirmed notes; per layer: kind, family, space, repeat; the layer's own sound played back through the render path; `plan`/`blueprint` carry a melodic sound slot and its `effects` instead of `"Drift"` | On the suite: magnitude SDR per layer against the truth (today 5.5 dB for the pluck with the truth's notes, 2.0–2.2 with read ones). The own-sound playback within the layer's own spread, and heard as the layer. In Live, the blueprint's Reverb, Utility and EQ Eight reproduce the offline space within 1 dB per octave. |
-| 3. `index-presets` and `sounds` | Live's preview vectors beside the library index; per layer, the shortlist of section 2 on the confirmed notes, against the layer alone, with a fitted voice and the stock control; a listening round; `--pick` | The truth sound's rank on the suite's separated layers; on the songs, stage 2's best against the stock control by both measures; the user's picks, logged, until about twenty of them can score the measures (section 5) |
+| 1. Single layers | A separation that puts each sound of a tonal stem in its own file, with a licence refdissect can ship: other separators measured against the stems the user approved on PIRAMIT, and on HAYIR DEMELİYDİM; `refdissect layers` around it | On PIRAMIT, bars 13–20: magnitude SDR against the approved `piano` stem (htdemucs_6s 5.3 dB, htdemucs' `other` 4.2 dB) and the share of the 88 confirmed notes that Basic Pitch finds on the candidate's stem (htdemucs_6s 27 %). Then the user's ear, stem by stem |
+| 2. Notes per layer, and the render-path gate | `melodic` on each layer; `refdissect melody-check --audio` (done); lengths and levels from the layer; the layer's own sound played back through the render path; `plan`/`blueprint` carry a melodic sound slot and its `effects` instead of `"Drift"` | The user's verdict on the melody check per layer. The own-sound playback within the layer's own spread and heard as the layer (PIRAMIT: `piano` 0.947 against 0.942, passed; `guitar` 0.78 against 0.90, not passed) |
+| 3. `index-presets` and `sounds` | Live's preview vectors beside the library index; per layer, the shortlist of section 2 on the confirmed notes, against the layer alone, inside its family, recorded in Live for sampled instruments, with a fitted voice and the stock control; a listening round; `--pick` | On the songs, stage 2's best against the stock control by both measures; the user's picks, logged, until about twenty of them can score the measures (section 5) |
 
 ## 9. Open questions
 
-- **How to get a layer's notes from a stem of several sounds.** On the suite no reader reaches a recall and a precision of 0.8 on a mixed stem (section 6): the best is 0.80 and 0.72, with a learned separator and a second transcription model. On PIRAMIT every reading so far was heard as the wrong melody, and three rounds of notes and split did not isolate the riff. So the reading is a draft, and the notes come from the user's correction of it in a piano roll; how long that takes, and how many notes it changes, is being measured.
-- **Which measure predicts the ear?** Three picks so far, and the PIRAMIT rounds of section 6 cannot count: their notes were wrong. About twenty, from the protocol in section 5, before any measure chooses alone.
-- **How to split one stem into layers.** A register split did not separate the suite's layers on Basic Pitch's notes; onset density was not tried. Candidates are a band per layer from the stem's spectrum (as the HAYIR DEMELİYDİM study did by hand), chroma per half bar for pads, and identifying a lead's sound before transcribing it (an earlier local study: 4 of 5 library leads found from the other stem by note templates).
+- **What separates a stem into single sounds, with a licence that can ship?** BS-Roformer-SW did it on PIRAMIT, by the user's ear, and its licence is not clear. htdemucs_6s (MIT) does not: its `guitar` stem is silent there and its `piano` stem gives 27 % of the confirmed notes. The model-free splits (from notes, from the channels' level difference, from a running median) did not either. One song and one listener so far.
+- **How to get a layer's notes from a stem of several sounds.** On the suite no reader reaches a recall and a precision of 0.8 on a mixed stem (section 6): the best is 0.80 and 0.72. With single layers the question goes away for PIRAMIT's two confirmed layers; the third stem's two readings disagree (5 and 58 notes), and nobody has checked it.
+- **A note's length and level.** The melody check on a plain tone confirms pitches and starts only. The `guitar` layer passed it and failed the render path. Lengths from the layer's decay and levels from the layer moved it from 0.73 to 0.78, against 0.90.
+- **A layer's space where notes overlap.** The reverb fit reads what rings after note-offs; a layer with few gaps gets an answer that cannot be trusted (75 % wet on the `piano` layer).
+- **Which measure predicts the ear?** Three picks so far, and the first day's PIRAMIT rounds of section 6 cannot count: their notes were wrong. About twenty, from the protocol in section 5, before any measure chooses alone.
+- **A model-free split of one stem into layers.** A register split did not separate the suite's layers on Basic Pitch's notes; onset density was not tried. Candidates are a band per layer from the stem's spectrum (as the HAYIR DEMELİYDİM study did by hand), chroma per half bar for pads, and identifying a lead's sound before transcribing it (an earlier local study: 4 of 5 library leads found from the other stem by note templates).
 - **Sampled layers.** Neither CLAP nor AST finds a cut from a record. A loop in the library is found by SampleID (Sony, MIT; 12 of 12 unchanged stems of the v1 calibration beats in an earlier local study). A cut from a record that is not in the library can only be told apart as "loop-like".
 - **Preset parity.** A preset is recorded at one note and repitched here. Over PIRAMIT's two octaves (24 semitones between its notes' 5th and 95th percentiles) its envelope and filter do not follow as the preset would. A shortlist recorded in Live at the layer's own notes settles it (about a minute for 30 presets).
 - **The fitted voice in Live.** Rendered to a multisample it plays as rendered. Mapped onto Drift or Operator, it needs a parity check in Live, as the 808 had.
