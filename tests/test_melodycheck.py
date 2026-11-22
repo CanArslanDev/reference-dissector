@@ -146,6 +146,30 @@ def test_check_refuses_bars_outside_the_stem_and_unknown_stems(work):
         MC.check(work, "vocals", (1, 2))
 
 
+def test_check_against_a_layer_file_melodic_json_does_not_know(work, tmp_path):
+    """A layer cut by another separation: its own audio and notes, no reading to compare with."""
+    x, sr = sf.read(str(work / "stems" / "other.wav"))
+    sf.write(str(tmp_path / "piano.wav"), 0.5 * x, sr)
+    notes = [{"pitch": 60, "start": 0.0, "length": 0.5}, {"pitch": 62, "start": 1.0, "length": 0.5}]
+    (tmp_path / "piano.json").write_text(json.dumps(notes))
+    m = MC.check(work, "piano", (2, 2), out_dir=tmp_path / "o", notes_file=tmp_path / "piano.json",
+                 audio=tmp_path / "piano.wav")
+    assert m["audio"] == str(tmp_path / "piano.wav") and m["against_reading"] is None and m["tuning_cents"] == 0.0
+    assert m["notes_per_bar"] == [2] and (tmp_path / "o" / "melody_AB.wav").is_file()
+    over, _ = sf.read(str(tmp_path / "o" / "melody_overlay.wav"))
+    assert abs(freq_of(over[int(0.55 * SR):int(0.95 * SR), 1]) - 440.0 * 2 ** ((62 - 69) / 12)) < 3
+    with pytest.raises(ValueError, match="needs both audio and notes"):
+        MC.check(work, "piano", (2, 2), audio=tmp_path / "piano.wav")
+    # a stem melodic.json knows, heard against another file: the reading is still compared
+    m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o2", notes_file=tmp_path / "piano.json",
+                 audio=tmp_path / "piano.wav")
+    assert m["against_reading"]["kept"] == 2 and m["against_reading"]["reading"] == 4
+    (work / "melodic.json").unlink()
+    m = MC.check(work, "piano", (2, 2), out_dir=tmp_path / "o3", notes_file=tmp_path / "piano.json",
+                 audio=tmp_path / "piano.wav")
+    assert len(m["notes"]) == 2
+
+
 def test_cli_runs_the_check_and_reports_the_correction(work, tmp_path, capsys):
     assert main(["melody-check", str(work), "--bars", "2-3"]) in (0, None)
     assert "8 notes from melodic.json in bars 2-3 of other (per bar: 4 4)" in capsys.readouterr().out
@@ -155,3 +179,7 @@ def test_cli_runs_the_check_and_reports_the_correction(work, tmp_path, capsys):
     text = capsys.readouterr().out
     assert "6 kept, 0 repitched, 0 moved, 2 removed, 0 added" in text and "precision 0.75, recall 1.0" in text
     assert (tmp_path / "o" / "melody_AB.wav").is_file()
+    main(["melody-check", str(work), "--stem", "layer", "--bars", "2-3", "--notes", str(tmp_path / "c.mid"),
+          "--audio", str(work / "stems" / "other.wav"), "--out", str(tmp_path / "o2")])
+    text = capsys.readouterr().out
+    assert "6 notes" in text and "of layer" in text and "against the reading" not in text

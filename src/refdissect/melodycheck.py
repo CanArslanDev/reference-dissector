@@ -188,37 +188,42 @@ def _grid(analysis: dict) -> Grid:
 
 def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Path | None = None,
           notes_file: str | Path | None = None, bars_per_file: int | None = None,
-          target_lufs: float = -14.0) -> dict:
+          target_lufs: float = -14.0, audio: str | Path | None = None) -> dict:
     """The melody check of bars `bars` (from 1, both included) of a stem of a
     work folder (analysis.json, melodic.json and the stems analysis.json
     names). Without notes_file the notes are melodic.json's; with it, the
     corrected file's (beats from the first bar), compared with the reading.
-    Writes into out_dir (WORK/melody-check by default): melody_AB.wav (one per
+    `audio` is a file to check against instead of the stem, on the song's
+    clock: one layer of the stem, cut by another separation of the same
+    file. A layer melodic.json does not know needs notes_file, and has no
+    reading to compare with. Writes into out_dir (WORK/melody-check by default): melody_AB.wav (one per
     `bars_per_file` bars when given), melody_overlay.wav, melody.mid and
     melody-check.json, which it returns."""
     work = Path(work)
     analysis = json.loads((work / "analysis.json").read_text(encoding="utf-8"))
-    melodic = json.loads((work / "melodic.json").read_text(encoding="utf-8"))
-    if stem not in melodic["stems"]:
-        raise ValueError(f"melodic.json has no stem {stem!r} (it has {', '.join(sorted(melodic['stems']))})")
+    known = json.loads((work / "melodic.json").read_text(encoding="utf-8"))["stems"] \
+        if (work / "melodic.json").is_file() else {}
+    entry = known.get(stem)
+    if entry is None and (audio is None or notes_file is None):
+        raise ValueError(f"melodic.json has no stem {stem!r} (it has {', '.join(sorted(known)) or 'none'}): "
+                         "a layer it does not know needs both audio and notes")
     grid = _grid(analysis)
     first, last = bars
     t0, t1 = bar_span(grid, first, last)
-    path = Path(analysis["source"]["stems"]) / f"{stem}.wav"
+    path = Path(audio) if audio else Path(analysis["source"]["stems"]) / f"{stem}.wav"
     info = sf.info(str(path))
     sr = info.samplerate
     if t0 < 0 or t1 > info.frames / sr + grid.step:
         raise ValueError(f"bars {first}-{last} are {t0:.2f}-{t1:.2f} s, outside the stem's {info.frames / sr:.2f} s")
     ref, _ = sf.read(str(path), start=int(round(t0 * sr)), stop=int(round(t1 * sr)), always_2d=True)
-    entry = melodic["stems"][stem]
-    cents = float(entry.get("tuning_cents", 0))
-    reading = notes_in_span(entry["notes"], grid, t0, t1)
+    cents = float(entry.get("tuning_cents", 0)) if entry else 0.0
+    reading = notes_in_span(entry["notes"], grid, t0, t1) if entry else None
     bar_beats = grid.bar / grid.beat
     if notes_file is None:
         notes, source, changed = reading, "melodic.json", None
     else:
         notes = [n for n in read_notes(notes_file) if n["start"] < (last - first + 1) * bar_beats]
-        source, changed = str(notes_file), diff(reading, notes)
+        source, changed = str(notes_file), diff(reading, notes) if reading is not None else None
     out = Path(out_dir) if out_dir else work / "melody-check"
     out.mkdir(parents=True, exist_ok=True)
     plain = render(notes, grid.bpm, len(ref) / sr, sr, cents)

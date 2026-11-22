@@ -33,6 +33,8 @@
     refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
     refdissect melody-check work/song --stem other --bars 13-20      (the stem's notes on a plain tone, after the
                                          stem and against it; melody.mid to correct, then --notes corrected.mid)
+    refdissect melody-check work/song --stem piano --audio layers/piano.wav --notes piano.mid --bars 13-20
+                                         (one layer of the stem, from another separation of the same file)
     refdissect space stems/other.wav --spans 40-56 100-116           (width, and the band-pass between spans)
     refdissect mix-gains stems/ --targets targets.json               (fader moves without re-recording)
     refdissect candidates work/song --out sketches --n 6 --seed 1 --section A
@@ -355,7 +357,7 @@ def _round(a):
 
 def _melody_check(a):
     from .melodycheck import check
-    m = check(a.work, a.stem, _bars(a.bars), a.out, a.notes, a.bars_per_file, a.lufs)
+    m = check(a.work, a.stem, _bars(a.bars), a.out, a.notes, a.bars_per_file, a.lufs, a.audio)
     out = Path(m["midi"]).parent
     print(f"{len(m['notes'])} notes from {m['notes_from']} in bars {m['bars'][0]}-{m['bars'][1]} of {a.stem} "
           f"(per bar: {' '.join(str(n) for n in m['notes_per_bar'])}) -> {out}")
@@ -589,6 +591,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--bars", required=True, help="a-b, from 1, both included")
     s.add_argument("--notes", default=None, help="a corrected file instead of melodic.json's notes: MIDI, or JSON "
                                                  "notes in beats; bar 1 of the file is the first bar asked for")
+    s.add_argument("--audio", default=None, help="check against this file instead of the stem: one layer of it, on "
+                                                 "the song's clock (--stem then names the layer; needs --notes "
+                                                 "when melodic.json does not have it)")
     s.add_argument("--out", default=None, help="folder (default: WORK/melody-check)")
     s.add_argument("--bars-per-file", type=int, default=None, help="one A/B file per this many bars")
     s.add_argument("--lufs", type=float, default=-14.0)
