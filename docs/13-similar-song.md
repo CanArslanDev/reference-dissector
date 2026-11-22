@@ -3,7 +3,7 @@
 Asked for "a song like this one", the tools give drums and an 808 that come close and a melodic layer that sounds unrelated to the reference: notes on a stock piano, pad or synth (on the replica path the notes are the reference's own transcription on Drift, built muted; the reference's own stems play by default). This page traces where that layer's sound and notes come from on each of the three paths, measures what would choose a closer sound, and proposes the order of work. It is a research note: no code changes with it.
 
 **In short** (2026-11-21/22, PIRAMIT, bars 13–20):
-- The user heard none of six files as close: four candidates chosen against the layer and two stock controls. Three versions of a sound resynthesized from the stem's own hits were heard as worse.
+- The user heard none of six files as close: four candidates chosen against the layer and two stock controls. Three versions of a sound resynthesized from the stem's own hits were rejected: noise and wrong notes, then worse twice.
 - Every one of those tests played notes nobody had confirmed. Where the user judged the melody (the resynthesized versions, a melody check) they heard it as wrong. The stem the notes were read from holds more than one sound: the riff, a sustained layer at the same pitches, and bleed.
 - No reading tried here gets a layer's notes out of such a stem. On the suite's melodic beat, Basic Pitch's notes find 57 % of the truth's notes at a precision of 0.72, its posteriorgrams read on the 16th grid 44–46 % at 0.83–0.89; the pad's chords least. A split of the stem without a learned model works only when the notes are known: 5.5 dB on the suite's pluck with the truth's notes, 2.0–2.2 dB with read ones, against 1.5 dB with no split.
 - So the notes come first. A layer's notes have to be confirmed by ear before any sound is tested on them (section 6).
@@ -239,7 +239,7 @@ After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each fi
 
    Each version changed more than one thing at once, and none was heard on confirmed notes.
 4. **The melody alone:** Basic Pitch's posteriorgrams read on the 16th grid (onset or note-posterior rise, Otsu thresholds), at most two notes a 16th.
-   - The result: 71 notes in 62 of the 128 16ths, 68 of them on G3, C4, G4 or A♭4. In 5 of the 8 bars the second half repeats one figure (C4, A♭4, G4, C4).
+   - The result: 71 notes in 62 of the 128 16ths, 68 of them on G3, C4, G4 or A♭4. In 5 of the 8 bars the second half repeats one four-note figure.
    - Played on a plain tone after the stem, and against it in the other channel.
    - Verdict: not right. The user added that the reference itself holds several sounds, and that the earlier rounds may have failed on that.
 5. **A split of the stem without a learned model** (the user's request; Demucs kept for drums, bass, vocals and other; its PIRAMIT result was not judged by ear). Each STFT bin's magnitude is a non-negative sum of fixed activation shapes; the coefficients are solved by non-negative least squares, and the parts are taken out by Wiener masks:
@@ -260,10 +260,10 @@ After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each fi
 
    - With the truth's notes the split moves the pluck 4 dB up. With read notes it moves it 0.6–0.8 dB.
    - The reading found 44 % of the 259 truth notes at a precision of 0.89, with at most two notes a 16th. It found 22 of the pad's 80 notes. Allowing up to four or six notes a 16th raised the recall only to 46 %, at a precision of 0.83. Basic Pitch's own notes find 57 % at 0.72.
-   - On PIRAMIT, three splits with a model-free note correction between them left a short layer of 32 notes, 12 dB under the stem (−35.9 against −23.8 dBFS). 59 notes read as short at first; the two corrections moved 40 notes from short to held, as their energy held on. In the spectrogram, the riff's attacks stayed in the held part and the bed.
+   - On PIRAMIT, three splits with a model-free note correction between them left a short layer of 32 notes in bars 13–20, 12 dB under the stem (−35.9 against −23.8 dBFS). Over the 9 bars read (one bar of lead-in), 59 notes read as short at first; the two corrections moved 40 notes from short to held, as their energy held on. In the spectrogram, the riff's attacks stayed in the held part and the bed.
 
 **What follows.**
-- Every test above played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were the same unconfirmed reading, so that verdict may mix the two.
+- Every test above played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were Basic Pitch's, which version 3 replayed and the user heard as a worse melody, so that verdict may mix the two.
 - The notes cannot come from the stem as it is: no reader tried here gets a layer's notes out of a stem of several sounds, and the split that would clean the stem needs those notes first.
 - So the order is: first the notes, confirmed by ear on a plain tone (or given by the user); then the render path, proven with the layer's own sound; only then a choice of sound.
 
@@ -300,14 +300,14 @@ Today a "song like this one" in alm has no prompt of its own. Proposed order, th
 ## 8. Recommended path
 
 1. **The notes first, confirmed by ear.** Before any sound is tested on a layer, its notes are played on a plain tone after the stem and against it in the other channel. The user says "this is the melody", or gives the notes. No sound test, separation or candidate starts on notes that have not passed.
-2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives a cleaner layer (on the suite still 5.5 dB from the truth's pluck): the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
+2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives a cleaner layer (on the suite, an SDR of 5.5 dB against the truth's pluck): the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
 3. **Then the render path, proven with the layer's own sound.** The layer's own notes, played by its own sound through the same sampler and space, must be heard as the layer, and score near its own spread, before any candidate is played that way. On PIRAMIT's mixed stem even its own sound scored as low as Drift's default.
 4. **Only then a sound, from a shortlist, not by name.** Ways A, B and B2 together:
    - the library and Live's previews;
-   - a fitted voice or a resynthesis from the layer's own hits;
+   - a fitted voice;
    - the stock sound as a plainly labelled control.
 
-   Ranked on the confirmed notes, through the layer's space, against the layer alone. Way C stays a personal-study control. Way D is not proposed: MusicGen's and RAVE's weights are non-commercial, MusicGen's melody conditioning copies the notes, and DDSP needs a model trained per timbre.
+   Ranked on the confirmed notes, through the layer's space, against the layer alone. Ways B2 and C stay personal-study controls ([09](09-data-and-copyright.md)): both are built from the song's own hits. Way D is not proposed: MusicGen's and RAVE's weights are non-commercial, MusicGen's melody conditioning copies the notes, and DDSP needs a model trained per timbre.
 5. **Then new notes of the layer's kind,** with `candidates`' copy rule, each played on the picked sound, and the build with its space; `check-rebuild` measures it.
 
 In every listening round, one thing changes at a time, and it is measured before the files go out.
