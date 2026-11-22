@@ -3,9 +3,9 @@
 Asked for "a song like this one", the tools give drums and an 808 that come close and a melodic layer that sounds unrelated to the reference: notes on a stock piano, pad or synth (on the replica path the notes are the reference's own transcription on Drift, built muted; the reference's own stems play by default). This page traces where that layer's sound and notes come from on each of the three paths, measures what would choose a closer sound, and proposes the order of work. It is a research note: no code changes with it.
 
 **In short** (2026-11-21/22, PIRAMIT, bars 13–20):
-- The user heard none of six sounds chosen against the layer as close. Three sounds resynthesized from the stem's own hits did no better.
-- Every one of those tests played notes nobody had confirmed, and the user heard them as the wrong melody. The stem they were read from holds more than one sound: the riff, a sustained layer at the same pitches, and bleed.
-- Neither Basic Pitch nor the readers tried here get a layer's notes out of such a stem: on the suite's melodic beat they find 44–46 % of the notes. A split of the stem without a learned model works only when the notes are known: 5.5 dB on the suite's pluck with the truth's notes, 2.0–2.2 dB with read ones, against 1.5 dB with no split.
+- The user heard none of six files as close: four candidates chosen against the layer and two stock controls. Three versions of a sound resynthesized from the stem's own hits were heard as worse.
+- Every one of those tests played notes nobody had confirmed. Where the user judged the melody (the resynthesized versions, a melody check) they heard it as wrong. The stem the notes were read from holds more than one sound: the riff, a sustained layer at the same pitches, and bleed.
+- No reading tried here gets a layer's notes out of such a stem. On the suite's melodic beat, Basic Pitch's notes find 57 % of the truth's notes at a precision of 0.72, its posteriorgrams read on the 16th grid 44–46 % at 0.83–0.89; the pad's chords least. A split of the stem without a learned model works only when the notes are known: 5.5 dB on the suite's pluck with the truth's notes, 2.0–2.2 dB with read ones, against 1.5 dB with no split.
 - So the notes come first. A layer's notes have to be confirmed by ear before any sound is tested on them (section 6).
 
 As in [09](09-data-and-copyright.md), no audio, stems, transcriptions, library file names or preset names are published. The numbers come from local runs. Code is cited at reference-dissector `8484988` (rd) and ableton-live-mcp `d6f28e5` (alm).
@@ -20,9 +20,9 @@ The job records hold only two PIRAMIT dissects (2026-11-16), the replica path. T
 | 2026-10-15/17 | HAYIR DEMELİYDİM | 3, with rd's modules ([11](11-style-beat-lessons.md)) | sounds chosen by ear in A/B files from a CLAP + band + envelope shortlist | v1 and v2 rejected: v1 for its drums and mix, v2 for its parts; the sounds had been picked by ear |
 | 2026-10-17/18 | a third song | replica-style through the assistant's own scripts (the song's own melodic stems), then 3 | the song's own stems, which the user heard as the original's melody; then library sounds by CLAP and ear | kept after picks by ear |
 | 2026-11-08 | four songs | 3 | Live presets: piano, then a sitar, then plucks; then, after separating again, a CLAP shortlist over preset previews and library one-shots, played in Live on the reference's phrase with its measured reverb (strings, pads, a synth) | no draft picked: the user heard no piano or synth in any of the four songs |
-| 2026-11-21/22 | PIRAMIT | this note | a shortlist by CLAP and descriptors, a fitted voice, the stock sounds; then sounds resynthesized from the stem's hits | none heard as close; the notes heard as wrong (section 6) |
+| 2026-11-21/22 | PIRAMIT | the assistant's own scripts, offline (this note) | a shortlist by CLAP and descriptors, a fitted voice, the stock sounds; then sounds resynthesized from the stem's hits | none heard as close; the notes heard as wrong (section 6) |
 
-Path 2 (`refdissect candidates`) has never been heard. Every "song like this one" went through path 3 at least in part. No step of the tools ties the sound to the reference there; where a sound was tied to it (CLAP against a stem, notes cut from a stem), the assistant's own scripts did it.
+Path 2 (`refdissect candidates`) has never been heard. Every earlier "song like this one" went through path 3 at least in part. No step of the tools ties the sound to the reference there; where a sound was tied to it (CLAP against a stem, notes cut from a stem), the assistant's own scripts did it.
 
 ## 1. Where the melodic sound and notes come from
 
@@ -151,7 +151,7 @@ Ways A, B and B2 are ranked through that space; C has it baked in.
 |---|---|---|---|---|
 | **A. Search the library and Live's presets by embedding, then re-rank on the layer's notes** | CLAP (615 MB, Apache-2.0); AST (346 MB, BSD-3) for the family; an index; the layer's notes and space | Index: 3,996 files with CLAP and AST in 615 s, once. Presets from Live's previews in 57 s, not 35 minutes of recording. Per layer: 10–45 s for 35 renders and their vectors. | PIRAMIT by CLAP: 0.647 against Drift's default 0.513 and the "warm pad" hits 0.20–0.30, ceiling 0.83–0.94; picked by the same CLAP, so biased upward. By the descriptors the same preset is 20th of 35 and Drift's default 3rd. Suite lead: 0.910 against the truth's 0.956. | Stage 1 alone misleads: long recordings on mixed stems, and the right sound at rank 38. CLAP and the descriptors disagree on real stems. A one-note recording repitched is not the preset over its whole range. The pool may lack the family (2026-11-08: no piano or synth in the songs, mostly presets in the pool). |
 | **B. Fit a voice to the layer (synthesizer sound matching)** | A numpy voice with Drift-like controls (here 13: one harmonic shape played by two detuned copies, a sub, a low-pass with envelope and resonance, ADSR, noise), a loss, an optimiser. Rendered per pitch into a multisample for Sampler, as `fit-808` renders a one-shot for the 808; mapping it onto Drift, Operator or Wavetable needs a check in Live, which renders instruments only in real time (1.12 s a render). | 6–11 minutes a layer: 2,704 evaluations, one core, differential evolution | PIRAMIT: first by the descriptors (0.95, inside the song's own 0.71–4.08), 0.533 CLAP. Suite pluck: 0.908, second only to the truth. | It is fitted on the descriptor loss, which therefore flatters it; CLAP is the independent check. Subtractive timbres only: no piano, strings or recorded sounds. The earlier local study found no 2024–2026 work that fits Live's own devices; the learned matchers that work need 3·10⁴–2·10⁶ renders of one synth, and Live renders in real time. |
-| **B2. Resynthesize from the layer's own hits** | Per pitch, the median over the stem's hits of harmonics 1–20, residual noise and a 1 ms attack, synthesized from that table (section 6); notes to play it on | Minutes | Not judged: the three versions the user heard played unconfirmed notes, and version 2 flickered (crackle) until its envelopes were smoothed | Its timbre is the reference's, measured from a stem that holds other sounds and reverb; the table carries them |
+| **B2. Resynthesize from the layer's own hits** | Per pitch, the median over the stem's hits of harmonics 1–20, residual noise, and an 80 ms attack envelope and click measured in 1 ms frames, synthesized from that table (section 6); notes to play it on | Minutes | Not judged as a sound: the three versions the user heard played unconfirmed notes. Version 2 flickered (heard as a crackle); version 3 smoothed its envelopes, not confirmed by ear | Its timbre is the reference's, averaged over the stem's hits, from a stem that holds other sounds and reverb; the table carries them. An average of the song's hits is personal study only, as averaged templates are ([09](09-data-and-copyright.md)) |
 | **C. A multisample from the stem's own notes** | Basic Pitch notes, each pitch's median over its hits, laid out as Simpler or Sampler zones | Minutes | PIRAMIT draft 6 (2026-10-12): the riff 0.759 CLAP against the song's own sections' 0.762; its keys 0.495 | **It is the song's own recording: personal study only, never in a release or a public repository** ([09](09-data-and-copyright.md)). Bleed and reverb come with it. Pitches the song never plays are repitched. Chords and pads do not cut into notes. A song that sounds "like" its reference by being its sound. |
 | **D. Generative models** | MusicGen-melody (1.5 B parameters, 6.2 GB, weights CC-BY-NC 4.0); MusicGen small (2.4 GB, CC-BY-NC 4.0, which alm already uses: an 8 s loop in ~19 s on Apple Silicon); DDSP timbre transfer (Apache-2.0, TensorFlow, pretrained on four acoustic instruments); RAVE (CC BY-NC 4.0, trained per timbre) | Downloads of 2.4–6.2 GB; RAVE and DDSP need hours of training per timbre | Not measured | MusicGen's and RAVE's weights are non-commercial. DDSP is Apache-2.0 but runs on TensorFlow, has four acoustic instruments and needs hours of training for any other. Melody conditioning feeds the reference's chroma, so it copies the notes. No hold on the exact timbre. A model trained on the reference's stem copies it. |
 
@@ -201,7 +201,7 @@ Not yet, on this evidence:
 - **CLAP against the descriptors:** on PIRAMIT they rank the same 30 candidates almost independently (Spearman 0.21).
 - **Separated against separated,** with the reference's own stems: every candidate rises into 0.72–0.93 and the plain additive pad wins.
 - **Where both measures work:** on a clean layer whose true sound is among the candidates (the suite), both put it first. A real song gives neither condition: its layer is separated, and its true sound is seldom in the pool.
-- **Against a stem of several sounds, not even the song's own sound scores high.** PIRAMIT's own note samples, played on the same notes, scored 0.47–0.55 CLAP, as Drift's default did (section 6). A score of one sound against such a stem says little about that sound.
+- **Against a stem of several sounds, not even the song's own sound scores high.** PIRAMIT's own note samples, played on the same unconfirmed notes, scored 0.47–0.55 CLAP, as Drift's default did (section 6). A score of one sound against such a stem says little about that sound.
 
 So the measures shortlist and the ear chooses. The cheapest protocol that also teaches the measures:
 1. **Per layer, one round.** One `listening-round` of 8 bars:
@@ -215,34 +215,34 @@ So the measures shortlist and the ear chooses. The cheapest protocol that also t
 
 ## 6. What the ear said: the notes come first
 
-After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each file was the reference stem, a beep, then the candidate. The files stay local. In order:
+After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each file was the reference stem, a beep, then the candidate. The files stay local. Rounds 2 and 5 got no verdict by ear. In order:
 
 1. **The shortlist** (section 2): its top 3 by CLAP, the fitted voice, Drift's default and a "warm pad" hit, on Basic Pitch's notes, through the fitted reverb.
    - Verdict: none like the reference. The user had said from the start that the chosen sounds were the problem, and these came from the same kinds of sources as before.
-2. **A control:** PIRAMIT's own note samples, cut from the stem and averaged per pitch in an October study, played the same way.
+2. **A control** (not judged by ear): PIRAMIT's own note samples, cut from the stem and averaged per pitch in an October study, played the same way.
    - CLAP 0.52 dry, 0.47 wet: the level of Drift's default.
-   - Two faults turned up. Two of those note files started 220–245 ms late. And Basic Pitch's 73 notes start at 66 distinct times, 50 of them within 50 ms of one of the stem's 142 broadband onsets.
-   - Many of those 142 onsets are not the riff's. They fall in 109 of the 128 16ths, while the notes read later on the 16th grid fill 62; 33 of them share a 16th with another.
+   - Two faults turned up. Two of those note files started 220–245 ms late. And the stem's broadband onsets (spectral flux) do not agree with Basic Pitch's notes: matched one to one within 50 ms, 50 of Basic Pitch's 66 distinct starts meet one of the 142 onsets.
+   - Many of those 142 onsets are not the riff's. They fall in 109 of the 128 16ths, while the notes read later on the 16th grid fill 62; 33 more fall in a 16th already taken, and 71 lie over 25 ms off the grid.
    - With a note at each onset, or with Basic Pitch's notes, and the files trimmed to their attacks, it scored 0.48–0.55.
    - The stem holds the riff, a sustained layer at the same pitches and bleed. One sound, even the song's own, is not that stem.
 3. **A sound resynthesized from the stem's hits** (the user's choice among the next steps):
-   - per pitch, the median over the stem's hits of harmonics 1–20, a residual noise in 24 bands and an attack measured at 1 ms;
+   - per pitch, the median over the stem's hits of harmonics 1–20, a residual noise in 24 bands, and an 80 ms attack envelope and click measured in 1 ms frames;
    - synthesized from that table, not from the recording's samples.
 
    Three versions:
 
    | Version | Notes from | What the user heard | What was measured afterwards |
    |---|---|---|---|
-   | 1 | an onset of the stem (broadband flux), pitched by harmonic salience | noise between the notes; wrong notes | the onsets were partly hat bleed (above); the residual "noise" is the stem's reverb and bleed |
-   | 2 | rises of harmonic contrast at the riff's four pitches on the 16th grid, two voices, plus held notes | worse: a crackle; the melody unrelated to the song | the envelopes' medians jumped 0.5–0.7 dB per 2.9 ms frame (90th percentile 1.5–2.3 dB), and 6–30 % of the harmonic cells were zero, flickering on and off; between notes the render was quiet (−55 dB over 6 kHz, the stem −34 dB) |
-   | 3 | Basic Pitch's notes again; envelopes smoothed (≤ 0.2 dB a frame) | the melody worse still | – |
+   | 1 | an onset of the stem (broadband flux), pitched by harmonic salience | noise between the notes; wrong notes | the onsets read as partly drum bleed (off the grid, two to a 16th; not measured against the drum stem); the residual "noise" read as the stem's reverb and bleed |
+   | 2 | rises of harmonic contrast at the riff's four pitches on the 16th grid, two voices, plus held notes | worse: a crackle; the melody unrelated to the song | the envelopes of harmonics 1–10 jumped 0.5–0.7 dB per 2.9 ms frame (median; 90th percentile 1.5–2.3 dB), and 6–30 % of their cells were zero, flickering on and off; between notes the render was quiet (over 6 kHz in the quietest fifth of 20 ms frames, −55 dB against the stem's −34 dB) |
+   | 3 | Basic Pitch's notes again; envelopes smoothed (median 0.1–0.2 dB a frame, 90th percentile 0.4–0.9 dB, measured as for version 2) | the melody worse still | – |
 
    Each version changed more than one thing at once, and none was heard on confirmed notes.
-4. **The melody alone:** Basic Pitch's posteriorgrams read on the 16th grid (onset or note-posterior rise, thresholds from the two-class split), at most two notes a 16th.
-   - The result: 71 notes in 62 of the 128 16ths, 68 of them on G3, C4, G4 or A♭4. The second half of each bar repeats one figure.
+4. **The melody alone:** Basic Pitch's posteriorgrams read on the 16th grid (onset or note-posterior rise, Otsu thresholds), at most two notes a 16th.
+   - The result: 71 notes in 62 of the 128 16ths, 68 of them on G3, C4, G4 or A♭4. In 5 of the 8 bars the second half repeats one figure (C4, A♭4, G4, C4).
    - Played on a plain tone after the stem, and against it in the other channel.
-   - Verdict: still broken. The reference itself holds several sounds, and the earlier rounds may have failed on that.
-5. **A split of the stem without a learned model** (the user's request; Demucs kept for drums, bass, vocals and other). Each STFT bin's magnitude is a non-negative sum of fixed activation shapes; the coefficients are solved by non-negative least squares, and the parts are taken out by Wiener masks:
+   - Verdict: not right. The user added that the reference itself holds several sounds, and that the earlier rounds may have failed on that.
+5. **A split of the stem without a learned model** (the user's request; Demucs kept for drums, bass, vocals and other; its PIRAMIT result was not judged by ear). Each STFT bin's magnitude is a non-negative sum of fixed activation shapes; the coefficients are solved by non-negative least squares, and the parts are taken out by Wiener masks:
    - short notes: kernels at onsets that rise in 5 ms and fall with time constants of 30, 80 and 150 ms;
    - held notes: boxes over the note's length, flat or falling with time constants of 0.6 and 2 s;
    - a free bed: cubic splines with knots every 0.35 s.
@@ -259,11 +259,11 @@ After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each fi
    | the same, notes read from Basic Pitch's posteriorgrams | 2.0–2.2 | 8.3 |
 
    - With the truth's notes the split moves the pluck 4 dB up. With read notes it moves it 0.6–0.8 dB.
-   - The reading found 44 % of the 259 truth notes at a precision of 0.89, with at most two notes a 16th. It found 22 of the pad's 80 notes. Allowing up to four or six notes a 16th raised that only to 46 %, at a precision of 0.83.
-   - On PIRAMIT, three rounds of split and model-free note correction left a short layer of 32 notes, 12 dB under the stem (−35.9 against −23.8 dBFS). Most notes read as short held their energy and moved to the held part. The riff's attacks stayed in the held part and the bed.
+   - The reading found 44 % of the 259 truth notes at a precision of 0.89, with at most two notes a 16th. It found 22 of the pad's 80 notes. Allowing up to four or six notes a 16th raised the recall only to 46 %, at a precision of 0.83. Basic Pitch's own notes find 57 % at 0.72.
+   - On PIRAMIT, three splits with a model-free note correction between them left a short layer of 32 notes, 12 dB under the stem (−35.9 against −23.8 dBFS). 59 notes read as short at first; the two corrections moved 40 notes from short to held, as their energy held on. In the spectrogram, the riff's attacks stayed in the held part and the bed.
 
 **What follows.**
-- Every test above, round 1 included, played notes that nobody had confirmed, and the user heard them as wrong. "None sounds like it" mixes the sound and the melody.
+- Every test above played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were the same unconfirmed reading, so that verdict may mix the two.
 - The notes cannot come from the stem as it is: no reader tried here gets a layer's notes out of a stem of several sounds, and the split that would clean the stem needs those notes first.
 - So the order is: first the notes, confirmed by ear on a plain tone (or given by the user); then the render path, proven with the layer's own sound; only then a choice of sound.
 
@@ -300,9 +300,9 @@ Today a "song like this one" in alm has no prompt of its own. Proposed order, th
 ## 8. Recommended path
 
 1. **The notes first, confirmed by ear.** Before any sound is tested on a layer, its notes are played on a plain tone after the stem and against it in the other channel. The user says "this is the melody", or gives the notes. No sound test, separation or candidate starts on notes that have not passed.
-2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives the layer alone: the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
+2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives a cleaner layer (on the suite still 5.5 dB from the truth's pluck): the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
 3. **Then the render path, proven with the layer's own sound.** The layer's own notes, played by its own sound through the same sampler and space, must be heard as the layer, and score near its own spread, before any candidate is played that way. On PIRAMIT's mixed stem even its own sound scored as low as Drift's default.
-4. **Only then a sound, from a shortlist, not by name.** Ways A and B together, as in section 2:
+4. **Only then a sound, from a shortlist, not by name.** Ways A, B and B2 together:
    - the library and Live's previews;
    - a fitted voice or a resynthesis from the layer's own hits;
    - the stock sound as a plainly labelled control.
@@ -316,13 +316,13 @@ In every listening round, one thing changes at a time, and it is measured before
 
 | Job | What | Measured by |
 |---|---|---|
-| 1. A layer's notes, and a melody check | A reading of each layer's notes that recovers them from a stem of several sounds (Basic Pitch's posteriorgrams on the 16th grid, iterated with the score-informed split of section 6), and `refdissect melody-check`: the notes on a plain tone after the stem, and against it in the other channel | On the suite's melodic beats: note F1 per truth layer (today 44 % recall at 0.89 precision on `melodic-1`'s htdemucs stem, all layers together). On PIRAMIT and HAYIR DEMELİYDİM: the user's verdict on the melody check, bar by bar |
+| 1. A layer's notes, and a melody check | A reading of each layer's notes that recovers them from a stem of several sounds (Basic Pitch's posteriorgrams on the 16th grid, iterated with the score-informed split of section 6), and `refdissect melody-check`: the notes on a plain tone after the stem, and against it in the other channel | On the suite's melodic beats: note F1 per truth layer (today, on `melodic-1`'s htdemucs stem, all layers together: Basic Pitch's notes 57 % recall at 0.72 precision, F1 0.63; the grid reading 44 % at 0.89, F1 0.59). On PIRAMIT and HAYIR DEMELİYDİM: the user's verdict on the melody check, bar by bar |
 | 2. `layers`, and the render-path gate | The split of section 6 from the confirmed notes; per layer: kind, family, space, repeat; the layer's own sound played back through the render path; `plan`/`blueprint` carry a melodic sound slot and its `effects` instead of `"Drift"` | On the suite: magnitude SDR per layer against the truth (today 5.5 dB for the pluck with the truth's notes, 2.0–2.2 with read ones). The own-sound playback within the layer's own spread, and heard as the layer. In Live, the blueprint's Reverb, Utility and EQ Eight reproduce the offline space within 1 dB per octave. |
 | 3. `index-presets` and `sounds` | Live's preview vectors beside the library index; per layer, the shortlist of section 2 on the confirmed notes, against the layer alone, with a fitted voice and the stock control; a listening round; `--pick` | The truth sound's rank on the suite's separated layers; on the songs, stage 2's best against the stock control by both measures; the user's picks, logged, until about twenty of them can score the measures (section 5) |
 
 ## 9. Open questions
 
-- **How to get a layer's notes from a stem of several sounds.** Basic Pitch's notes, its posteriorgrams on the grid, onset flux and harmonic contrast were all heard as the wrong melody on PIRAMIT, and find under half the notes on the suite. Three rounds of notes and split (section 6) did not isolate the riff on PIRAMIT. The notes may have to come from the user, or from a layer split that needs no notes, which the model-free methods here did not achieve.
+- **How to get a layer's notes from a stem of several sounds.** Basic Pitch's notes, its posteriorgrams on the grid, onset flux and harmonic contrast were all heard as the wrong melody on PIRAMIT. On the suite, the two readings measured find 57 % (Basic Pitch's notes) and 44–46 % (the grid) of the truth's notes. Three rounds of notes and split (section 6) did not isolate the riff on PIRAMIT. The notes may have to come from the user, or from a layer split that needs no notes, which the model-free methods here did not achieve.
 - **Which measure predicts the ear?** Three picks so far, and the PIRAMIT rounds of section 6 cannot count: their notes were wrong. About twenty, from the protocol in section 5, before any measure chooses alone.
 - **How to split one stem into layers.** A register split did not separate the suite's layers on Basic Pitch's notes; onset density was not tried. Candidates are a band per layer from the stem's spectrum (as the HAYIR DEMELİYDİM study did by hand), chroma per half bar for pads, and identifying a lead's sound before transcribing it (an earlier local study: 4 of 5 library leads found from the other stem by note templates).
 - **Sampled layers.** Neither CLAP nor AST finds a cut from a record. A loop in the library is found by SampleID (Sony, MIT; 12 of 12 unchanged stems of the v1 calibration beats in an earlier local study). A cut from a record that is not in the library can only be told apart as "loop-like".
