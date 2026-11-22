@@ -160,7 +160,7 @@ Ways A, B and B2 are ranked through that space; C has it baked in.
 
 ## 4. Reading what kind of part a layer is
 
-The ear judged the kind of part first: PIRAMIT has a three-pitch riff in 16ths and no lead, and its three drafts with a lead were rejected (the history above). Basic Pitch's fine statistics on a reverb-heavy layer measure the transcription, not the music; only coarse ones survived ([11](11-style-beat-lessons.md#3-statistics-have-to-survive-the-same-pipeline-rhythm)). These coarse statistics were read over 8 bars:
+The ear judged the kind of part first: PIRAMIT has a riff of three pitch classes in 16ths and no lead, and its three drafts with a lead were rejected (the history above). Basic Pitch's fine statistics on a reverb-heavy layer measure the transcription, not the music; only coarse ones survived ([11](11-style-beat-lessons.md#3-statistics-have-to-survive-the-same-pipeline-rhythm)). These coarse statistics were read over 8 bars:
 - notes sounding at once (median over sounding 16ths);
 - median note length in 16ths;
 - distinct onset 16ths per bar;
@@ -319,7 +319,7 @@ The riff the user means is the `piano` and `guitar` stems together.
 | a mask from the level difference between the channels, no notes | – | 1.2 |
 
 - For the `piano` layer no version beats leaving the stem as it is. The yardstick is another separator's output, not a truth.
-- On the suite's `melodic-1` (htdemucs' stem, the truth's notes) the pluck stays where it was (5.5 dB with the first version, 5.4 dB with a template per note in the second, 5.6 dB with a template per layer and pitch), and the shared template moves the lead from 3.4 to 4.3 dB (no split: 4.0 dB); the pad stays near 1 dB, under the 2.1 dB of no split, and the pad and lead together fall from 7.5 dB unsplit to 4.7 dB. On a sum of the truth's layers panned apart, the level per channel adds 0.5 dB on the pluck and 0.8 dB on the lead. The suite's layers are all in the centre, so its stems cannot show that gain.
+- On the suite's `melodic-1` (htdemucs' stem, the truth's notes) the pluck stays where it was (5.5 dB with the first version, 5.4 dB with a template per note in the second, 5.6 dB with a template per layer and pitch), and the shared template moves the lead from 3.4 to 4.3 dB (no split: 4.0 dB); the pad stays near 1 dB, under the 2.1 dB of no split, and the pad and lead together, without the bed, fall from 7.5 dB unsplit to 4.7 dB (4.8 dB with the first version; the 10.8 dB of round 5's table counts the bed with them). On a sum of the truth's layers panned apart, the level per channel adds 0.5 dB on the pluck and 0.8 dB on the lead. The suite's layers are all in the centre, so its stems cannot show that gain.
 - The user chose BS-Roformer-SW's stems as the clean layers, for this study only.
 
 **htdemucs_6s does not come near this separation, by these measures.** On the same bars its `guitar` stem is silent (−78 dBFS, mono sum as above) and the level is in `piano` (−31.1 dBFS) and `other` (−30.7 dBFS):
