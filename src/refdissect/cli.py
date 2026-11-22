@@ -31,6 +31,8 @@
     refdissect check-rebuild work/song --reference song.mp3     (the plan rendered, mastered like the song and
                                          separated by the same model: descriptors before/after, null tests)
     refdissect listening-round ref.wav a.wav b.wav --question "Chords?" --out round1
+    refdissect melody-check work/song --stem other --bars 13-20      (the stem's notes on a plain tone, after the
+                                         stem and against it; melody.mid to correct, then --notes corrected.mid)
     refdissect space stems/other.wav --spans 40-56 100-116           (width, and the band-pass between spans)
     refdissect mix-gains stems/ --targets targets.json               (fader moves without re-recording)
     refdissect candidates work/song --out sketches --n 6 --seed 1 --section A
@@ -351,6 +353,20 @@ def _round(a):
     print(f"{len(m['files'])} files -> {a.out} (manifest.md says what each number is)")
 
 
+def _melody_check(a):
+    from .melodycheck import check
+    m = check(a.work, a.stem, _bars(a.bars), a.out, a.notes, a.bars_per_file, a.lufs)
+    out = Path(m["midi"]).parent
+    print(f"{len(m['notes'])} notes from {m['notes_from']} in bars {m['bars'][0]}-{m['bars'][1]} of {a.stem} "
+          f"(per bar: {' '.join(str(n) for n in m['notes_per_bar'])}) -> {out}")
+    d = m["against_reading"]
+    if d:
+        print(f"against the reading's {d['reading']} notes: {d['kept']} kept, {d['repitched']} repitched, "
+              f"{d['moved']} moved, {d['removed']} removed, {d['added']} added "
+              f"(the reading's precision {d['precision']}, recall {d['recall']})")
+    print("listen to melody_AB*.wav and melody_overlay.wav; correct melody.mid and run again with --notes")
+
+
 def _space(a):
     import soundfile as sf
 
@@ -565,6 +581,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--candidate-span", default=None, help="seconds a-b")
     s.add_argument("--lufs", type=float, default=-14.0)
     s.set_defaults(run=_round)
+
+    s = sub.add_parser("melody-check", help="a stem's notes on a plain tone, after the stem and against it, "
+                                            "to confirm by ear; reads a corrected MIDI back")
+    s.add_argument("work", help="a work folder with analysis.json and melodic.json")
+    s.add_argument("--stem", default="other")
+    s.add_argument("--bars", required=True, help="a-b, from 1, both included")
+    s.add_argument("--notes", default=None, help="a corrected file instead of melodic.json's notes: MIDI, or JSON "
+                                                 "notes in beats; bar 1 of the file is the first bar asked for")
+    s.add_argument("--out", default=None, help="folder (default: WORK/melody-check)")
+    s.add_argument("--bars-per-file", type=int, default=None, help="one A/B file per this many bars")
+    s.add_argument("--lufs", type=float, default=-14.0)
+    s.set_defaults(run=_melody_check)
 
     s = sub.add_parser("space", help="width per octave, and the band-pass between two spans")
     s.add_argument("audio", help="a stereo stem")
