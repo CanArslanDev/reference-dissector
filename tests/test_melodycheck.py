@@ -80,6 +80,28 @@ def test_midi_written_and_read_back(tmp_path):
     assert MC.read_notes(tmp_path / "clip.json") == [notes[0], notes[2]]
 
 
+def test_midi_cuts_a_note_where_its_pitch_starts_again(tmp_path):
+    """Two sounding notes of one pitch cannot be told apart in MIDI: the first ends where the second starts."""
+    notes = [{"pitch": 60, "start": 0.0, "length": 2.0}, {"pitch": 60, "start": 1.0, "length": 0.5},
+             {"pitch": 64, "start": 0.0, "length": 2.0}]
+    got = MC.read_notes(MC.write_midi(notes, 120.0, tmp_path / "m.mid", meter=(7, 8)))
+    assert got == [{"pitch": 60, "start": 0.0, "length": 1.0}, {"pitch": 64, "start": 0.0, "length": 2.0},
+                   {"pitch": 60, "start": 1.0, "length": 0.5}]
+    import mido
+    sig = [m for m in mido.MidiFile(str(tmp_path / "m.mid")).tracks[0] if m.type == "time_signature"][0]
+    assert (sig.numerator, sig.denominator) == (7, 8)
+
+
+def test_check_keeps_a_note_from_before_the_first_bar_and_refuses_a_bad_split(work, tmp_path):
+    (tmp_path / "n.json").write_text(json.dumps([{"pitch": 60, "start": -0.5, "length": 1.0},
+                                                 {"pitch": 62, "start": -2.0, "length": 1.0},
+                                                 {"pitch": 64, "start": 1.0, "length": 0.5}]))
+    m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o", notes_file=tmp_path / "n.json")
+    assert [(n["pitch"], n["start"], n["length"]) for n in m["notes"]] == [(60, 0.0, 0.5), (64, 1.0, 0.5)]
+    with pytest.raises(ValueError, match="bars_per_file"):
+        MC.check(work, "other", (2, 3), bars_per_file=0)
+
+
 def test_diff_counts_each_kind_of_change():
     reading = [{"pitch": 60, "start": 0.0, "length": 0.5}, {"pitch": 62, "start": 1.0, "length": 0.5},
                {"pitch": 64, "start": 2.0, "length": 0.5}, {"pitch": 65, "start": 3.0, "length": 0.5}]
@@ -160,10 +182,12 @@ def test_check_against_a_layer_file_melodic_json_does_not_know(work, tmp_path):
     assert abs(freq_of(over[int(0.55 * SR):int(0.95 * SR), 1]) - 440.0 * 2 ** ((62 - 69) / 12)) < 3
     with pytest.raises(ValueError, match="needs both audio and notes"):
         MC.check(work, "piano", (2, 2), audio=tmp_path / "piano.wav")
-    # a stem melodic.json knows, heard against another file: the reading is still compared
+    # a stem melodic.json knows, against another file: its reading is the stem's, so nothing is compared
     m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o2", notes_file=tmp_path / "piano.json",
                  audio=tmp_path / "piano.wav")
-    assert m["against_reading"]["kept"] == 2 and m["against_reading"]["reading"] == 4
+    assert m["against_reading"] is None
+    m = MC.check(work, "other", (2, 2), out_dir=tmp_path / "o4", audio=tmp_path / "piano.wav")
+    assert m["notes_from"] == "melodic.json" and len(m["notes"]) == 4  # its own notes, heard against the layer
     (work / "melodic.json").unlink()
     m = MC.check(work, "piano", (2, 2), out_dir=tmp_path / "o3", notes_file=tmp_path / "piano.json",
                  audio=tmp_path / "piano.wav")

@@ -1,9 +1,10 @@
 """The melody check: a stem's notes on a plain tone, to confirm by ear.
 
-Before a sound is chosen for a layer, or the layer is split from its stem,
-its notes have to be right, and only the ear says so (docs/13, section 6:
-every sound test of the first study ran on notes nobody had confirmed, and
-each was heard as the wrong melody). For some bars of a stem this writes:
+Before a sound is chosen for a layer its notes have to be right, and only
+the ear says so (docs/13, section 6: the first study's sound tests ran on
+notes nobody had confirmed, read from a stem of several sounds; read from
+one layer alone, the notes were confirmed). For some bars of a stem, or of
+one layer of it (`audio`), this writes:
 
 - an A/B file: the stem, a beep, then the notes on a plain tone;
 - an overlay: the stem in the left channel, the tone in the right;
@@ -12,6 +13,8 @@ each was heard as the wrong melody). For some bars of a stem this writes:
 A corrected file (MIDI, or notes as JSON in beats) is read back the same way,
 so the correction is heard against the stem too, and it is compared with the
 reading: how many notes were kept, moved, repitched, added and removed.
+The check confirms pitches and starts. A plain tone says little about how
+long a note rings or how loud it is: those are taken from the layer.
 
 Notes here are in beats (quarter notes) from the first bar asked for:
 {"pitch": MIDI number, "start": beats, "length": beats}.
@@ -92,19 +95,26 @@ def render(notes: list[dict], bpm: float, seconds: float, sr: int, cents: float 
     return out
 
 
-def write_midi(notes: list[dict], bpm: float, path: str | Path, ppq: int = PPQ) -> Path:
-    """The notes as a one-track MIDI file at the grid's tempo, bar 1 of the
-    file being the first bar asked for."""
+def write_midi(notes: list[dict], bpm: float, path: str | Path, ppq: int = PPQ,
+               meter: tuple[int, int] = (4, 4)) -> Path:
+    """The notes as a one-track MIDI file at the grid's tempo and meter, bar 1
+    of the file being the first bar asked for. A note still sounding when
+    its pitch starts again ends there: a MIDI file cannot tell two sounding
+    notes of one pitch apart (their note-offs would pair the wrong way)."""
     import mido
     mid = mido.MidiFile(ticks_per_beat=ppq)
     track = mido.MidiTrack()
     mid.tracks.append(track)
     track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(bpm), time=0))
+    track.append(mido.MetaMessage("time_signature", numerator=meter[0], denominator=meter[1], time=0))
+    spans = sorted((int(n["pitch"]), int(round(n["start"] * ppq)),
+                    int(round((n["start"] + n["length"]) * ppq))) for n in notes)
     events = []
-    for n in notes:
-        on = int(round(n["start"] * ppq))
-        off = max(on + 1, int(round((n["start"] + n["length"]) * ppq)))
-        events += [(on, 1, n["pitch"]), (off, 0, n["pitch"])]
+    for k, (pitch, on, off) in enumerate(spans):
+        off = max(on + 1, off)
+        if k + 1 < len(spans) and spans[k + 1][0] == pitch and on < spans[k + 1][1]:
+            off = min(off, spans[k + 1][1])
+        events += [(on, 1, pitch), (off, 0, pitch)]
     now = 0
     for tick, kind, pitch in sorted(events):  # at one tick, note-offs first
         track.append(mido.Message("note_on" if kind else "note_off", note=int(pitch), velocity=100 if kind else 0,
@@ -195,8 +205,9 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
     corrected file's (beats from the first bar), compared with the reading.
     `audio` is a file to check against instead of the stem, on the song's
     clock: one layer of the stem, cut by another separation of the same
-    file. A layer melodic.json does not know needs notes_file, and has no
-    reading to compare with. Writes into out_dir (WORK/melody-check by default): melody_AB.wav (one per
+    file. With `audio` there is no reading to compare with (melodic.json's
+    notes are the stem's, not the layer's), and a layer melodic.json does
+    not know needs notes_file. Writes into out_dir (WORK/melody-check by default): melody_AB.wav (one per
     `bars_per_file` bars when given), melody_overlay.wav, melody.mid and
     melody-check.json, which it returns."""
     work = Path(work)
@@ -217,12 +228,18 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
         raise ValueError(f"bars {first}-{last} are {t0:.2f}-{t1:.2f} s, outside the stem's {info.frames / sr:.2f} s")
     ref, _ = sf.read(str(path), start=int(round(t0 * sr)), stop=int(round(t1 * sr)), always_2d=True)
     cents = float(entry.get("tuning_cents", 0)) if entry else 0.0
-    reading = notes_in_span(entry["notes"], grid, t0, t1) if entry else None
+    reading = notes_in_span(entry["notes"], grid, t0, t1) if entry and not audio else None
     bar_beats = grid.bar / grid.beat
+    if bars_per_file is not None and bars_per_file < 1:
+        raise ValueError(f"bars_per_file is {bars_per_file}: one bar or more a file")
     if notes_file is None:
-        notes, source, changed = reading, "melodic.json", None
+        notes = notes_in_span(entry["notes"], grid, t0, t1)
+        source, changed = "melodic.json", None
     else:
-        notes = [n for n in read_notes(notes_file) if n["start"] < (last - first + 1) * bar_beats]
+        # a note that starts before the first bar is kept from the bar's start, if it still sounds there
+        notes = _sorted({**n, "start": max(0.0, n["start"]), "length": n["length"] + min(0.0, n["start"])}
+                        for n in read_notes(notes_file)
+                        if n["start"] + n["length"] > 0 and n["start"] < (last - first + 1) * bar_beats)
         source, changed = str(notes_file), diff(reading, notes) if reading is not None else None
     out = Path(out_dir) if out_dir else work / "melody-check"
     out.mkdir(parents=True, exist_ok=True)
@@ -244,7 +261,7 @@ def check(work: str | Path, stem: str, bars: tuple[int, int], out_dir: str | Pat
     mono = ref.mean(1)
     overlay = np.stack([mono / (np.max(np.abs(mono)) or 1.0), plain / (np.max(np.abs(plain)) or 1.0)], 1) * 0.9
     sf.write(str(out / "melody_overlay.wav"), overlay.astype(np.float32), sr, subtype="PCM_16")
-    write_midi(notes, grid.bpm, out / "melody.mid")
+    write_midi(notes, grid.bpm, out / "melody.mid", meter=(grid.beats_per_bar, grid.beat_unit))
     per_bar = [sum(1 for n in notes if k * bar_beats <= n["start"] < (k + 1) * bar_beats)
                for k in range(last - first + 1)]
     manifest = {"stem": stem, "audio": str(path), "bars": [first, last], "span_s": [round(t0, 4), round(t1, 4)],
