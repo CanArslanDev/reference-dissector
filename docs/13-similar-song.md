@@ -6,7 +6,7 @@ Asked for "a song like this one", the tools give drums and an 808 that come clos
 - The user heard none of six files as close: four candidates chosen against the layer and two stock controls. Three versions of a sound resynthesized from the stem's own hits were rejected: noise and wrong notes, then worse twice.
 - Every one of those tests played notes nobody had confirmed. Where the user judged the melody (the resynthesized versions, a melody check) they heard it as wrong. The stem the notes were read from holds more than one sound: the riff, a sustained layer at the same pitches, and bleed.
 - No reading tried here gets a layer's notes out of such a stem: on the suite the best is a precision of 0.80 at a recall of 0.72, with a second separator and a second transcription model. Alone, the suite's pluck is read at 0.99 (its pad at 0.44).
-- A split of the stem from known notes, without a learned model, did not give a clean layer on PIRAMIT, with the notes the user had confirmed: 3.6–3.9 dB against the layer, where the unsplit stem scores 4.2 dB.
+- A split of the stem from known notes, without a learned model, did not give a clean layer on PIRAMIT, with the notes the user had confirmed: 3.2–3.9 dB against the layer, where the unsplit stem scores 4.2–4.3 dB.
 - What worked was the other order. A separator that puts each sound in its own stem gave three stems the user heard as cleanly separated. Basic Pitch on each of two of them gave notes the user confirmed by ear without changing one (88 and 17). One layer's own sound (cut from the layer: personal study), played on its confirmed notes, then scored inside the layer's own spread (CLAP 0.947 against 0.942), and the user heard it as right; on the mixed stem the same test had scored 0.47–0.55.
 - So single layers come first, then each layer's notes, confirmed by ear, then the render path, then a sound (section 8). The separator that did this has no clear licence, and htdemucs_6s does not come near it by the measures here (the ear has not judged it): that is the first open question. All of this is one song and one listener.
 
@@ -184,7 +184,7 @@ A first rule over them, its thresholds set on the same truth layers it is shown 
 
 - On truth notes the rule reads the pad and the pluck, as it was set to. It calls the suite's lead a riff: the suite's lead plays 2 pitch classes a bar, and nothing in these numbers tells a sparse lead from a riff. What would is the period: a riff repeats every one or two bars, a lead phrase does not. The waveform repeat below measures that, but the stem's other content gets into it.
 - On the separated stem the layers are not separable this way. The suite's pad plays five notes at once for six 16ths in the truth. The Basic Pitch notes on the other stem that match it (the same MIDI pitch, onset within 60 ms) read two notes at once for 3 16ths, and 37 of its 80 truth notes are found: its chords come out thinned and cut short. Only the middle register cluster mixes all three layers (35 lead, 29 pluck, 19 pad notes matched). The low one holds the pad's fragments with some of the pluck's low notes (24 and 8; 29 of its 61 notes match no truth note). The highest is mostly the pluck's top notes (40 of 46), not the lead. So every reading of a layer's kind needs its notes from that layer alone, and Demucs gives one stem for all of them. **A layer split inside the other stem is missing**, and it comes before any choice of kind or sound. The HAYIR DEMELİYDİM study split its layers by hand, with its own scripts.
-- PIRAMIT reads as a riff: three pitch classes a bar, the 1, 5 and ♭6 of its key.
+- PIRAMIT reads as a riff: three pitch classes a bar.
 
 **Writing new notes of that kind.** `candidates` already draws drums and 808 from per-16th shares and keeps any bar under a copy score of 0.75 against the reference's bars. The same machinery extends to a riff or a pulse:
 - per 16th, the share of bars with an onset (the [onset profile](11-style-beat-lessons.md#3-statistics-have-to-survive-the-same-pipeline-rhythm) at 48 points a bar is the transcription-free version);
@@ -241,7 +241,7 @@ After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each fi
 
    Each version changed more than one thing at once, and none was heard on confirmed notes.
 4. **The melody alone:** Basic Pitch's posteriorgrams read on the 16th grid (onset or note-posterior rise, Otsu thresholds), at most two notes a 16th.
-   - The result: 71 notes in 62 of the 128 16ths, 68 of them on G3, C4, G4 or A♭4. In 5 of the 8 bars the second half repeats one four-note figure.
+   - The result: 71 notes in 62 of the 128 16ths, 68 of them on four pitches. In 5 of the 8 bars the second half repeats one four-note figure.
    - Played on a plain tone after the stem, and against it in the other channel.
    - Verdict: not right. The user added that the reference itself holds several sounds, and that the earlier rounds may have failed on that.
 5. **A split of the stem without a learned model** (the user's request; Demucs kept for drums, bass, vocals and other; its PIRAMIT result was not judged by ear). Each STFT bin's magnitude is a non-negative sum of fixed activation shapes; the coefficients are solved by non-negative least squares, and the parts are taken out by Wiener masks:
@@ -319,10 +319,10 @@ The riff the user means is the `piano` and `guitar` stems together.
 | a mask from the level difference between the channels, no notes | – | 1.2 |
 
 - For the `piano` layer no version beats leaving the stem as it is. The yardstick is another separator's output, not a truth.
-- On the suite's `melodic-1` (htdemucs' stem, the truth's notes) the second version moves the pluck from 5.5 to 5.6 dB and the lead from 3.4 to 4.3 dB (no split: 4.0 dB); the pad stays near 1 dB, under the 2.1 dB of no split, and the pad and lead together fall from 7.5 dB unsplit to 4.7 dB. On a sum of the truth's layers panned apart, the level per channel adds 0.5 dB on the pluck and 0.8 dB on the lead. The suite's layers are all in the centre, so its stems cannot show that gain.
+- On the suite's `melodic-1` (htdemucs' stem, the truth's notes) the pluck stays where it was (5.5 dB with the first version, 5.4 dB with a template per note in the second, 5.6 dB with a template per layer and pitch), and the shared template moves the lead from 3.4 to 4.3 dB (no split: 4.0 dB); the pad stays near 1 dB, under the 2.1 dB of no split, and the pad and lead together fall from 7.5 dB unsplit to 4.7 dB. On a sum of the truth's layers panned apart, the level per channel adds 0.5 dB on the pluck and 0.8 dB on the lead. The suite's layers are all in the centre, so its stems cannot show that gain.
 - The user chose BS-Roformer-SW's stems as the clean layers, for this study only.
 
-**htdemucs_6s does not come near this separation, by these measures.** On the same bars its `guitar` stem is silent (−77 dBFS) and the level is in `piano` (−29.8 dBFS) and `other` (−27.6 dBFS):
+**htdemucs_6s does not come near this separation, by these measures.** On the same bars its `guitar` stem is silent (−78 dBFS, mono sum as above) and the level is in `piano` (−31.1 dBFS) and `other` (−30.7 dBFS):
 
 | | htdemucs_6s `piano` | htdemucs `other` | BS-Roformer-SW `piano` |
 |---|---|---|---|
@@ -348,7 +348,7 @@ The ear has not judged htdemucs_6s' stems.
 
 **The family, on a single layer.** AST's top instrument label is Piano at 0.46 on the `piano` layer, against 0.057 on the mixed stem. The user hears a piano there. Of the pool's 3,996 files, 57 score 0.2 or more on AST's piano, keyboard or electric-piano labels; by CLAP against the layer the best of them is 16th, and the twelve nearest files are long library recordings. No candidate was played: the study stopped here.
 
-`refdissect melody-check` writes the check of a reading or of a corrected file (the stem or a layer file, a beep, the notes on a plain tone; the audio left and the tone right; a MIDI file), and counts what a correction changed.
+`refdissect melody-check` writes the check of a reading or of a corrected file (the stem or a layer file, a beep, the notes on a plain tone; the audio left and the tone right; a MIDI file), and counts what a correction changed against the reading of a stem. A layer file comes with its own notes, and has no reading to be compared with.
 
 **What follows.**
 - Every test of the first day played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were Basic Pitch's, which version 3 replayed and the user heard as a worse melody, so that verdict may mix the two.
