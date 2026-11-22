@@ -302,7 +302,7 @@ Today a "song like this one" in alm has no prompt of its own. Proposed order, th
 1. **The notes first, confirmed by ear.** Before any sound is tested on a layer, its notes are played on a plain tone after the stem and against it in the other channel. The user says "this is the melody", or gives the notes. No sound test, separation or candidate starts on notes that have not passed.
 2. **Then the layer, from those notes.** The split of section 6, informed by the confirmed notes. On the suite it moved the pluck 4 dB with the truth's notes. It gives a cleaner layer (on the suite, an SDR of 5.5 dB against the truth's pluck): the reference a sound is heard and measured against, and its kind, family, space and repeat (section 4).
 3. **Then the render path, proven with the layer's own sound.** The layer's own notes, played by its own sound through the same sampler and space, must be heard as the layer, and score near its own spread, before any candidate is played that way. On PIRAMIT's mixed stem even its own sound scored as low as Drift's default.
-4. **Only then a sound, from a shortlist, not by name.** Ways A, B and B2 together:
+4. **Only then a sound, from a shortlist, not by name.** Ways A and B together:
    - the library and Live's previews;
    - a fitted voice;
    - the stock sound as a plainly labelled control.
