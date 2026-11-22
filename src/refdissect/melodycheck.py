@@ -14,7 +14,8 @@ A corrected file (MIDI, or notes as JSON in beats) is read back the same way,
 so the correction is heard against the stem too, and it is compared with the
 reading (not for a layer file, which has no reading of its own): how many
 notes were kept, moved, repitched, added and removed. The check confirms
-pitches and starts. A plain tone says little about how long a note rings or how loud it is: those are taken from the layer.
+pitches and starts. A plain tone says little about how long a note rings
+or how loud it is: those are taken from the layer.
 
 Notes here are in beats (quarter notes) from the first bar asked for:
 {"pitch": MIDI number, "start": beats, "length": beats}.
