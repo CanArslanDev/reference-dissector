@@ -262,6 +262,38 @@ After section 2 the user listened, in rounds, to PIRAMIT's bars 13–20. Each fi
    - The reading found 44 % of the 259 truth notes at a precision of 0.89, with at most two notes a 16th. It found 22 of the pad's 80 notes. Allowing up to four or six notes a 16th raised the recall only to 46 %, at a precision of 0.83. Basic Pitch's own notes find 57 % at 0.72.
    - On PIRAMIT, three splits with a model-free note correction between them left a short layer of 32 notes in bars 13–20, 12 dB under the stem (−35.9 against −23.8 dBFS). Over the 9 bars read (one bar of lead-in), 59 notes read as short at first; the two corrections moved 40 notes from short to held, as their energy held on. In the spectrogram, the riff's attacks stayed in the held part and the bed.
 
+### Which reader gets the notes out of a mixed stem (2026-11-22)
+
+Measured on the suite's four beats with melodic truth, all 16 bars: `melodic-1` and `melodic-2` (pluck, pad, lead) and `full-1` and `full-2` (pad, lead); 1,553 notes (521 pluck, 352 lead, 680 pad). A note counts when an estimate of the same pitch starts within 30 ms of it, one to one. Estimates carry no layer, so each layer has a recall, and the precision is over all estimates. The aim was a recall and a precision of 0.8 on the riff-like layer (the pluck).
+
+| Stem read | Reader | Precision | Recall | F1 | Pluck recall | Lead recall | Pad recall |
+|---|---|---|---|---|---|---|---|
+| the pluck alone (truth) | Basic Pitch, refdissect's preset | 1.00 | 0.99 | 0.99 | 0.99 | – | – |
+| the pad alone (truth) | the same | 0.46 | 0.44 | 0.45 | – | – | 0.44 |
+| the truth's layers summed | the same | 0.70 | 0.62 | 0.66 | 0.66 | 0.76 | 0.52 |
+| htdemucs `other` | Basic Pitch's defaults (0.5 / 0.3 / 127.7 ms, melodia) | 0.42 | 0.38 | 0.40 | 0.23 | 0.70 | 0.34 |
+| htdemucs `other` | refdissect's preset (0.6 / 0.3 / 35 ms) | 0.66 | 0.53 | 0.59 | 0.61 | 0.71 | 0.39 |
+| htdemucs `other` | the stem settings of the melodic study (0.6 / 0.4 / 27.6 ms) | 0.66 | 0.50 | 0.57 | 0.52 | 0.71 | 0.37 |
+| htdemucs `other` | the grid reading, two notes a 16th | 0.86 | 0.43 | 0.57 | 0.46 | 0.67 | 0.28 |
+| htdemucs `other` | the stem settings, plus the grid's notes where they have none | 0.67 | 0.56 | 0.61 | 0.61 | 0.75 | 0.43 |
+| htdemucs `other` | YourMT3+ | 0.51 | 0.56 | 0.54 | 0.69 | 0.74 | 0.38 |
+| htdemucs `other` | YourMT3+, plus the grid's notes where it has none | 0.58 | 0.68 | 0.62 | 0.74 | 0.90 | 0.51 |
+| htdemucs_6s `other` + `guitar` + `piano` | refdissect's preset | 0.69 | 0.49 | 0.57 | 0.60 | 0.70 | 0.29 |
+| BS-Roformer-SW `other` | refdissect's preset | 0.67 | 0.55 | 0.61 | 0.62 | 0.72 | 0.41 |
+| BS-Roformer-SW `other` | YourMT3+ | 0.76 | 0.61 | 0.68 | 0.73 | 0.61 | 0.53 |
+| BS-Roformer-SW `other` | YourMT3+, plus the grid's notes where it has none | **0.80** | **0.72** | **0.76** | 0.77 | 0.84 | 0.62 |
+
+- **No reader reaches 0.8 and 0.8 on a stem of several layers.** The closest is YourMT3+ (its duplicates across programs removed) with the grid reading added, on BS-Roformer-SW's stem: precision 0.80, pluck recall 0.77.
+- **The layers on top of each other are the limit, not the separator.** Alone, the pluck is read at 0.99. In the perfect sum of the truth's layers its recall is 0.66, against 0.61 in htdemucs' stem.
+- **Lowering Basic Pitch's thresholds trades one for the other.** Over onset 0.3–0.5 and frame 0.2–0.4 on htdemucs' stem, the pluck's recall reaches 0.82 at a precision of 0.24.
+- **A split that needs no notes did not help.** Each STFT bin split by a running median over time (0.2, 0.4, 0.8 s) into a held and a short part, each read on its own: the pluck's recall 0.56–0.63 in the short part of htdemucs' stem at a precision of 0.53–0.73, the pad's 0.16–0.36 in the held part.
+- **refdissect's loop vote did not move it:** 0.64 and 0.53 on htdemucs' stem.
+- YourMT3+ runs in its own environment (weights Apache-2.0, code GPL-3.0); BS-Roformer-SW's licence is not clear. Both were used for a draft only. MuScriptor was not tried (non-commercial weights).
+
+On PIRAMIT, BS-Roformer-SW puts the melodic content of bars 13–20 into two stems: `piano` at −27.8 dBFS (correlation with htdemucs' `other` 0.75) and `other` at −34.1 dBFS (0.39), against −25.8 dBFS for htdemucs' `other`; the three tonal stems together correlate at 0.85. The draft for the user's correction is the best reader above on that sum. It is a draft: at the suite's figures, about one note in five of it is wrong and more than one in four is missing.
+
+`refdissect melody-check` writes the check of a reading or of a corrected file (the stem, a beep, the notes on a plain tone; the stem left and the tone right; a MIDI file), and counts what a correction changed.
+
 **What follows.**
 - Every test above played notes that nobody had confirmed. Where the user judged the melody (the resynthesized versions, the melody check), they heard it as wrong. In round 1 they blamed the sounds, but its notes were Basic Pitch's, which version 3 replayed and the user heard as a worse melody, so that verdict may mix the two.
 - The notes cannot come from the stem as it is: no reader tried here gets a layer's notes out of a stem of several sounds, and the split that would clean the stem needs those notes first.
@@ -322,7 +354,7 @@ In every listening round, one thing changes at a time, and it is measured before
 
 ## 9. Open questions
 
-- **How to get a layer's notes from a stem of several sounds.** Basic Pitch's notes, its posteriorgrams on the grid, onset flux and harmonic contrast were all heard as the wrong melody on PIRAMIT. On the suite, the two readings measured find 57 % (Basic Pitch's notes) and 44–46 % (the grid) of the truth's notes. Three rounds of notes and split (section 6) did not isolate the riff on PIRAMIT. The notes may have to come from the user, or from a layer split that needs no notes, which the model-free methods here did not achieve.
+- **How to get a layer's notes from a stem of several sounds.** On the suite no reader reaches a recall and a precision of 0.8 on a mixed stem (section 6): the best is 0.80 and 0.72, with a learned separator and a second transcription model. On PIRAMIT every reading so far was heard as the wrong melody, and three rounds of notes and split did not isolate the riff. So the reading is a draft, and the notes come from the user's correction of it in a piano roll; how long that takes, and how many notes it changes, is being measured.
 - **Which measure predicts the ear?** Three picks so far, and the PIRAMIT rounds of section 6 cannot count: their notes were wrong. About twenty, from the protocol in section 5, before any measure chooses alone.
 - **How to split one stem into layers.** A register split did not separate the suite's layers on Basic Pitch's notes; onset density was not tried. Candidates are a band per layer from the stem's spectrum (as the HAYIR DEMELİYDİM study did by hand), chroma per half bar for pads, and identifying a lead's sound before transcribing it (an earlier local study: 4 of 5 library leads found from the other stem by note templates).
 - **Sampled layers.** Neither CLAP nor AST finds a cut from a record. A loop in the library is found by SampleID (Sony, MIT; 12 of 12 unchanged stems of the v1 calibration beats in an earlier local study). A cut from a record that is not in the library can only be told apart as "loop-like".
