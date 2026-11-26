@@ -1,6 +1,7 @@
 """The steps in order, each writing what it found to a work folder:
 
-    analyze(stems)   -> analysis.json, bass808.json, templates/ (grid, tuning, drums, 808, sections)
+    analyze(stems)   -> analysis.json, bass808.json, templates/ (grid, tuning, drums, 808, sections),
+                        loops/ (a cycle of each loop-like layer of the drums)
     melodic()        -> melodic.json, basicpitch/             (notes per tonal stem, chords)
     match(library)   -> matches.json                          (library sound per template, verdicts)
     fit_808()        -> synth808.json, 808 one-shot .wav      (the synthesized 808)
@@ -22,7 +23,8 @@ from scipy.signal import find_peaks
 from . import bass808
 from . import describe as describe_mod
 from . import detect as det
-from .audio import PRE, SR, band, read, samples, shift, transpose, write
+from . import loops as loops_mod
+from .audio import PRE, SR, band, loud_db, read, samples, shift, transpose, write
 from .audio import fit as fit_to
 from .beats import track_stems
 from .cache import keep, kept, key
@@ -54,6 +56,10 @@ SAME_SOUND = 0.5  # a layer candidate this correlated with the top match (aligne
 # a "layer" this much louder than the top match means the top match is not the template's sound (a kick
 # template's snare-band match got a kick 15 dB louder as its layer); a clap on a snare sits -6..0 dB
 LOUDER_DB = 10.0
+# a bass stem this far under the loudest other stem holds no bass line: what the 808 reader finds in it is the
+# separation's residue. Of 8 separated songs (2026-11-26) the 7 with a bass or an 808 read -9.9 to +9.1 dB and
+# one without read -53.3 dB (-56.9 dB by htdemucs_6s), where the reader had written 246 notes
+SILENT_BASS_DB = -30.0
 TIED_NCC = 0.002  # a band whose five best different sounds lie within this of each other tells none apart (_tied)
 
 
@@ -92,6 +98,23 @@ def _transcribe(bass: np.ndarray, drums: np.ndarray, cache: Path | None, log=pri
     out = json.loads(json.dumps(bass808.transcribe(bass, drums, log=both, **opts), default=float))
     keep(path, {"bass808": out, "log": lines}, log, "bass808")
     return out, None
+
+
+def silent_bass(stems_dir: Path, bass: np.ndarray, drums: np.ndarray) -> dict | None:
+    """What says the bass stem holds no bass line: its 808 band's level
+    (audio.loud_db) SILENT_BASS_DB or more under the loudest other stem's,
+    as {"bass_db", "loudest", "loudest_db", "under_db"}; None when it
+    plays, or when no other stem does."""
+    others = {"drums": loud_db(drums)}
+    for s in TONAL_STEMS:
+        if s != "bass" and (stems_dir / f"{s}.wav").is_file():
+            others[s] = loud_db(read(stems_dir / f"{s}.wav"))
+    top = max(others, key=others.get)
+    level = loud_db(band(bass, "808"))
+    if others[top] <= -100.0 or level - others[top] > SILENT_BASS_DB:
+        return None
+    return {"bass_db": round(level, 1), "loudest": top, "loudest_db": round(others[top], 1),
+            "under_db": round(others[top] - level, 1)}
 
 
 def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), log=print, bpm: float | None = None,
@@ -162,7 +185,19 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
             f"{len(events[tp.name]):3d} detected ({layered} under other sounds, {pitched} pitched)")
     for name, into in found.info.get("merged", {}).items():
         log(f"  {name} plays what {into['into']} plays ({into['offset_ms']:+.1f} ms): its hits are {into['into']}'s")
-    b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log, slides)
+    loop_layers = loops_mod.layers(events, out_templates, grid)
+    for layer in loop_layers:
+        layer["files"] = loops_mod.cut(drums, grid, layer, work / "loops")
+        log(f"  loop-like: {len(layer['sounds'])} sounds ({', '.join(layer['sounds'])}) each keep one place of a "
+            f"{layer['bars']}-bar cycle, {layer['share_of_band']:.0%} of the {layer['band']} band's hits: a loop "
+            f"rather than one-shots (a cycle from bar {layer['cycle']['start_bar']}: {layer['files'][layer['band']]})")
+    quiet = silent_bass(stems_dir, bass, drums)
+    if quiet:
+        log(f"808: none. The bass stem's 808 band ({quiet['bass_db']} dB) is {quiet['under_db']} dB under the "
+            f"{quiet['loudest']} stem: it holds no bass line, and is not read")
+        b808, read_back = {"template": None, "notes": [], "silent": quiet}, None
+    else:
+        b808, read_back = _transcribe(bass, drums, work / "cache" if cache is True else cache or None, log, slides)
     _save(work / "bass808.json", b808)
     notes = bass808.project(b808)
     tpl = b808["template"]
@@ -171,7 +206,7 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
     if tpl:
         log(f"808: {len(notes)} notes, template {tpl['hz']:.2f} Hz = MIDI {tpl['midi']:.2f} ({tpl['method']}, "
             f"{tpl['notes_used']} notes): tuned {tpl['tuning_cents']:+.1f} cents")
-    else:
+    elif not quiet:
         log("808: no note to learn a template from")
     n_bars = int(np.ceil((duration - grid.phase) / grid.bar))
     stems = {s: read(stems_dir / f"{s}.wav") for s in ("other", "piano", "vocals")
@@ -184,9 +219,12 @@ def analyze(stems_dir: str | Path, work: str | Path, bpm_range=(100.0, 180.0), l
                 "tuning": {"per_stem": tunings, "consensus": consensus,
                            "a4_hz": round(440 * 2 ** (consensus / 12), 1),
                            "808": tuning_808, "808_agreement": agreement_808},
-                "templates": out_templates, "events": events, "layers": found.info, "notes_808": notes,
+                "templates": out_templates, "events": events, "layers": found.info, "loops": loop_layers,
+                "notes_808": notes,
                 "bars": [{**r, "sounds": sorted(r["sounds"]), "stems": sorted(r["stems"])} for r in rows],
                 "sections": secs}
+    if quiet:
+        analysis["source"]["silent_bass"] = quiet
     if slides:
         analysis["source"]["slides"] = True
     if read_back:  # not read by this run: what the run that kept it read (same stems, code and versions)

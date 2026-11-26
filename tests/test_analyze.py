@@ -149,7 +149,14 @@ def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems
     808 reader's result back says so in source.cached, and is otherwise the
     run that kept it."""
     monkeypatch.setattr(beats, "track", lambda *a, **kw: pytest.fail("the tracker ran"))
+    played = tmp_path / "stems"  # with a bass stem that plays: a silent one is not read at all (silent_bass)
+    played.mkdir()
+    drums = read(stems["dir"] / "drums.wav")
+    sf.write(played / "drums.wav", drums, SR, subtype="FLOAT")
+    sf.write(played / "bass.wav", 0.2 * np.sin(2 * np.pi * 55 * np.arange(len(drums)) / SR), SR, subtype="FLOAT")
+    stems = {"dir": played}
     plain = pipeline.analyze(stems["dir"], tmp_path / "plain", log=lambda *_: None, tracker=False)
+    assert "silent_bass" not in plain["source"]
     assert sorted(p.name for p in (tmp_path / "plain").iterdir()) == ["analysis.json", "bass808.json", "templates"]
     kept = tmp_path / "kept"
     first, again = (pipeline.analyze(stems["dir"], tmp_path / w, log=lambda *_: None, tracker=False, cache=kept)
@@ -157,3 +164,29 @@ def test_analyze_keeps_nothing_unless_given_a_folder_and_names_a_read_back(stems
     assert "cached" not in plain["source"] and "cached" not in first["source"]
     assert again["source"].pop("cached") == {"808_reader": str(next(kept.glob("808-*.json")))}
     assert again == first == plain
+
+
+def test_a_bass_stem_far_under_the_others_holds_no_bass_line(tmp_path):
+    rng = np.random.default_rng(0)
+    drums = (0.3 * rng.standard_normal(4 * SR)).astype(np.float32)
+    tone = (0.2 * np.sin(2 * np.pi * 55 * np.arange(4 * SR) / SR)).astype(np.float32)
+    sf.write(tmp_path / "other.wav", 0.5 * drums, SR, subtype="FLOAT")
+    assert pipeline.silent_bass(tmp_path, tone, drums) is None  # 8 dB under the drums: a bass line
+    assert pipeline.silent_bass(tmp_path, 0.1 * tone, drums) is None  # 28 dB under them
+    quiet = pipeline.silent_bass(tmp_path, 0.003 * tone, drums)
+    assert quiet["loudest"] == "drums" and 55 < quiet["under_db"] < 62
+    assert pipeline.silent_bass(tmp_path, 0.003 * tone, np.zeros_like(drums))["loudest"] == "other"
+    # in a few bars only, the bass is as loud as it plays there
+    assert pipeline.silent_bass(tmp_path, np.r_[tone[:SR], np.zeros(3 * SR, np.float32)], drums) is None
+    (tmp_path / "other.wav").unlink()
+    assert pipeline.silent_bass(tmp_path, 0.003 * tone, np.zeros_like(drums)) is None  # nothing to be under
+
+
+@pytest.mark.slow
+def test_analyze_does_not_read_a_silent_bass_stem(stems, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.bass808, "transcribe", lambda *a, **kw: pytest.fail("the 808 reader ran"))
+    logs = []
+    a = pipeline.analyze(stems["dir"], tmp_path, log=logs.append, tracker=False)
+    assert a["notes_808"] == [] and a["source"]["silent_bass"]["loudest"] == "drums" and a["loops"] == []
+    assert json.loads((tmp_path / "bass808.json").read_text())["template"] is None
+    assert any(line.startswith("808: none.") for line in logs)

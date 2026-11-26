@@ -169,7 +169,15 @@ It costs about 4 s per 30 s beat: the suite's analyze step takes 10.0 s per beat
 
 `peak_ncc_histogram` shows each template's peaks per 0.1 of NCC. A clean template shows a gap: PIRAMIT's −1 snare (odd bars) has 27 peaks at ≥ 0.9, one in 0.8–0.9 and none between 0.4 and 0.8 (267 more in 0.3–0.4). Before replica mode this page said "even-bar" and "nothing between 0.3 and 0.8"; the old template's own histogram had 269 peaks in 0.3–0.4.
 
+### Loop-like layers (`loops.layers`)
+
+A sampled loop (a break, a hat or percussion loop) recurs as one-shots do, so `discover` makes a template of each of its hits: a four-bar hat loop reads as a dozen "hats" of a hit or two a cycle, none with a close library match. `loops.period` gives a sound the shortest of 1, 2, 4 and 8 bars at which its hits keep to one or two places of the cycle (80 % of them, in at least 4 cycles and three quarters of the cycles between its first and last hit). A snare on every bar's 2 and 4 has a period of one bar: an ordinary part. Four or more sounds at one longer period are a layer in `analysis.json`'s `loops`, and one cycle of it is cut to `loops/`: the drum stem in the layer's band and whole, to search a loop library with (refdissect has no such search; ableton-live-mcp's `find_similar_sounds(like=…)` takes the file).
+
+That says "loop-like", not "sampled": a part programmed with a different sample on each step reads the same. On the one song this was set on (99 BPM boom bap, 2026-11-26), 12 of 26 sounds keep one or two places of a four-bar cycle and hold 34 % of the hat band's hits. No beat with a known loop in its drums has scored the rule: the suite has none.
+
 ### 808 notes (`bass808.transcribe`)
+
+A bass stem that holds no bass line is not read. `pipeline.silent_bass` compares how loud the stem's 808 band gets (`audio.loud_db`: the level 95 % of its 50 ms frames are under) with the loudest other stem, and 30 dB under it writes no note and no template (`source.silent_bass`). Of 8 separated songs on one machine (2026-11-26), the 7 with a bass or an 808 read 9.9 dB under to 9.1 dB over and the one without read 53.3 dB under; before the gate the reader wrote 246 notes from that stem's residue, and the plan would have played them.
 
 An 808 line is one sample retriggered at different transpositions and cut by the next note. `bass808.transcribe` reads it that way and writes `bass808.json`. `analysis.json`'s `notes_808` is its projection (t, t_attack, end, pitch, midi_float, midi_settled, cents, slide, peak, glide, flags).
 1. **Onsets.** Re-attacks of the bass stem's 808 band (a notch of at least 4 dB recovering 6 dB within 30 ms, or a rise of 9 dB), and attacks of the drum stem's low band. Where the re-attacks are too few to learn a template from, the drum attacks are onsets too: on synthetic lines at 160–170 BPM the re-attacks found only 6–10 of 28–32 notes, as a driven 33 Hz tone dips only 0.5–2.3 dB at a cut.

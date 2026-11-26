@@ -102,6 +102,7 @@ song.mp3 ──Demucs──▶ stems ──▶ grid + tuning ──▶ drum temp
 - **Grid**: beat_this's beats and downbeats decide the octave, the first bar line and the meter. A comb search over tempo and phase on the onset envelope, coarse then fine, gives the tempo, and its phase is moved onto the attacks. `--bpm-range` picks between half and double time.
 - **Drums**: in each band (low, snare, hat), onsets are moved back to where their sound starts. They are grouped by their place in the beat (straight or swung 16ths, triplets, 32nds), then by waveform: one template per sound. Averaging N hits lowers whatever plays along by about √N.
   - A second pass groups the onsets no template explains: rare sounds, crashes, fills.
+  - Sounds that each keep one place of a cycle of 2, 4 or 8 bars are named as a loop-like layer, and a cycle of it is cut out to search a loop library with ([01](docs/01-pipeline.md#loop-like-layers-loopslayers)).
   - Each template slides over the whole stem as a matched filter. Every moment is then fit with all the templates near it (non-negative least squares on the kick, snare and hat bands). So a hat under a snare, a flam's grace note, a 64th roll and a hat at another pitch are hits of their own.
 - **Identification**: normalized cross-correlation (NCC) against every library one-shot, in three bands, over ±30 ms of lag.
   - In the snare and hat bands it works at any pitch, to a quarter cent. A speckle index, the fine structure of a noisy sample's spectrum, proposes the file and its transposition. Kicks keep whole semitones.
@@ -109,6 +110,7 @@ song.mp3 ──Demucs──▶ stems ──▶ grid + tuning ──▶ drum temp
   - A library file that peaks under −60 dBFS is never a match, and a band whose five best sounds tie within 0.002 NCC names none of them: a kick's click in the hat band matched 20 kick, 808 and synth-bass files alike.
   - The verdict uses NCC, the margin over the next *different* sound and per-hit votes; a null test is reported beside it. A pad plays its match with Simpler's Transpose and Detune.
 - **808**: notes are read as transpositions of the song's own 808: a template learnt from its long notes, preferably those that start on kicks. A note's written pitch is its settled pitch less the 808's tuning.
+  - A bass stem 30 dB or more under the loudest other stem holds no bass line and is not read.
   - A note ends where the 808 falls 40 dB under its peak, and a rise of 9 dB starts a new one. Where the template's own notes are too short to settle, its settled pitch is read on the notes that reach past it.
   - A sine + glide + envelope + tanh-drive voice is fitted to the template's notes by differential evolution. It is scored on waveform, harmonics and envelope, not on correlation alone.
   - The one-shot the plan plays is that voice on the template's own pitch: it crosses zero where the template does until the template's drop has settled, and attacks where the template attacks after its onset.

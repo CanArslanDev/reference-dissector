@@ -160,3 +160,15 @@ def transpose(x: np.ndarray, semitones: float) -> np.ndarray:
 
 def rms_db(x: np.ndarray) -> float:
     return float(20 * np.log10(np.sqrt(np.mean(np.square(x, dtype=np.float64))) + 1e-12))
+
+
+def loud_db(x: np.ndarray, ms: float = 50.0, share: float = 95.0) -> float:
+    """How loud x gets: the level (dB) its RMS over ms-long frames is under
+    in `share` percent of them. A stem that plays in a few bars only still
+    reads as loud as it plays, where its RMS over the song would not."""
+    w = samples(ms)
+    n = len(x) // w
+    if not n:
+        return -240.0
+    frames = np.sqrt(np.mean(np.square(x[:n * w], dtype=np.float64).reshape(n, w), axis=1))
+    return float(20 * np.log10(np.percentile(frames, share) + 1e-12))
